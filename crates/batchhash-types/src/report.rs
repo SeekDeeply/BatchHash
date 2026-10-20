@@ -313,7 +313,7 @@ impl Report {
 /// Validation failures for report import/export.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ReportValidationError {
-    #[error("unsupported report schema_version {0}")]
+    #[error("unsupported report schema_version")]
     UnsupportedSchemaVersion,
     #[error("report schema_version {found} is newer than supported {supported}")]
     UnsupportedFutureSchema { found: u32, supported: u32 },

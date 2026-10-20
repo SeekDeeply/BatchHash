@@ -269,7 +269,7 @@ impl DiffReport {
 /// Diff document validation failures.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DiffValidationError {
-    #[error("unsupported diff schema_version {0}")]
+    #[error("unsupported diff schema_version")]
     UnsupportedSchemaVersion,
     #[error("diff schema_version {found} is newer than supported {supported}")]
     UnsupportedFutureSchema { found: u32, supported: u32 },

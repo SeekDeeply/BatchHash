@@ -1,0 +1,51 @@
+name: Format (CI)
+
+# CI is the only place formatting runs. Dispatch this workflow, download the
+# "formatted-sources" artifact, and apply it to the repository. This keeps local
+# machines build-free while still enforcing rustfmt/dart format in CI.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: Format sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Rust format
+        run: cargo fmt --all
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Dart format
+        shell: bash
+        run: |
+          if [ -f app/pubspec.yaml ]; then
+            dart format app/lib app/test
+          else
+            echo "no Flutter app yet; skipping dart format"
+          fi
+      - name: Package formatted sources
+        shell: bash
+        run: |
+          tar -czf formatted-sources.tar.gz \
+            Cargo.toml Cargo.lock rust-toolchain.toml \
+            crates
+          if [ -f app/pubspec.yaml ]; then
+            tar -rzf formatted-sources.tar.gz app/lib app/test app/pubspec.yaml app/analysis_options.yaml
+          fi
+          tar -tzf formatted-sources.tar.gz | head -20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formatted-sources
+          path: formatted-sources.tar.gz
+          if-no-files-found: error

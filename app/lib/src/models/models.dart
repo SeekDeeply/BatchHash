@@ -199,7 +199,7 @@ class HashProgress {
   final List<BatchEntry> entries;
   final bool done;
 
-  double get fraction => total <= 0 ? 0 : completed / total;
+  double get fraction => total <= 0 ? 0.0 : completed / total;
 }
 
 /// Status of one row in a rename dry run.
@@ -358,7 +358,7 @@ int recommendedSuffixLength(int fileCount) {
 /// Birthday bound estimate of a suffix collision over the hex alphabet.
 double collisionProbability(int fileCount, int length) {
   if (fileCount <= 1 || length <= 0) {
-    return 0;
+    return 0.0;
   }
   final double space = math.pow(16, length).toDouble();
   final double pairs = fileCount * (fileCount - 1) / 2;

@@ -13,7 +13,9 @@
 //! source is "cpufeatures" when runtime CPU feature detection was available and
 //! "inferred" when only the architecture string could be obtained.
 
-use batchhash_types::{BackendPolicy, HardwareReport};
+pub use batchhash_types::BackendPolicy;
+
+use batchhash_types::HardwareReport;
 
 /// Observed hardware capabilities relevant to hashing.
 #[derive(Debug, Clone, PartialEq, Eq)]

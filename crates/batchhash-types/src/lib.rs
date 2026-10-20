@@ -21,8 +21,8 @@ pub use algorithm::{
     spec_by_suffix_prefix, AlgorithmId, AlgorithmParseError, AlgorithmSpec, REGISTRY,
 };
 pub use diff::{
-    DiffEntry, DiffMode, DiffReport, DiffRow, DiffSource, DiffSourceKind, DiffStatus,
-    DiffStrategy, DiffSummary, DiffValidationError, DIFF_SCHEMA_VERSION,
+    DiffEntry, DiffMode, DiffReport, DiffRow, DiffSource, DiffSourceKind, DiffStatus, DiffStrategy,
+    DiffSummary, DiffValidationError, RootAlignment, DIFF_SCHEMA_VERSION,
 };
 pub use entry::{
     join_display_path, validate_relative_path, EntryStatus, ErrorKind, FileEntry, PathError,

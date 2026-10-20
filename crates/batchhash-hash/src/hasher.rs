@@ -44,7 +44,7 @@ pub enum Blake3Policy {
 pub struct HashOptions {
     /// Algorithms to compute. Duplicates are ignored; output is canonical registry order.
     pub algorithms: Vec<AlgorithmId>,
-    /// Requested read buffer size in bytes, clamped to [MIN_BUFFER_SIZE, MAX_BUFFER_SIZE].
+    /// Requested read buffer size in bytes, clamped between MIN_BUFFER_SIZE and MAX_BUFFER_SIZE.
     pub buffer_size: usize,
     /// BLAKE3 internal parallelism policy.
     pub blake3: Blake3Policy,
@@ -146,7 +146,7 @@ where
     F: FnMut(&[u8]),
 {
     fn on_chunk(&mut self, chunk: &[u8]) {
-        self(chunk);
+        (*self)(chunk);
     }
 }
 
@@ -223,7 +223,9 @@ impl HasherImpl {
             Self::Sha3_512(hasher) => hasher.update(chunk),
             Self::Blake2b(hasher) => hasher.update(chunk),
             Self::Blake2s(hasher) => hasher.update(chunk),
-            Self::Blake3(hasher) => hasher.update(chunk),
+            Self::Blake3(hasher) => {
+                hasher.update(chunk);
+            }
             Self::Xxh3_64(hasher) => hasher.update(chunk),
             Self::Xxh3_128(hasher) => hasher.update(chunk),
             Self::Xxh64(hasher) => hasher.update(chunk),
@@ -312,8 +314,8 @@ pub fn hash_reader(
 
 /// Compute hashes for a file path.
 ///
-/// Uses the parallel BLAKE3 memory-map path only when all of these hold: the
-/// algorithm list is exactly [Blake3], Blake3Policy::Auto, mmap_threshold is set
+/// Uses the parallel BLAKE3 memory-map path only when all of these hold: BLAKE3
+/// is the only selected algorithm, Blake3Policy::Auto is selected, mmap_threshold is set
 /// and the file is at least that large, and forced_soft is false. Otherwise the
 /// file is streamed in one pass.
 pub fn compute_hashes_file(
@@ -400,6 +402,7 @@ fn compute_hashes_mmap_blake3(
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn buffer_size_defaults_and_clamps() {

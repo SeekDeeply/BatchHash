@@ -1,6 +1,6 @@
 //! HardwareProbe shape tests. No test asserts a specific accelerator.
 
-use batchhash_hash::{probe, probe_auto, HardwareInfo};
+use batchhash_hash::{probe, probe_auto};
 use batchhash_types::{BackendPolicy, HardwareReport};
 
 const ALLOWED_BLAKE3_BACKENDS: [&str; 5] = ["avx512", "avx2", "neon", "portable", "unknown"];

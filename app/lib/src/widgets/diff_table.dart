@@ -97,7 +97,6 @@ class DiffRowTile extends StatelessWidget {
     final Color barColor = diffStatusColor(row.status, scheme);
     final Color background = diffRowBackground(row.status, scheme);
     final Color foreground = diffRowForeground(row.status, scheme);
-    final bool isChanged = row.status == DiffStatus.changed;
     return Material(
       key: ValueKey<String>('diff-row-bg-${row.path}'),
       color: background,
@@ -121,7 +120,6 @@ class DiffRowTile extends StatelessWidget {
                   Expanded(
                     child: _DiffCell(
                       entry: row.left,
-                      isChanged: isChanged,
                       foreground: foreground,
                     ),
                   ),
@@ -129,7 +127,6 @@ class DiffRowTile extends StatelessWidget {
                   Expanded(
                     child: _DiffCell(
                       entry: row.right,
-                      isChanged: isChanged,
                       foreground: foreground,
                     ),
                   ),
@@ -163,12 +160,10 @@ class DiffRowTile extends StatelessWidget {
 class _DiffCell extends StatelessWidget {
   const _DiffCell({
     required this.entry,
-    required this.isChanged,
     required this.foreground,
   });
 
   final BatchEntry? entry;
-  final bool isChanged;
   final Color foreground;
 
   @override

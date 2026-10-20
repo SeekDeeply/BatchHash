@@ -303,16 +303,18 @@ impl<'a> ProgressReporter<'a> {
                 Ok(guard) => guard,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            if !force {
-                if let Some(last_emit) = state.last_emit {
-                    if now.duration_since(last_emit) < PROGRESS_INTERVAL {
-                        return;
-                    }
-                }
+            let throttled = !force
+                && state
+                    .last_emit
+                    .is_some_and(|last_emit| {
+                        now.saturating_duration_since(last_emit) < PROGRESS_INTERVAL
+                    });
+            if throttled {
+                return;
             }
             state.last_emit = Some(now);
             let bytes_done = self.bytes_done.load(Ordering::Relaxed);
-            let elapsed = now.duration_since(state.last_sample);
+            let elapsed = now.saturating_duration_since(state.last_sample);
             let elapsed_secs = elapsed.as_secs_f64();
             if elapsed_secs > 0.0 {
                 let delta = bytes_done.saturating_sub(state.last_bytes) as f64;
@@ -381,6 +383,7 @@ impl HashSink for ProgressSink<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
     #[test]
     fn cancel_token_is_shared_and_sticky() {

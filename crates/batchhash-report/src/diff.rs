@@ -284,10 +284,10 @@ impl StreamingDiff {
                     return Vec::new();
                 }
                 let compared = self.streaming_compared(&report_entry);
-                let right_group = self.right.get(&key).map(Vec::as_slice);
+                let right_group = self.right.get(&key).map(|group| group.as_slice());
                 rows_for_key(
                     &key,
-                    self.left.by_key.get(&key).map(Vec::as_slice),
+                    self.left.by_key.get(&key).map(|group| group.as_slice()),
                     right_group,
                     &compared,
                     self.options.mode,
@@ -501,8 +501,8 @@ fn join_rows(
         keys.insert(key.as_str());
     }
     for key in keys {
-        let left_group = left.by_key.get(key).map(Vec::as_slice);
-        let right_group = right.by_key.get(key).map(Vec::as_slice);
+        let left_group = left.by_key.get(key).map(|group| group.as_slice());
+        let right_group = right.by_key.get(key).map(|group| group.as_slice());
         if let Some(row) = rows_for_key(
             key,
             left_group,
@@ -1135,9 +1135,9 @@ mod tests {
         assert_eq!(diff.summary.removed, 1);
     }
 
-    fn file_entry(path: &str, digest: &str) -> FileEntry {
+    fn file_entry(path: &str, digest: impl Into<String>) -> FileEntry {
         let mut entry = FileEntry::new("root", RootKind::Fs, path, path, 10, None);
-        entry.hashes.insert(AlgorithmId::Md5, digest.to_string());
+        entry.hashes.insert(AlgorithmId::Md5, digest.into());
         entry
     }
 

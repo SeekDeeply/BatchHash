@@ -381,9 +381,9 @@ pub fn execute_plan(plan: &RenamePlan, backend: &mut dyn RenameBackend) -> Vec<R
         if row.status != RenameRowStatus::Ready {
             continue;
         }
-        let from = PathBuf::from(&row.original_path);
+        let from = Path::new(&row.original_path);
         let to = target_path(&row.original_path, &row.proposed_name);
-        match backend.rename(&from, &to) {
+        match backend.rename(from, &to) {
             Ok(()) => results.push(RenameResult {
                 entry_index: row.entry_index,
                 original_path: row.original_path.clone(),
@@ -810,7 +810,10 @@ mod tests {
         let results = execute_plan(&plan, &mut StdFsBackend::new());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, RenameResultStatus::Renamed);
-        assert_eq!(results[0].original_path, ready.to_string_lossy());
+        assert_eq!(
+            results[0].original_path,
+            ready.to_string_lossy().into_owned()
+        );
         assert!(temp.path().join("ready[ABCDE].txt").exists());
         assert!(!ready.exists());
         assert!(conflicted.exists(), "conflicted row must not be moved");

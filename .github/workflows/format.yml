@@ -37,13 +37,13 @@ jobs:
       - name: Package formatted sources
         shell: bash
         run: |
-          tar -czf formatted-sources.tar.gz \
-            Cargo.toml Cargo.lock rust-toolchain.toml \
-            crates
+          FILES="Cargo.toml Cargo.lock rust-toolchain.toml crates"
           if [ -f app/pubspec.yaml ]; then
-            tar -rzf formatted-sources.tar.gz app/lib app/test app/pubspec.yaml app/analysis_options.yaml
+            FILES="$FILES app/lib app/test app/pubspec.yaml app/analysis_options.yaml"
           fi
-          tar -tzf formatted-sources.tar.gz | head -20
+          tar -czf formatted-sources.tar.gz $FILES
+          tar -tzf formatted-sources.tar.gz > listing.txt
+          head -20 listing.txt
       - uses: actions/upload-artifact@v4
         with:
           name: formatted-sources

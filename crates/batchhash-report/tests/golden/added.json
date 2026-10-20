@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "tool": "BatchHash",
+  "tool_version": "0.1.0",
+  "generated_at": "2026-10-20T00:00:00Z",
+  "strategy": {
+    "mode": "root_relative",
+    "case_sensitive": false,
+    "root_alignment": "same_root",
+    "algorithms": [
+      "crc32"
+    ],
+    "algorithms_compared": [
+      "crc32"
+    ],
+    "left": {
+      "kind": "report",
+      "label": "left.json",
+      "generated_at": "2026-01-01T00:00:00Z",
+      "scan_time": null
+    },
+    "right": {
+      "kind": "report",
+      "label": "right.json",
+      "generated_at": "2026-01-02T00:00:00Z",
+      "scan_time": null
+    }
+  },
+  "summary": {
+    "total": 1,
+    "unchanged": 0,
+    "changed": 0,
+    "added": 1,
+    "removed": 0,
+    "unknown": 0,
+    "ambiguous": 0,
+    "duplicate_key": 0,
+    "out_of_root": 0,
+    "corrupt": 0,
+    "unstable": 0,
+    "incomplete": false
+  },
+  "rows": [
+    {
+      "key": "new.mkv",
+      "status": "added",
+      "reason": "only in right",
+      "algorithms_compared": [],
+      "changed_algorithms": [],
+      "left_status": null,
+      "right_status": "ok",
+      "left": null,
+      "right": {
+        "path": "new.mkv",
+        "size": 42,
+        "mtime": null,
+        "status": "ok",
+        "hashes": {
+          "crc32": "22222222"
+        },
+        "error_kind": null,
+        "error_message": null
+      }
+    }
+  ]
+}

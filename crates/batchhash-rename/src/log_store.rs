@@ -102,12 +102,6 @@ impl OperationState {
     }
 }
 
-impl Default for OperationState {
-    fn default() -> Self {
-        OperationState::Pending
-    }
-}
-
 impl fmt::Display for OperationState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -139,7 +133,7 @@ pub struct BatchRecord {
 
 impl BatchRecord {
     /// Batch status written by [`BatchRecord::new`].
-    pub const STATUS_ACTIVE: &'static str = "active";
+    pub const STATUS_ACTIVE: &str = "active";
 
     /// Create a new batch record with a generated UUID and current timestamp.
     pub fn new(
@@ -197,7 +191,7 @@ pub struct RenameOperation {
 
 impl RenameOperation {
     /// Operation type written by [`RenameOperation::new`].
-    pub const TYPE_RENAME: &'static str = "rename";
+    pub const TYPE_RENAME: &str = "rename";
 
     /// Create a pending rename operation with a current timestamp.
     pub fn new(
@@ -453,7 +447,7 @@ impl LogStore {
     ) -> Result<(), LogError> {
         let current = self
             .operation_state(operation_id)?
-            .ok_or(LogError::OperationNotFound(operation_id))?;
+            .ok_or_else(|| LogError::OperationNotFound(operation_id))?;
         if current != state && !can_transition(current, state) {
             return Err(LogError::InvalidStateTransition {
                 from: current,
@@ -715,10 +709,11 @@ pub fn apply_undo(
                 from: row.from.clone(),
                 to: row.to.clone(),
                 status: UndoResultStatus::Skipped,
-                error: row
-                    .reason
-                    .clone()
-                    .or_else(|| Some("undo conflict".to_string())),
+                error: Some(
+                    row.reason
+                        .clone()
+                        .unwrap_or_else(|| "undo conflict".to_string()),
+                ),
             }),
         }
     }
@@ -953,30 +948,25 @@ mod tests {
         let batches = store.list_batches().expect("list batches");
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0], batch);
-        assert_eq!(
-            store.operations_for_batch(&batch.id).expect("operations"),
-            vec![RenameOperation {
-                id: 1,
-                batch_id: batch.id.clone(),
-                original_path: "/tmp/a.txt".to_string(),
-                new_path: "/tmp/a[ABCDE].txt".to_string(),
-                algorithm: AlgorithmId::Blake3,
-                full_hash: digest(),
-                suffix: "ABCDE".to_string(),
-                op_type: "rename".to_string(),
-                result: None,
-                error_kind: None,
-                created_at: store
-                    .operations_for_batch(&batch.id)
-                    .expect("operations")
-                    .first()
-                    .expect("operation")
-                    .created_at
-                    .clone(),
-                undone_at: None,
-                state: OperationState::Pending,
-            }]
-        );
+
+        let operations = store
+            .operations_for_batch(&batch.id)
+            .expect("reopened operations");
+        assert_eq!(operations.len(), 1);
+        let operation = &operations[0];
+        assert_eq!(operation.id, 1);
+        assert_eq!(operation.batch_id, batch.id);
+        assert_eq!(operation.original_path, "/tmp/a.txt");
+        assert_eq!(operation.new_path, "/tmp/a[ABCDE].txt");
+        assert_eq!(operation.algorithm, AlgorithmId::Blake3);
+        assert_eq!(operation.full_hash, digest());
+        assert_eq!(operation.suffix, "ABCDE");
+        assert_eq!(operation.op_type, "rename");
+        assert_eq!(operation.result, None);
+        assert_eq!(operation.error_kind, None);
+        assert_eq!(operation.undone_at, None);
+        assert_eq!(operation.state, OperationState::Pending);
+        assert!(!operation.created_at.is_empty());
     }
 
     #[test]
@@ -1130,8 +1120,14 @@ mod tests {
         assert_eq!(plan.rows[1].status, UndoStatus::Conflict);
         assert_eq!(plan.rows[2].operation_id, id_one);
         assert_eq!(plan.rows[2].status, UndoStatus::Conflict);
-        assert_eq!(plan.rows[1].from, renamed_two.to_string_lossy());
-        assert_eq!(plan.rows[1].to, original_two.to_string_lossy());
+        assert_eq!(
+            plan.rows[1].from,
+            renamed_two.to_string_lossy().into_owned()
+        );
+        assert_eq!(
+            plan.rows[1].to,
+            original_two.to_string_lossy().into_owned()
+        );
 
         let error = store
             .plan_undo("missing-batch", &StdRenameFs)
@@ -1198,7 +1194,7 @@ mod tests {
 
         let mut store = LogStore::open_in_memory().expect("in-memory store");
         let batch = BatchRecord::new(
-            temp.path().to_string_lossy(),
+            temp.path().to_string_lossy().into_owned(),
             RootKind::Fs,
             vec![AlgorithmId::Blake3],
             SuffixFormat::default(),

@@ -15,11 +15,10 @@ use std::path::Path;
 
 use batchhash_types::{
     is_hex, validate_relative_path, AlgorithmId, EntryStatus, ErrorKind, HardwareReport, HexCase,
-Report, ReportEntry, ReportValidationError, RootKind, SuffixConfig,
-    MAX_IMPORT_BYTES, MAX_IMPORT_ENTRIES, REPORT_SCHEMA_VERSION, TOOL_NAME, TOOL_VERSION,
+    Report, ReportEntry, ReportValidationError, RootKind, MAX_IMPORT_BYTES, MAX_IMPORT_ENTRIES,
+    REPORT_SCHEMA_VERSION,
 };
 use indexmap::IndexMap;
-use serde::Serialize;
 
 /// Maximum number of entries rendered by Markdown and TXT table exports.
 ///
@@ -128,7 +127,10 @@ pub enum ExportError {
     UnencodablePath(String),
     /// Checksum formats hold exactly one algorithm per file.
     #[error("format requires exactly one algorithm, report declares {count}")]
-    RequiresSingleAlgorithm { count: usize },
+    RequiresSingleAlgorithm {
+        /// Number of algorithms the report declares.
+        count: usize,
+    },
 }
 
 /// Failures while parsing an untrusted report file.
@@ -139,16 +141,31 @@ pub enum ImportError {
     UnsupportedFormat(ReportFormat),
     /// The byte cap was exceeded.
     #[error("input is {size} bytes, maximum is {max}")]
-    TooLarge { size: u64, max: u64 },
+    TooLarge {
+        /// Input size in bytes.
+        size: u64,
+        /// Configured maximum.
+        max: u64,
+    },
     /// The entry cap was exceeded.
     #[error("report has {count} entries, maximum is {max}")]
-    TooManyEntries { count: usize, max: usize },
+    TooManyEntries {
+        /// Number of entries found.
+        count: usize,
+        /// Configured maximum.
+        max: usize,
+    },
     /// Schema version zero is reserved and never valid.
     #[error("unsupported report schema_version {0}")]
     UnsupportedSchemaVersion(u32),
     /// The file was produced by a newer BatchHash.
     #[error("report schema_version {found} is newer than supported {supported}")]
-    FutureSchema { found: u32, supported: u32 },
+    FutureSchema {
+        /// Version found in the file.
+        found: u32,
+        /// Highest version this crate supports.
+        supported: u32,
+    },
     /// JSON parsing failed.
     #[error("invalid JSON: {0}")]
     Json(String),
@@ -766,34 +783,28 @@ fn import_csv(bytes: &[u8]) -> Result<Report, ImportError> {
         let record = record.map_err(|error| ImportError::Csv(error.to_string()))?;
         check_entry_cap(entries.len() + 1)?;
 
-        let get = |index: Option<usize>| -> &str {
-            index
-                .and_then(|position| record.get(position))
-                .unwrap_or("")
-        };
-
-        let path = get(Some(path_index)).to_string();
+        let path = record.get(path_index).unwrap_or("").to_string();
         validate_relative_path(&path).map_err(|source| ImportError::Path {
             path: path.clone(),
             source,
         })?;
 
-        let size = match get(size_index) {
+        let size = match record_field(&record, size_index) {
             "" => 0,
             value => value
                 .trim()
                 .parse::<u64>()
                 .map_err(|_| ImportError::InvalidSize(value.to_string()))?,
         };
-        let status = parse_status(get(status_index))?;
-        let error_kind = match get(error_kind_index).trim() {
+        let status = parse_status(record_field(&record, status_index))?;
+        let error_kind = match record_field(&record, error_kind_index).trim() {
             "" => None,
             value => Some(
                 error_kind_from_str(value)
                     .ok_or_else(|| ImportError::InvalidErrorKind(value.to_string()))?,
             ),
         };
-        let suffix_algorithm = match get(suffix_algorithm_index).trim() {
+        let suffix_algorithm = match record_field(&record, suffix_algorithm_index).trim() {
             "" => None,
             value => Some(
                 AlgorithmId::from_stable_id(value)
@@ -801,7 +812,7 @@ fn import_csv(bytes: &[u8]) -> Result<Report, ImportError> {
             ),
         };
         if generated_at.is_empty() {
-            let value = get(generated_at_index);
+            let value = record_field(&record, generated_at_index);
             if !value.is_empty() {
                 generated_at = value.to_string();
             }
@@ -825,14 +836,14 @@ fn import_csv(bytes: &[u8]) -> Result<Report, ImportError> {
         entries.push(ReportEntry {
             path,
             size,
-            mtime: non_empty(get(mtime_index)),
+            mtime: non_empty(record_field(&record, mtime_index)),
             hashes,
             status,
             error_kind,
             error_message: None,
-            suffix_applied: non_empty(get(suffix_applied_index)),
+            suffix_applied: non_empty(record_field(&record, suffix_applied_index)),
             suffix_algorithm,
-            renamed_to: non_empty(get(renamed_to_index)),
+            renamed_to: non_empty(record_field(&record, renamed_to_index)),
         });
     }
 
@@ -1332,6 +1343,12 @@ fn bool_str(value: bool) -> &'static str {
     } else {
         "false"
     }
+}
+
+fn record_field<'a>(record: &'a csv::StringRecord, index: Option<usize>) -> &'a str {
+    index
+        .and_then(|position| record.get(position))
+        .unwrap_or("")
 }
 
 fn non_empty(value: &str) -> Option<String> {

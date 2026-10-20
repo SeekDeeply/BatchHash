@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "tool": "BatchHash",
+  "tool_version": "0.1.0",
+  "generated_at": "2026-10-20T00:00:00Z",
+  "strategy": {
+    "mode": "root_relative",
+    "case_sensitive": false,
+    "root_alignment": "same_root",
+    "algorithms": [
+      "md5",
+      "sha256"
+    ],
+    "algorithms_compared": [],
+    "left": {
+      "kind": "report",
+      "label": "left.json",
+      "generated_at": "2026-01-01T00:00:00Z",
+      "scan_time": null
+    },
+    "right": {
+      "kind": "report",
+      "label": "right.json",
+      "generated_at": "2026-01-02T00:00:00Z",
+      "scan_time": null
+    }
+  },
+  "summary": {
+    "total": 1,
+    "unchanged": 1,
+    "changed": 0,
+    "added": 0,
+    "removed": 0,
+    "unknown": 0,
+    "ambiguous": 0,
+    "duplicate_key": 0,
+    "out_of_root": 0,
+    "corrupt": 0,
+    "unstable": 0,
+    "incomplete": false
+  },
+  "rows": [
+    {
+      "key": "a.mkv",
+      "status": "unchanged",
+      "reason": "no common algorithms; presence/size comparison only",
+      "algorithms_compared": [],
+      "changed_algorithms": [],
+      "left_status": "ok",
+      "right_status": "ok",
+      "left": {
+        "path": "a.mkv",
+        "size": 10,
+        "mtime": null,
+        "status": "ok",
+        "hashes": {
+          "md5": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "error_kind": null,
+        "error_message": null
+      },
+      "right": {
+        "path": "a.mkv",
+        "size": 10,
+        "mtime": null,
+        "status": "ok",
+        "hashes": {
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "error_kind": null,
+        "error_message": null
+      }
+    }
+  ]
+}

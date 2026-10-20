@@ -555,8 +555,8 @@ fn rows_for_key(
     mode: DiffMode,
     mark_removed: bool,
 ) -> Option<DiffRow> {
-    let left_count = left_group.map_or(0, <[ReportEntry]>::len);
-    let right_count = right_group.map_or(0, <[ReportEntry]>::len);
+    let left_count = left_group.map_or(0, |group| group.len());
+    let right_count = right_group.map_or(0, |group| group.len());
     let left_first = left_group.and_then(|group| group.first());
     let right_first = right_group.and_then(|group| group.first());
 

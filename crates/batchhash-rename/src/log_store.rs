@@ -63,10 +63,11 @@ CREATE INDEX IF NOT EXISTS idx_rename_operation_state
 const MIGRATIONS: &[&str] = &[MIGRATION_V1];
 
 /// Lifecycle state of a recorded rename operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationState {
     /// Recorded locally but not yet confirmed by the platform backend.
+    #[default]
     Pending,
     /// The backend confirmed the rename.
     Applied,
@@ -349,7 +350,7 @@ impl LogStore {
         )?;
         let applied: i64 = self.conn.query_row(
             "SELECT COALESCE(MAX(version), 0) FROM schema_migration",
-            [],
+            params![],
             |row| row.get(0),
         )?;
         if applied > i64::from(SCHEMA_VERSION) {
@@ -357,7 +358,7 @@ impl LogStore {
                 "database schema version {applied} is newer than supported {SCHEMA_VERSION}"
             )));
         }
-        for (index, migration) in MIGRATIONS.iter().enumerate() {
+        for (index, migration) in MIGRATIONS.iter().copied().enumerate() {
             let version = (index as i64) + 1;
             if version <= applied {
                 continue;
@@ -377,7 +378,7 @@ impl LogStore {
     pub fn schema_version(&self) -> Result<u32, LogError> {
         let version: i64 = self.conn.query_row(
             "SELECT COALESCE(MAX(version), 0) FROM schema_migration",
-            [],
+            params![],
             |row| row.get(0),
         )?;
         u32::try_from(version)
@@ -476,7 +477,7 @@ impl LogStore {
              FROM batch ORDER BY created_at ASC, id ASC",
         )?;
         let raw = statement
-            .query_map([], |row| {
+            .query_map(params![], |row| {
                 Ok(RawBatch {
                     id: row.get(0)?,
                     created_at: row.get(1)?,
@@ -872,8 +873,9 @@ mod tests {
         StdRenameFs,
     };
     use crate::suffix::SuffixFormat;
-    use batchhash_types::FileEntry;
+    use batchhash_types::{AlgorithmId, FileEntry, RootKind};
     use std::fs;
+    use std::path::Path;
     use tempfile::tempdir;
 
     fn digest() -> String {
@@ -917,7 +919,9 @@ mod tests {
         store.migrate().expect("third migrate");
         let migrations: i64 = store
             .conn
-            .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM schema_migration", params![], |row| {
+                row.get(0)
+            })
             .expect("count migrations");
         assert_eq!(migrations, 1);
     }
@@ -1201,7 +1205,7 @@ mod tests {
         );
         store.create_batch(&batch).expect("create batch");
         let operation = RenameOperation::new(
-            &batch.id,
+            batch.id.clone(),
             original_display.clone(),
             renamed.clone(),
             AlgorithmId::Blake3,

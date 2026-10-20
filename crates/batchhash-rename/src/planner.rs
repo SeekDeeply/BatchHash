@@ -555,7 +555,9 @@ fn target_key(row: &RenamePlanRow, case_insensitive: bool) -> String {
 mod tests {
     use super::*;
     use batchhash_types::{AlgorithmId, EntryStatus, ErrorKind, RootKind};
+    use crate::suffix::SuffixFormat;
     use std::fs;
+    use std::path::Path;
     use tempfile::tempdir;
 
     fn digest() -> String {

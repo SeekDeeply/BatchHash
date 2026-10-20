@@ -347,7 +347,7 @@ fn parse_suffix_token(content: &str) -> Option<ParsedSuffix> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use batchhash_types::AlgorithmId;
+    use batchhash_types::{AlgorithmId, HexCase};
 
     fn digest() -> String {
         "abcdef0123456789".repeat(4)

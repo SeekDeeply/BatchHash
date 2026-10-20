@@ -298,13 +298,7 @@ pub fn import_report(bytes: &[u8], format: ReportFormat) -> Result<Report, Impor
     if !format.can_import() {
         return Err(ImportError::UnsupportedFormat(format));
     }
-    let size = bytes.len() as u64;
-    if size > MAX_IMPORT_BYTES {
-        return Err(ImportError::TooLarge {
-            size,
-            max: MAX_IMPORT_BYTES,
-        });
-    }
+    check_import_size(bytes.len() as u64)?;
     match format {
         ReportFormat::Json => import_json(bytes),
         ReportFormat::Csv => import_csv(bytes),
@@ -867,6 +861,10 @@ fn import_checksum(bytes: &[u8], format: ReportFormat) -> Result<Report, ImportE
             ReportFormat::Bsd => parse_bsd_line(trimmed, line_number)?,
             _ => return Err(ImportError::UnsupportedFormat(format)),
         };
+        validate_relative_path(&parsed.path).map_err(|source| ImportError::Path {
+            path: parsed.path.clone(),
+            source,
+        })?;
         let resolved = match parsed.algorithm {
             Some(explicit) => explicit,
             None => infer_algorithm(parsed.digest.len())?,
@@ -1054,6 +1052,17 @@ fn base_report(
     report.entries = entries;
     report.recompute_summary();
     report
+}
+
+fn check_import_size(size: u64) -> Result<(), ImportError> {
+    if size > MAX_IMPORT_BYTES {
+        Err(ImportError::TooLarge {
+            size,
+            max: MAX_IMPORT_BYTES,
+        })
+    } else {
+        Ok(())
+    }
 }
 
 fn check_entry_cap(count: usize) -> Result<(), ImportError> {
@@ -1382,6 +1391,15 @@ mod tests {
         assert!(matches!(
             check_entry_cap(MAX_IMPORT_ENTRIES + 1),
             Err(ImportError::TooManyEntries { .. })
+        ));
+    }
+
+    #[test]
+    fn byte_cap_is_enforced() {
+        assert!(check_import_size(MAX_IMPORT_BYTES).is_ok());
+        assert!(matches!(
+            check_import_size(MAX_IMPORT_BYTES + 1),
+            Err(ImportError::TooLarge { .. })
         ));
     }
 

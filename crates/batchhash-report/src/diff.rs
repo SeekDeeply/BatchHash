@@ -189,7 +189,10 @@ pub fn diff_report_vs_entries(
 ) -> Result<DiffReport, DiffError> {
     report.validate().map_err(DiffError::LeftReport)?;
 
-    let right_entries: Vec<ReportEntry> = entries.iter().map(report_entry_from_file_entry).collect();
+    let right_entries: Vec<ReportEntry> = entries
+        .iter()
+        .map(report_entry_from_file_entry)
+        .collect();
     let mut right_algorithm_list: Vec<AlgorithmId> = Vec::new();
     for entry in &right_entries {
         for algorithm in entry.hashes.keys() {
@@ -333,7 +336,7 @@ impl StreamingDiff {
         let mut right = SideIndex::default();
         right.by_key = self.right;
         for group in right.by_key.values_mut() {
-            group.sort_by(|a, b| a.path.cmp(&b.path));
+            group.sort_by_key(|entry| entry.path.clone());
         }
         right.out_of_root = self.right_out_of_root;
 
@@ -421,7 +424,7 @@ fn index_entries(
         }
     }
     for group in index.by_key.values_mut() {
-        group.sort_by(|a, b| a.path.cmp(&b.path));
+        group.sort_by_key(|entry| entry.path.clone());
     }
     index
 }

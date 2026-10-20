@@ -55,19 +55,13 @@ fn nist_and_reference_digests_match() {
     ];
     for (algorithm, input, expected) in CASES {
         let actual = digest(*algorithm, input.as_bytes());
-        assert_eq!(actual, *expected, "{} digest for {input:?}", algorithm);
-        assert_eq!(
-            actual.len(),
-            algorithm.hex_len(),
-            "{} digest length",
-            algorithm
-        );
+        assert_eq!(actual, *expected, "{algorithm} digest for {input:?}");
+        assert_eq!(actual.len(), algorithm.hex_len(), "{algorithm} digest length");
         assert!(
             actual
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-            "{} digest must be lowercase hex: {actual}",
-            algorithm
+            "{algorithm} digest must be lowercase hex: {actual}"
         );
     }
 }

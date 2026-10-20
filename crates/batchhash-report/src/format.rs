@@ -380,7 +380,8 @@ fn export_csv(report: &Report) -> Result<String, ExportError> {
         .map_err(|error| ExportError::Csv(error.to_string()))?;
 
     for entry in &report.entries {
-        let mut record: Vec<String> = Vec::with_capacity(CSV_FIXED_HEADER.len() + report.algorithms.len());
+        let mut record: Vec<String> =
+            Vec::with_capacity(CSV_FIXED_HEADER.len() + report.algorithms.len());
         record.push(entry.path.clone());
         record.push(entry.size.to_string());
         record.push(entry.mtime.clone().unwrap_or_default());
@@ -466,7 +467,7 @@ fn export_markdown(report: &Report) -> String {
     out.push('|');
     out.push_str(" Path | Size | Mtime | Status | Error kind | Suffix applied | Suffix algorithm | Renamed to |");
     for algorithm in &report.algorithms {
-        out.push_str(" ");
+        out.push(' ');
         out.push_str(algorithm.stable_id());
         out.push_str(" |");
     }
@@ -1307,8 +1308,7 @@ fn markdown_cell(value: &str) -> String {
     value
         .replace('\\', "\\\\")
         .replace('|', "\\|")
-        .replace('\r', " ")
-        .replace('\n', " ")
+        .replace(['\r', '\n'], " ")
 }
 
 fn truncation_note(total: usize) -> Option<String> {
@@ -1354,7 +1354,7 @@ fn bool_str(value: bool) -> &'static str {
     }
 }
 
-fn record_field<'a>(record: &'a csv::StringRecord, index: Option<usize>) -> &'a str {
+fn record_field(record: &csv::StringRecord, index: Option<usize>) -> &str {
     index
         .and_then(|position| record.get(position))
         .unwrap_or("")
@@ -1375,7 +1375,10 @@ mod tests {
     #[test]
     fn format_capabilities_are_explicit() {
         for format in ReportFormat::ALL {
-            assert_eq!(format.can_import(), !matches!(format, ReportFormat::Markdown | ReportFormat::Txt));
+            assert_eq!(
+                format.can_import(),
+                !matches!(format, ReportFormat::Markdown | ReportFormat::Txt)
+            );
             assert_eq!(
                 format.can_diff(),
                 !matches!(format, ReportFormat::Md5sum | ReportFormat::Bsd)
@@ -1476,6 +1479,3 @@ mod tests {
             detect_report_format("checksums.sha256", b""),
             Some(ReportFormat::Bsd)
         );
-        assert_eq!(detect_report_format("mystery.bin", b""), None);
-    }
-}

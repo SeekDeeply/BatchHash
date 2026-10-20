@@ -368,7 +368,7 @@ fn diff_export_formats_are_stable() {
     let json = export_diff(&diff, ReportFormat::Json).expect("diff JSON");
     assert!(json.ends_with('\n'));
     let value: serde_json::Value = serde_json::from_str(&json).expect("valid diff JSON");
-    assert_eq!(value["rows"][0]["status"], "unchanged");
+    assert_eq!(value["rows"][0]["status"].as_str(), Some("unchanged"));
 
     let csv = export_diff(&diff, ReportFormat::Csv).expect("diff CSV");
     assert!(csv.starts_with("key,status,reason,algorithms_compared,changed_algorithms,"));

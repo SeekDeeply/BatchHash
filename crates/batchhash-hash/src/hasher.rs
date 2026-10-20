@@ -170,44 +170,46 @@ pub enum HashError {
     Cancelled,
 }
 
+// The BLAKE3 state is an order of magnitude larger than the digest states, so all
+// variants are boxed to keep every HasherImpl the same small size.
 enum HasherImpl {
-    Md5(md5::Md5),
-    Sha1(sha1::Sha1),
-    Sha224(sha2::Sha224),
-    Sha256(sha2::Sha256),
-    Sha384(sha2::Sha384),
-    Sha512(sha2::Sha512),
-    Sha3_256(sha3::Sha3_256),
-    Sha3_512(sha3::Sha3_512),
-    Blake2b(blake2::Blake2b512),
-    Blake2s(blake2::Blake2s256),
-    Blake3(blake3::Hasher),
-    Xxh3_64(xxhash_rust::xxh3::Xxh3),
-    Xxh3_128(xxhash_rust::xxh3::Xxh3),
-    Xxh64(xxhash_rust::xxh64::Xxh64),
-    Crc32(crc32fast::Hasher),
-    Crc32c(crc32c::Crc32cHasher),
+    Md5(Box<md5::Md5>),
+    Sha1(Box<sha1::Sha1>),
+    Sha224(Box<sha2::Sha224>),
+    Sha256(Box<sha2::Sha256>),
+    Sha384(Box<sha2::Sha384>),
+    Sha512(Box<sha2::Sha512>),
+    Sha3_256(Box<sha3::Sha3_256>),
+    Sha3_512(Box<sha3::Sha3_512>),
+    Blake2b(Box<blake2::Blake2b512>),
+    Blake2s(Box<blake2::Blake2s256>),
+    Blake3(Box<blake3::Hasher>),
+    Xxh3_64(Box<xxhash_rust::xxh3::Xxh3>),
+    Xxh3_128(Box<xxhash_rust::xxh3::Xxh3>),
+    Xxh64(Box<xxhash_rust::xxh64::Xxh64>),
+    Crc32(Box<crc32fast::Hasher>),
+    Crc32c(Box<crc32c::Crc32cHasher>),
 }
 
 impl HasherImpl {
     fn new(algorithm: AlgorithmId) -> Self {
         match algorithm {
-            AlgorithmId::Md5 => Self::Md5(md5::Md5::new()),
-            AlgorithmId::Sha1 => Self::Sha1(sha1::Sha1::new()),
-            AlgorithmId::Sha224 => Self::Sha224(sha2::Sha224::new()),
-            AlgorithmId::Sha256 => Self::Sha256(sha2::Sha256::new()),
-            AlgorithmId::Sha384 => Self::Sha384(sha2::Sha384::new()),
-            AlgorithmId::Sha512 => Self::Sha512(sha2::Sha512::new()),
-            AlgorithmId::Sha3_256 => Self::Sha3_256(sha3::Sha3_256::new()),
-            AlgorithmId::Sha3_512 => Self::Sha3_512(sha3::Sha3_512::new()),
-            AlgorithmId::Blake2b => Self::Blake2b(blake2::Blake2b512::new()),
-            AlgorithmId::Blake2s => Self::Blake2s(blake2::Blake2s256::new()),
-            AlgorithmId::Blake3 => Self::Blake3(blake3::Hasher::new()),
-            AlgorithmId::Xxh3_64 => Self::Xxh3_64(xxhash_rust::xxh3::Xxh3::new()),
-            AlgorithmId::Xxh3_128 => Self::Xxh3_128(xxhash_rust::xxh3::Xxh3::new()),
-            AlgorithmId::Xxh64 => Self::Xxh64(xxhash_rust::xxh64::Xxh64::new(0)),
-            AlgorithmId::Crc32 => Self::Crc32(crc32fast::Hasher::new()),
-            AlgorithmId::Crc32c => Self::Crc32c(crc32c::Crc32cHasher::default()),
+            AlgorithmId::Md5 => Self::Md5(Box::new(md5::Md5::new())),
+            AlgorithmId::Sha1 => Self::Sha1(Box::new(sha1::Sha1::new())),
+            AlgorithmId::Sha224 => Self::Sha224(Box::new(sha2::Sha224::new())),
+            AlgorithmId::Sha256 => Self::Sha256(Box::new(sha2::Sha256::new())),
+            AlgorithmId::Sha384 => Self::Sha384(Box::new(sha2::Sha384::new())),
+            AlgorithmId::Sha512 => Self::Sha512(Box::new(sha2::Sha512::new())),
+            AlgorithmId::Sha3_256 => Self::Sha3_256(Box::new(sha3::Sha3_256::new())),
+            AlgorithmId::Sha3_512 => Self::Sha3_512(Box::new(sha3::Sha3_512::new())),
+            AlgorithmId::Blake2b => Self::Blake2b(Box::new(blake2::Blake2b512::new())),
+            AlgorithmId::Blake2s => Self::Blake2s(Box::new(blake2::Blake2s256::new())),
+            AlgorithmId::Blake3 => Self::Blake3(Box::new(blake3::Hasher::new())),
+            AlgorithmId::Xxh3_64 => Self::Xxh3_64(Box::new(xxhash_rust::xxh3::Xxh3::new())),
+            AlgorithmId::Xxh3_128 => Self::Xxh3_128(Box::new(xxhash_rust::xxh3::Xxh3::new())),
+            AlgorithmId::Xxh64 => Self::Xxh64(Box::new(xxhash_rust::xxh64::Xxh64::new(0))),
+            AlgorithmId::Crc32 => Self::Crc32(Box::new(crc32fast::Hasher::new())),
+            AlgorithmId::Crc32c => Self::Crc32c(Box::<crc32c::Crc32cHasher>::default()),
         }
     }
 
@@ -230,28 +232,44 @@ impl HasherImpl {
             Self::Xxh3_128(hasher) => hasher.update(chunk),
             Self::Xxh64(hasher) => hasher.update(chunk),
             Self::Crc32(hasher) => hasher.update(chunk),
-            Self::Crc32c(hasher) => std::hash::Hasher::write(hasher, chunk),
+            Self::Crc32c(hasher) => std::hash::Hasher::write(&mut **hasher, chunk),
         }
     }
 
     fn finalize_hex(self) -> String {
         match self {
-            Self::Md5(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Sha1(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Sha224(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Sha256(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Sha384(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Sha512(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Sha3_256(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Sha3_512(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Blake2b(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Blake2s(hasher) => digest_to_hex(&hasher.finalize()),
-            Self::Blake3(hasher) => hasher.finalize().to_hex().to_string(),
-            Self::Xxh3_64(hasher) => format!("{:016x}", hasher.digest()),
-            Self::Xxh3_128(hasher) => format!("{:032x}", hasher.digest128()),
-            Self::Xxh64(hasher) => format!("{:016x}", hasher.digest()),
-            Self::Crc32(hasher) => format!("{:08x}", hasher.finalize()),
+            Self::Md5(hasher) => finalize_digest(hasher),
+            Self::Sha1(hasher) => finalize_digest(hasher),
+            Self::Sha224(hasher) => finalize_digest(hasher),
+            Self::Sha256(hasher) => finalize_digest(hasher),
+            Self::Sha384(hasher) => finalize_digest(hasher),
+            Self::Sha512(hasher) => finalize_digest(hasher),
+            Self::Sha3_256(hasher) => finalize_digest(hasher),
+            Self::Sha3_512(hasher) => finalize_digest(hasher),
+            Self::Blake2b(hasher) => finalize_digest(hasher),
+            Self::Blake2s(hasher) => finalize_digest(hasher),
+            Self::Blake3(hasher) => {
+                let hasher = *hasher;
+                hasher.finalize().to_hex().to_string()
+            }
+            Self::Xxh3_64(hasher) => {
+                let hasher = *hasher;
+                format!("{:016x}", hasher.digest())
+            }
+            Self::Xxh3_128(hasher) => {
+                let hasher = *hasher;
+                format!("{:032x}", hasher.digest128())
+            }
+            Self::Xxh64(hasher) => {
+                let hasher = *hasher;
+                format!("{:016x}", hasher.digest())
+            }
+            Self::Crc32(hasher) => {
+                let hasher = *hasher;
+                format!("{:08x}", hasher.finalize())
+            }
             Self::Crc32c(hasher) => {
+                let hasher = *hasher;
                 let checksum = std::hash::Hasher::finish(&hasher);
                 format!("{:08x}", checksum as u32)
             }
@@ -259,12 +277,20 @@ impl HasherImpl {
     }
 }
 
+fn finalize_digest<D: Digest>(hasher: Box<D>) -> String {
+    let hasher = *hasher;
+    let digest = hasher.finalize();
+    digest_to_hex(&digest)
+}
+
 fn digest_to_hex(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut hex = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        hex.push(DIGITS[(byte >> 4) as usize] as char);
-        hex.push(DIGITS[(byte & 0x0f) as usize] as char);
+        let high = *byte >> 4;
+        let low = *byte & 0x0f;
+        hex.push(DIGITS[high as usize] as char);
+        hex.push(DIGITS[low as usize] as char);
     }
     hex
 }

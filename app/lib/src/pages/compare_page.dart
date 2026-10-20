@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import '../app_state.dart';
 import '../models/models.dart';
-import '../theme.dart';
 import '../widgets/diff_table.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/entry_list.dart';

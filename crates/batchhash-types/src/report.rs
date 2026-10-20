@@ -72,17 +72,12 @@ impl SuffixConfig {
 }
 
 /// Backend selection policy for CPU hash acceleration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum BackendPolicy {
+    #[default]
     Auto,
     ForcedSoft,
-}
-
-impl Default for BackendPolicy {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 /// Hardware acceleration observability block. Values are `reported` or

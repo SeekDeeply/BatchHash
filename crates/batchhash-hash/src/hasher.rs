@@ -399,7 +399,7 @@ pub(crate) fn compute_hashes_path(
 
 fn compute_hashes_mmap_blake3(
     file: &File,
-    mut sink: Option<&mut dyn HashSink>,
+    sink: Option<&mut dyn HashSink>,
     cancel: Option<&AtomicBool>,
 ) -> Result<IndexMap<AlgorithmId, String>, HashError> {
     if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
@@ -410,7 +410,7 @@ fn compute_hashes_mmap_blake3(
     // stable inputs and documents that files must not change during a batch; the
     // mapping is read-only, private to this call and dropped before returning.
     let mapped = unsafe { memmap2::Mmap::map(file)? };
-    if let Some(hook) = sink.as_deref_mut() {
+    if let Some(hook) = sink {
         hook.on_chunk(&mapped);
     }
     let mut hasher = blake3::Hasher::new();

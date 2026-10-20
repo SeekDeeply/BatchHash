@@ -133,6 +133,23 @@ pub use log_store::{LogStore, BatchRecord, RenameOperation, OperationState, Undo
 * `batchhash-types` is read-only for everyone except the Lead.
 * Hex digests are lowercase everywhere; `AlgorithmId` ordering is canonical registry order.
 * Errors: `thiserror` enums, no panics on malformed input (imports are untrusted).
-* Tests: unit + golden tests in your crate; `cargo test -p <crate>` must be green before you report.
-* Run `cargo fmt` and `cargo clippy -p <crate> --all-targets -- -D warnings` before reporting.
-* Report back: files created, public API deviations, test command + summary, known gaps.
+* Tests: unit + golden tests in your crate; CI runs `cargo test --workspace`.
+* **Local builds are forbidden.** CI runs `cargo fmt`/`cargo clippy -D warnings`/tests;
+  formatting is applied through the CI "Format (CI)" workflow artifact.
+
+## Deviations accepted in P0
+
+Additive only; no contract item was renamed.
+
+1. Hash: `probe(policy)` + `probe_auto()`; `HardwareInfo` implements
+   `From<HardwareInfo> for HardwareReport`; additions `compute_hashes_file`,
+   `compute_hashes_with_sink`, `FileIo`, buffer-size constants; `CancelToken` is a
+   newtype over `Arc<AtomicBool>`; fd API is `#[cfg(unix)]`.
+2. Report: `diff_reports`/`diff_report_vs_entries`/`StreamingDiff::new` return
+   `Result<_, DiffError>` (they validate both reports); `DiffOptions` has public
+   fields plus `with_*` setters.
+3. Rename: additive `RenamePlanSummary`, `execute_plan` result status enum,
+   `LogError`, `UndoRow`/`UndoResult`/`apply_undo`, `RenameFs::supports_rename`.
+4. `SuffixFormat`/`RenamePlanOptions` keep hand-written `Default` (non-derivable).
+5. Hardware backends are reported as `unknown` unless the hash library exposes a
+   runtime backend; this is intentional honesty, not a bug.

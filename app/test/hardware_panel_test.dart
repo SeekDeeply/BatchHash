@@ -4,11 +4,14 @@ import 'package:batchhash/src/widgets/hardware_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/test_helpers.dart';
+
 Future<void> pumpPanel(
   WidgetTester tester, {
   required HardwareInfoModel? hashInfo,
   required RenderingHardwareModel? renderingInfo,
 }) async {
+  setViewSize(tester, const Size(500, 900));
   await tester.pumpWidget(
     MaterialApp(
       theme: AppTheme.light(null),

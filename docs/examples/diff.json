@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "tool": "BatchHash",
+  "tool_version": "0.1.0",
+  "generated_at": "2026-10-20T12:30:00Z",
+  "strategy": {
+    "mode": "root_relative",
+    "case_sensitive": false,
+    "root_alignment": "same_root",
+    "algorithms": ["sha256", "blake3"],
+    "algorithms_compared": ["sha256", "blake3"],
+    "left": {
+      "kind": "report",
+      "label": "batchhash_media_20261019.json",
+      "generated_at": "2026-10-19T08:00:00Z",
+      "scan_time": null
+    },
+    "right": {
+      "kind": "realtime_directory",
+      "label": "/data/media",
+      "generated_at": null,
+      "scan_time": "2026-10-20T12:30:00Z"
+    }
+  },
+  "summary": {
+    "total": 3,
+    "unchanged": 1,
+    "changed": 1,
+    "added": 1,
+    "removed": 0,
+    "unknown": 0,
+    "ambiguous": 0,
+    "duplicate_key": 0,
+    "out_of_root": 0,
+    "corrupt": 0,
+    "unstable": 0,
+    "incomplete": false
+  },
+  "rows": [
+    {
+      "key": "b.bin",
+      "status": "added",
+      "reason": "present only on the right side",
+      "algorithms_compared": ["sha256", "blake3"],
+      "changed_algorithms": [],
+      "left_status": null,
+      "right_status": "ok",
+      "left": null,
+      "right": {
+        "path": "b.bin",
+        "size": 1048576,
+        "mtime": "2026-10-02T11:30:00Z",
+        "status": "ok",
+        "hashes": {
+          "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+          "blake3": "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9"
+        },
+        "error_kind": null,
+        "error_message": null
+      }
+    },
+    {
+      "key": "sub/a.mkv",
+      "status": "changed",
+      "reason": "hash mismatch: blake3",
+      "algorithms_compared": ["sha256", "blake3"],
+      "changed_algorithms": ["blake3"],
+      "left_status": "ok",
+      "right_status": "ok",
+      "left": {
+        "path": "sub/a.mkv",
+        "size": 1048576,
+        "mtime": "2026-10-01T10:00:00Z",
+        "status": "ok",
+        "hashes": {
+          "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+          "blake3": "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
+        },
+        "error_kind": null,
+        "error_message": null
+      },
+      "right": {
+        "path": "sub/a.mkv",
+        "size": 1048576,
+        "mtime": "2026-10-20T09:00:00Z",
+        "status": "ok",
+        "hashes": {
+          "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+          "blake3": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "error_kind": null,
+        "error_message": null
+      }
+    },
+    {
+      "key": "sub/c.txt",
+      "status": "unchanged",
+      "reason": "all common algorithms match",
+      "algorithms_compared": ["sha256", "blake3"],
+      "changed_algorithms": [],
+      "left_status": "ok",
+      "right_status": "ok",
+      "left": {
+        "path": "sub/c.txt",
+        "size": 12,
+        "mtime": "2026-10-01T10:00:00Z",
+        "status": "ok",
+        "hashes": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "blake3": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "error_kind": null,
+        "error_message": null
+      },
+      "right": {
+        "path": "sub/c.txt",
+        "size": 12,
+        "mtime": "2026-10-01T10:00:00Z",
+        "status": "ok",
+        "hashes": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "blake3": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "error_kind": null,
+        "error_message": null
+      }
+    }
+  ]
+}

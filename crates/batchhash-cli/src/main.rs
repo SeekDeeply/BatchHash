@@ -35,7 +35,10 @@ fn print_help() {
 }
 
 fn print_algorithms() {
-    println!("{:<10} {:<14} {:>4} {:>5}  {}", "ID", "DISPLAY", "HEX", "CRYPTO", "SUFFIX");
+    println!(
+        "{:<10} {:<14} {:>4} {:>5}  SUFFIX",
+        "ID", "DISPLAY", "HEX", "CRYPTO"
+    );
     for spec in batchhash_types::REGISTRY.iter() {
         println!(
             "{:<10} {:<14} {:>4} {:>5}  {}",

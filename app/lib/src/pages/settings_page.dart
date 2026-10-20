@@ -40,10 +40,10 @@ class SettingsPage extends StatelessWidget {
                   ),
                 ),
                 const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.memory_outlined),
-                  title: const Text('Acceleration reporting'),
-                  subtitle: const Text(
+                const ListTile(
+                  leading: Icon(Icons.memory_outlined),
+                  title: Text('Acceleration reporting'),
+                  subtitle: Text(
                     'Hash acceleration is reported by the core probe; UI '
                     'rendering acceleration comes from the platform layer. '
                     'Unknown values are shown as unknown, never guessed.',

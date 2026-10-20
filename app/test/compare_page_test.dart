@@ -72,10 +72,14 @@ void main() {
     );
     expect(unchangedRow.color, Colors.transparent);
 
-    final Container statusBar = tester.widget<Container>(
-      find.byKey(const ValueKey<String>('diff-status-bar-docs/gamma.md')),
+    expect(
+      tester
+          .getSize(
+            find.byKey(const ValueKey<String>('diff-status-bar-docs/gamma.md')),
+          )
+          .width,
+      DiffRowTile.statusBarWidth,
     );
-    expect(statusBar.width, DiffRowTile.statusBarWidth);
   });
 
   testWidgets('policy banner is always visible', (WidgetTester tester) async {

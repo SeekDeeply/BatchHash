@@ -62,18 +62,30 @@ void main() {
     expect(failedIcon.semanticLabel, 'Status failed');
     expect(skippedIcon.semanticLabel, 'Status skipped');
 
-    final SemanticsNode okNode = tester.getSemantics(
-      find.byKey(const ValueKey<String>('entry-row-reports/ok.txt')),
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const ValueKey<String>('entry-row-reports/ok.txt')),
+          )
+          .label,
+      contains('Status ok'),
     );
-    final SemanticsNode failedNode = tester.getSemantics(
-      find.byKey(const ValueKey<String>('entry-row-reports/failed.txt')),
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const ValueKey<String>('entry-row-reports/failed.txt')),
+          )
+          .label,
+      contains('Status failed'),
     );
-    final SemanticsNode skippedNode = tester.getSemantics(
-      find.byKey(const ValueKey<String>('entry-row-reports/skipped.txt')),
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const ValueKey<String>('entry-row-reports/skipped.txt')),
+          )
+          .label,
+      contains('Status skipped'),
     );
-    expect(okNode.label, contains('Status ok'));
-    expect(failedNode.label, contains('Status failed'));
-    expect(skippedNode.label, contains('Status skipped'));
 
     expect(find.text('ok'), findsOneWidget);
     expect(find.text('failed'), findsOneWidget);

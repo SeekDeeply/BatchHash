@@ -383,7 +383,7 @@ pub(crate) fn compute_hashes_streaming(
     Ok(hashes)
 }
 
-fn compute_hashes_path(
+pub(crate) fn compute_hashes_path(
     path: &Path,
     options: &HashOptions,
     sink: Option<&mut dyn HashSink>,

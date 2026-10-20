@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned in CI via this file (rustup picks it up automatically).
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

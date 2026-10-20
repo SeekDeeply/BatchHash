@@ -1,0 +1,212 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  detect:
+    name: Detect components
+    runs-on: ubuntu-latest
+    outputs:
+      flutter: ${{ steps.check.outputs.flutter }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        shell: bash
+        run: |
+          if [ -f app/pubspec.yaml ]; then
+            echo "flutter=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "flutter=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  rust:
+    name: Rust fmt / clippy / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace --verbose
+
+  flutter:
+    name: Flutter analyze / test
+    needs: detect
+    if: needs.detect.outputs.flutter == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: flutter create --platforms=android,ios,linux,macos,windows --project-name batchhash .
+      - name: Pub get
+        working-directory: app
+        run: flutter pub get
+      - name: Analyze
+        working-directory: app
+        run: flutter analyze
+      - name: Test
+        working-directory: app
+        run: flutter test --reporter expanded
+
+  build-linux:
+    name: Build Linux (debug)
+    needs: [detect, flutter]
+    if: needs.detect.outputs.flutter == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install GTK toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: flutter create --platforms=linux --project-name batchhash .
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build linux --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batchhash-linux-debug
+          path: app/build/linux/x64/debug/bundle
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (debug)
+    needs: [detect, flutter]
+    if: needs.detect.outputs.flutter == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: flutter create --platforms=windows --project-name batchhash .
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build windows --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batchhash-windows-debug
+          path: app/build/windows/x64/runner/Debug
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS (debug)
+    needs: [detect, flutter]
+    if: needs.detect.outputs.flutter == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: flutter create --platforms=macos --project-name batchhash .
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build macos --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batchhash-macos-debug
+          path: app/build/macos/Build/Products/Debug
+          if-no-files-found: error
+
+  build-ios:
+    name: Build iOS simulator (debug, no codesign)
+    needs: [detect, flutter]
+    if: needs.detect.outputs.flutter == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: flutter create --platforms=ios --project-name batchhash .
+      - name: Build iOS simulator
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build ios --debug --simulator --no-codesign
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batchhash-ios-simulator-debug
+          path: app/build/ios/iphonesimulator
+          if-no-files-found: error
+
+  build-android:
+    name: Build Android APK (debug)
+    needs: [detect, flutter]
+    if: needs.detect.outputs.flutter == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: flutter create --platforms=android --project-name batchhash .
+      - name: Build APK
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batchhash-android-debug
+          path: app/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error

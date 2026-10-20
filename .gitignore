@@ -1,0 +1,26 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+**/build/
+*.iml
+.idea/
+.vscode/
+app/ios/Pods/
+app/ios/.symlinks/
+app/macos/Pods/
+**/*.xcworkspace/xcuserdata/
+**/*.xcodeproj/xcuserdata/
+
+# Generated test artifacts
+/artifacts/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

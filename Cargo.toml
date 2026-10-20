@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/batchhash-types",
+    "crates/batchhash-hash",
+    "crates/batchhash-report",
+    "crates/batchhash-rename",
+    "crates/batchhash-core",
+    "crates/batchhash-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+repository = "https://github.com/SeekDeeply/validation"
+
+[workspace.dependencies]
+batchhash-types = { path = "crates/batchhash-types" }
+batchhash-hash = { path = "crates/batchhash-hash" }
+batchhash-report = { path = "crates/batchhash-report" }
+batchhash-rename = { path = "crates/batchhash-rename" }
+
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = { version = "1.0.128", features = ["preserve_order"] }
+thiserror = "1.0.64"
+indexmap = { version = "2.5.0", features = ["serde"] }
+chrono = { version = "0.4.38", features = ["serde"] }
+uuid = { version = "1.10.0", features = ["v4"] }
+unicode-normalization = "0.1.24"
+csv = "1.3.0"
+hex = "0.4.3"
+rayon = "1.10.0"
+blake3 = { version = "1.5.4", features = ["rayon"] }
+blake2 = "0.10.6"
+sha2 = "0.10.8"
+sha3 = "0.10.8"
+sha1 = "0.10.6"
+md-5 = "0.10.6"
+xxhash-rust = { version = "0.8.12", features = ["xxh3", "xxh64"] }
+crc32fast = "1.4.2"
+crc32c = "0.6.8"
+cpufeatures = "0.2.14"
+memmap2 = "0.9.5"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
+tempfile = "3.13.0"

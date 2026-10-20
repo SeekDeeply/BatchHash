@@ -1,0 +1,14 @@
+[package]
+name = "batchhash-core"
+description = "BatchHash core facade: re-exports the hash, report/diff and rename engines for the Flutter bridge and CLI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+batchhash-types = { workspace = true }
+batchhash-hash = { workspace = true }
+batchhash-report = { workspace = true }
+batchhash-rename = { workspace = true }

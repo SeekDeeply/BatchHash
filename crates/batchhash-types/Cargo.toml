@@ -1,0 +1,14 @@
+[package]
+name = "batchhash-types"
+description = "BatchHash shared schema types and the algorithm registry (report/diff schema v1 contract)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+indexmap = { workspace = true }

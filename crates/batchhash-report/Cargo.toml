@@ -1,0 +1,21 @@
+[package]
+name = "batchhash-report"
+description = "BatchHash report/diff: schema v1 serialization, six export formats, four import formats, PathNormalizer, Diff Engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+batchhash-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+csv = { workspace = true }
+indexmap = { workspace = true }
+thiserror = { workspace = true }
+unicode-normalization = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

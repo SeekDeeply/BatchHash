@@ -238,16 +238,16 @@ impl HasherImpl {
 
     fn finalize_hex(self) -> String {
         match self {
-            Self::Md5(hasher) => finalize_digest(hasher),
-            Self::Sha1(hasher) => finalize_digest(hasher),
-            Self::Sha224(hasher) => finalize_digest(hasher),
-            Self::Sha256(hasher) => finalize_digest(hasher),
-            Self::Sha384(hasher) => finalize_digest(hasher),
-            Self::Sha512(hasher) => finalize_digest(hasher),
-            Self::Sha3_256(hasher) => finalize_digest(hasher),
-            Self::Sha3_512(hasher) => finalize_digest(hasher),
-            Self::Blake2b(hasher) => finalize_digest(hasher),
-            Self::Blake2s(hasher) => finalize_digest(hasher),
+            Self::Md5(hasher) => finalize_digest(*hasher),
+            Self::Sha1(hasher) => finalize_digest(*hasher),
+            Self::Sha224(hasher) => finalize_digest(*hasher),
+            Self::Sha256(hasher) => finalize_digest(*hasher),
+            Self::Sha384(hasher) => finalize_digest(*hasher),
+            Self::Sha512(hasher) => finalize_digest(*hasher),
+            Self::Sha3_256(hasher) => finalize_digest(*hasher),
+            Self::Sha3_512(hasher) => finalize_digest(*hasher),
+            Self::Blake2b(hasher) => finalize_digest(*hasher),
+            Self::Blake2s(hasher) => finalize_digest(*hasher),
             Self::Blake3(hasher) => {
                 let hasher = *hasher;
                 hasher.finalize().to_hex().to_string()
@@ -277,8 +277,7 @@ impl HasherImpl {
     }
 }
 
-fn finalize_digest<D: Digest>(hasher: Box<D>) -> String {
-    let hasher = *hasher;
+fn finalize_digest<D: Digest>(hasher: D) -> String {
     let digest = hasher.finalize();
     digest_to_hex(&digest)
 }

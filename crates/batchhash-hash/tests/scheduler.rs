@@ -209,7 +209,7 @@ fn fd_input_is_used_for_fd_entries() {
     let dir = tempfile::tempdir().expect("tempdir must be created");
     let path = dir.path().join("fd.bin");
     let data: Vec<u8> = (0..200).map(|index| (index * 7 % 256) as u8).collect();
-    fs::write(&path, &data).expect("file must be written");
+    fs::write(&path, data.as_slice()).expect("file must be written");
     let mut file = File::open(&path).expect("file must open");
     let fd = file.as_raw_fd();
 

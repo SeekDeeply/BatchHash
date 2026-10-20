@@ -107,7 +107,7 @@ fn blake3_parallel_path_matches_streaming() {
     let dir = tempfile::tempdir().expect("tempdir must be created");
     let path = dir.path().join("large.bin");
     let data = patterned_data(300_000);
-    fs::write(&path, &data).expect("file must be written");
+    fs::write(&path, data.as_slice()).expect("file must be written");
 
     let streaming_options = HashOptions::new(vec![AlgorithmId::Blake3]);
     let streaming = compute_hashes(&mut Cursor::new(data.clone()), &streaming_options)

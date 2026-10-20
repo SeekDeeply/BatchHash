@@ -50,6 +50,7 @@ fn nist_and_reference_digests_match() {
         (AlgorithmId::Crc32, "abc", "352441c2"),
         (AlgorithmId::Crc32, "123456789", "cbf43926"),
         (AlgorithmId::Crc32c, "", "00000000"),
+        (AlgorithmId::Crc32c, "abc", "364b3fb7"),
         (AlgorithmId::Crc32c, "Hello world!", "7b98e751"),
         (AlgorithmId::Crc32c, "123456789", "e3069283"),
     ];
@@ -60,7 +61,7 @@ fn nist_and_reference_digests_match() {
         assert!(
             actual
                 .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
             "{algorithm} digest must be lowercase hex: {actual}"
         );
     }

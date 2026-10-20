@@ -244,31 +244,35 @@ class _ComparePageState extends State<ComparePage> {
   }
 
   Widget _buildPaneSelector() {
-    return SegmentedButton<ComparePane>(
-      key: const ValueKey<String>('compare-pane-selector'),
-      segments: const <ButtonSegment<ComparePane>>[
-        ButtonSegment<ComparePane>(
-          value: ComparePane.left,
-          label: Text('Left'),
-          icon: Icon(Icons.view_sidebar_outlined),
-        ),
-        ButtonSegment<ComparePane>(
-          value: ComparePane.right,
-          label: Text('Right'),
-          icon: Icon(Icons.view_sidebar),
-        ),
-        ButtonSegment<ComparePane>(
-          value: ComparePane.differences,
-          label: Text('Differences'),
-          icon: Icon(Icons.compare_arrows),
-        ),
-      ],
-      selected: <ComparePane>{_pane},
-      onSelectionChanged: (Set<ComparePane> selection) {
-        setState(() {
-          _pane = selection.first;
-        });
-      },
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SegmentedButton<ComparePane>(
+        key: const ValueKey<String>('compare-pane-selector'),
+        showSelectedIcon: false,
+        segments: const <ButtonSegment<ComparePane>>[
+          ButtonSegment<ComparePane>(
+            value: ComparePane.left,
+            label: Text('Left'),
+            icon: Icon(Icons.view_sidebar_outlined),
+          ),
+          ButtonSegment<ComparePane>(
+            value: ComparePane.right,
+            label: Text('Right'),
+            icon: Icon(Icons.view_sidebar),
+          ),
+          ButtonSegment<ComparePane>(
+            value: ComparePane.differences,
+            label: Text('Differences'),
+            icon: Icon(Icons.compare_arrows),
+          ),
+        ],
+        selected: <ComparePane>{_pane},
+        onSelectionChanged: (Set<ComparePane> selection) {
+          setState(() {
+            _pane = selection.first;
+          });
+        },
+      ),
     );
   }
 

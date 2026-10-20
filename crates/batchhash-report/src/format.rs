@@ -1479,3 +1479,5 @@ mod tests {
             detect_report_format("checksums.sha256", b""),
             Some(ReportFormat::Bsd)
         );
+    }
+}

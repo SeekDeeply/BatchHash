@@ -31,7 +31,7 @@ fn fd_offset_and_length_are_respected() {
     let dir = tempfile::tempdir().expect("tempdir must be created");
     let path = dir.path().join("data.bin");
     let data = content(1000);
-    std::fs::write(&path, &data).expect("file must be written");
+    std::fs::write(&path, data.as_slice()).expect("file must be written");
     let mut file = File::open(&path).expect("file must open");
     let fd = file.as_raw_fd();
     let options = options();
@@ -64,7 +64,7 @@ fn original_descriptor_is_never_closed() {
     let dir = tempfile::tempdir().expect("tempdir must be created");
     let path = dir.path().join("data.bin");
     let data = content(64);
-    std::fs::write(&path, &data).expect("file must be written");
+    std::fs::write(&path, data.as_slice()).expect("file must be written");
     let mut file = File::open(&path).expect("file must open");
     let fd = file.as_raw_fd();
     let options = options();

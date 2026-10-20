@@ -103,6 +103,8 @@ pub struct ProgressSnapshot {
 }
 
 /// Event stream produced by hash_entries.
+// The contract embeds FileEntry in EntryDone; boxing it would change the public shape.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum BatchEvent {
     /// Periodic aggregate progress sample (throttled to about 20 per second).

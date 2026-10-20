@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "tool": "BatchHash",
+  "tool_version": "0.1.0",
+  "generated_at": "2026-10-20T12:00:00Z",
+  "root": "/data/media",
+  "root_kind": "fs",
+  "case_sensitive": false,
+  "algorithms": ["sha256", "blake3"],
+  "suffix_config": {
+    "length": 5,
+    "case": "upper",
+    "enabled": true,
+    "algorithm": "blake3"
+  },
+  "hardware": {
+    "arch": "x86_64",
+    "detected_features": ["SSE4.1", "AVX2", "SHA-NI"],
+    "backend_policy": "auto",
+    "blake3_backend_reported": "avx2",
+    "sha256_backend_reported": "sha-ni",
+    "source": "cpufeatures",
+    "multithread": 8
+  },
+  "summary": {
+    "total": 2,
+    "ok": 2,
+    "failed": 0,
+    "skipped": 0,
+    "total_bytes": 2097152,
+    "truncated": false
+  },
+  "entries": [
+    {
+      "path": "sub/a.mkv",
+      "size": 1048576,
+      "mtime": "2026-10-01T10:00:00Z",
+      "hashes": {
+        "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        "blake3": "6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85"
+      },
+      "status": "ok",
+      "error_kind": null,
+      "error_message": null,
+      "suffix_applied": "A1B2C",
+      "suffix_algorithm": "blake3",
+      "renamed_to": "sub/a[A1B2C].mkv"
+    },
+    {
+      "path": "b.bin",
+      "size": 1048576,
+      "mtime": "2026-10-02T11:30:00Z",
+      "hashes": {
+        "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+        "blake3": "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9"
+      },
+      "status": "ok",
+      "error_kind": null,
+      "error_message": null,
+      "suffix_applied": "DEF01",
+      "suffix_algorithm": "blake3",
+      "renamed_to": "b[DEF01].bin"
+    }
+  ]
+}

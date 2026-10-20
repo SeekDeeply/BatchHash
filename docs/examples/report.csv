@@ -1,0 +1,3 @@
+path,size,mtime,status,error_kind,suffix_applied,suffix_algorithm,renamed_to,sha256,blake3
+sub/a.mkv,1048576,2026-10-01T10:00:00Z,ok,,A1B2C,blake3,sub/a[A1B2C].mkv,9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08,6437b3ac38465133ffb63b75273a8db548c558465d79db03fd359c6cd5bd9d85
+b.bin,1048576,2026-10-02T11:30:00Z,ok,,DEF01,blake3,b[DEF01].bin,2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae,fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9

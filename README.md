@@ -21,6 +21,8 @@ UI 采用 Flutter + Material Design 3（动态取色、自适应布局），核�
 | Flutter UI 外壳（MD3、自适应、双列对比、硬件面板） | 已实现（假数据服务） | `flutter analyze` + widget 测试 |
 | 原生桥接（JSON C ABI + dart:ffi） | 已实现 | CI job `Bridge (Rust FFI + Dart)`：真跑 Rust 库 |
 | UI 接入真实桥接（RustBatchHashService，缺库回退 fake） | 已实现 | 桥接 job 里的服务级端到端测试 |
+| Linux 包内嵌 Rust 库 / Android APK 内含 .so | 已实现 | CI 断言 bundle 与 APK 内的 .so |
+| macOS/Windows 打包与 iOS 静态库链接 | 待接入 | 见 docs/native-packaging.md |
 
 ## 构建策略（重要）
 
@@ -79,6 +81,7 @@ scripts/              CI 构建辅助脚本（本地不执行构建）
 | [docs/privacy-and-security.md](docs/privacy-and-security.md) | 隐私、截断哈希安全语义、导入校验 |
 | [docs/cli.md](docs/cli.md) | 开发者 CLI 命令、选项与退出码 |
 | [docs/bridge.md](docs/bridge.md) | 原生桥接 ABI 契约、Dart 绑定与 CI 校验方式 |
+| [docs/native-packaging.md](docs/native-packaging.md) | 各平台原生库产物、已自动化的打包与剩余工作 |
 | [docs/ci.md](docs/ci.md) | CI 流水线结构与"禁止本地构建"的落地方式 |
 
 ## 安全语义

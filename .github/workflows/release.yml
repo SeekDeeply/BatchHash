@@ -199,12 +199,15 @@ jobs:
           codesign --force --verbose=2 --sign - "$frameworks/libbatchhash_ffi.dylib"
       - name: Package
         run: |
+          set -e
           mkdir -p dist
           cd app/build/macos/Build/Products/Release
-          zip -qry ../../../../../dist/BatchHash-macos.zip BatchHash.app 2>/dev/null || \
-            zip -qry ../../../../../dist/BatchHash-macos.zip *.app
-          cd -
+          app_bundle=$(ls -d *.app | head -1)
+          echo "packaging $app_bundle"
+          ditto -c -k --sequesterRsrc --keepParent "$app_bundle" "$GITHUB_WORKSPACE/dist/BatchHash-macos.zip"
+          cd "$GITHUB_WORKSPACE"
           ls -lh dist
+          unzip -l dist/BatchHash-macos.zip | grep 'Contents/Frameworks/libbatchhash_ffi.dylib'
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:

@@ -133,10 +133,18 @@ void main() {
         algorithms: const <String>['md5'],
         entries: progress.single.entries,
       );
+      // Export outside the scanned root so the export itself cannot show up as
+      // an added file in the directory comparison below.
+      final out = Directory.systemTemp.createTempSync('batchhash_report');
+      addTearDown(() {
+        if (out.existsSync()) {
+          out.deleteSync(recursive: true);
+        }
+      });
       final written = await service.exportReport(
         report: report,
         formats: <ReportFormat>{ReportFormat.json},
-        directory: '$root/out',
+        directory: out.path,
       );
       final imported = await service.importReport(written.single.path);
       expect(imported.entries, hasLength(1));

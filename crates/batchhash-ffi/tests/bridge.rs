@@ -304,6 +304,7 @@ fn plan_renames_request_uses_the_supplied_hashes() {
         }],
     };
     let plan = batchhash_ffi::api::plan_renames_request(&batchhash_ffi::api::PlanRenamesRequest {
+        root: None,
         entries: vec![entry],
         algorithm: "md5".to_string(),
         length: 8,

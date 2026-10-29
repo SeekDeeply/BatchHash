@@ -411,7 +411,7 @@ mod tests {
             "denied",
         ));
         assert_eq!(classify_hash_error(&denied).0, ErrorKind::PermissionDenied);
-        let other = HashError::Io(io::Error::new(io::ErrorKind::Other, "other"));
+        let other = HashError::Io(io::Error::other("other"));
         assert_eq!(classify_hash_error(&other).0, ErrorKind::IoError);
     }
 }

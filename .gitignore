@@ -24,3 +24,7 @@ app/macos/Pods/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local tooling / agent state
+.mnemon/
+.tmp/

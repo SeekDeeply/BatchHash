@@ -47,7 +47,6 @@ void main() {
     WidgetTester tester,
   ) async {
     final SemanticsHandle handle = tester.ensureSemantics();
-    addTearDown(handle.dispose);
     final ColorScheme scheme = await pumpEntries(tester);
 
     final Icon okIcon = iconFor(tester, 'reports/ok.txt');
@@ -91,5 +90,7 @@ void main() {
     expect(find.text('ok'), findsOneWidget);
     expect(find.text('failed'), findsOneWidget);
     expect(find.text('skipped'), findsOneWidget);
+
+    handle.dispose();
   });
 }

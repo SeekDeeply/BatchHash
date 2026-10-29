@@ -32,12 +32,14 @@ pub const C_ABI_VERSION: u32 = 1;
 /// The returned pointer must be released with [bh_free].
 #[no_mangle]
 pub unsafe extern "C" fn bh_api_version() -> *mut c_char {
-    reply_ok(json!({
-        "contract_version": api::CONTRACT_VERSION,
-        "c_abi_version": C_ABI_VERSION,
-        "tool": batchhash_types::TOOL_NAME,
-        "tool_version": batchhash_types::TOOL_VERSION,
-    }))
+    reply(|| {
+        Ok(json!({
+            "contract_version": api::CONTRACT_VERSION,
+            "c_abi_version": C_ABI_VERSION,
+            "tool": batchhash_types::TOOL_NAME,
+            "tool_version": batchhash_types::TOOL_VERSION,
+        }))
+    })
 }
 
 /// List the registered algorithms.

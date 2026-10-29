@@ -113,27 +113,26 @@ class BatchHashNative {
   }
 
   /// Bridge contract version, C ABI version, tool name and tool version.
-  Map<String, Object?> version() => _decode(_apiVersion());
+  Map<String, Object?> version() => _decodeMap(_apiVersion());
 
   /// Registered algorithms in canonical order.
-  List<Map<String, Object?>> algorithms() {
-    final data = _decode(_algorithms());
-    return (data as List<Object?>).cast<Map<String, Object?>>();
-  }
+  List<Map<String, Object?>> algorithms() => _decodeList(_algorithms());
 
   /// Hardware capability report.
   Map<String, Object?> probe({bool forcedSoft = false}) {
-    return _decode(_callJson(_probe, <String, Object?>{
-      'forced_soft': forcedSoft,
-    }));
+    return _decodeMap(
+      _callJson(_probe, <String, Object?>{'forced_soft': forcedSoft}),
+    );
   }
 
   /// Scan a directory (or a single file) without hashing.
   Map<String, Object?> scan(String root, {bool followLinks = false}) {
-    return _decode(_callJson(_scan, <String, Object?>{
-      'root': root,
-      'follow_links': followLinks,
-    }));
+    return _decodeMap(
+      _callJson(_scan, <String, Object?>{
+        'root': root,
+        'follow_links': followLinks,
+      }),
+    );
   }
 
   /// Run the full pipeline: scan, hash, optional suffix write, report, log.
@@ -148,7 +147,7 @@ class BatchHashNative {
     String? logDb,
     bool overwrite = false,
   }) {
-    return _decode(
+    return _decodeMap(
       _callJson(_runBatch, <String, Object?>{
         'root': root,
         'algorithms': algorithms,
@@ -169,7 +168,7 @@ class BatchHashNative {
     String? batchId,
     bool apply = false,
   }) {
-    return _decode(
+    return _decodeMap(
       _callJson(_undo, <String, Object?>{
         'db': db,
         if (batchId != null) 'batch_id': batchId,
@@ -183,7 +182,7 @@ class BatchHashNative {
     required String reportJson,
     required String format,
   }) {
-    final data = _decode(
+    final data = _decodeMap(
       _callJson(_export, <String, Object?>{
         'report_json': reportJson,
         'format': format,
@@ -207,13 +206,32 @@ class BatchHashNative {
     }
     final text = pointer.toDartString();
     _free(pointer);
-    final envelope = jsonDecode(text) as Map<String, Object?>;
-    if (envelope['ok'] != true) {
+    final decoded = jsonDecode(text);
+    if (decoded is! Map<String, Object?>) {
+      throw BridgeException('internal', 'malformed bridge envelope');
+    }
+    if (decoded['ok'] != true) {
       throw BridgeException(
-        envelope['kind'] as String? ?? 'internal',
-        envelope['error'] as String? ?? 'unknown native error',
+        decoded['kind'] as String? ?? 'internal',
+        decoded['error'] as String? ?? 'unknown native error',
       );
     }
-    return envelope['data'];
+    return decoded['data'];
+  }
+
+  Map<String, Object?> _decodeMap(Pointer<Utf8> pointer) {
+    final data = _decode(pointer);
+    if (data is Map<String, Object?>) {
+      return data;
+    }
+    throw BridgeException('internal', 'expected a JSON object from the bridge');
+  }
+
+  List<Map<String, Object?>> _decodeList(Pointer<Utf8> pointer) {
+    final data = _decode(pointer);
+    if (data is List<Object?>) {
+      return data.cast<Map<String, Object?>>();
+    }
+    throw BridgeException('internal', 'expected a JSON array from the bridge');
   }
 }

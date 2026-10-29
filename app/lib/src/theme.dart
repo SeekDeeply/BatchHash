@@ -9,7 +9,9 @@ class AppTheme {
   static const Color seedColor = Color(0xFF00658F);
 
   static ThemeData light(ColorScheme? dynamicScheme) {
-    return _themeFrom(dynamicScheme ?? ColorScheme.fromSeed(seedColor: seedColor));
+    return _themeFrom(
+      dynamicScheme ?? ColorScheme.fromSeed(seedColor: seedColor),
+    );
   }
 
   static ThemeData dark(ColorScheme? dynamicScheme) {
@@ -37,11 +39,12 @@ IconData entryStatusIcon(EntryStatus status) => switch (status) {
   EntryStatus.skipped => Icons.remove_circle_outline,
 };
 
-Color entryStatusColor(EntryStatus status, ColorScheme scheme) => switch (status) {
-  EntryStatus.ok => scheme.tertiary,
-  EntryStatus.failed => scheme.error,
-  EntryStatus.skipped => scheme.outline,
-};
+Color entryStatusColor(EntryStatus status, ColorScheme scheme) =>
+    switch (status) {
+      EntryStatus.ok => scheme.tertiary,
+      EntryStatus.failed => scheme.error,
+      EntryStatus.skipped => scheme.outline,
+    };
 
 IconData diffStatusIcon(DiffStatus status) => switch (status) {
   DiffStatus.unchanged => Icons.check,
@@ -56,18 +59,19 @@ IconData diffStatusIcon(DiffStatus status) => switch (status) {
   DiffStatus.unstable => Icons.timeline,
 };
 
-Color diffStatusColor(DiffStatus status, ColorScheme scheme) => switch (status) {
-  DiffStatus.unchanged => scheme.outline,
-  DiffStatus.changed => scheme.error,
-  DiffStatus.added => scheme.tertiary,
-  DiffStatus.removed => scheme.secondary,
-  DiffStatus.unknown => scheme.outline,
-  DiffStatus.ambiguous => scheme.tertiary,
-  DiffStatus.duplicateKey => scheme.error,
-  DiffStatus.outOfRoot => scheme.error,
-  DiffStatus.corrupt => scheme.error,
-  DiffStatus.unstable => scheme.secondary,
-};
+Color diffStatusColor(DiffStatus status, ColorScheme scheme) =>
+    switch (status) {
+      DiffStatus.unchanged => scheme.outline,
+      DiffStatus.changed => scheme.error,
+      DiffStatus.added => scheme.tertiary,
+      DiffStatus.removed => scheme.secondary,
+      DiffStatus.unknown => scheme.outline,
+      DiffStatus.ambiguous => scheme.tertiary,
+      DiffStatus.duplicateKey => scheme.error,
+      DiffStatus.outOfRoot => scheme.error,
+      DiffStatus.corrupt => scheme.error,
+      DiffStatus.unstable => scheme.secondary,
+    };
 
 Color diffRowBackground(DiffStatus status, ColorScheme scheme) =>
     status == DiffStatus.changed ? scheme.errorContainer : Colors.transparent;

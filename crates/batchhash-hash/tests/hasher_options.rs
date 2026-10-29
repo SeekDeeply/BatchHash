@@ -16,7 +16,10 @@ fn patterned_data(len: usize) -> Vec<u8> {
 
 #[test]
 fn buffer_size_is_clamped_to_supported_range() {
-    assert_eq!(HashOptions::default().effective_buffer_size(), 4 * 1024 * 1024);
+    assert_eq!(
+        HashOptions::default().effective_buffer_size(),
+        4 * 1024 * 1024
+    );
     assert_eq!(
         HashOptions::new(vec![AlgorithmId::Md5])
             .with_buffer_size(0)
@@ -47,11 +50,8 @@ fn every_algorithm_matches_individual_runs() {
     assert_eq!(combined.len(), algorithms.len());
     for algorithm in algorithms {
         let mut individual_reader = Cursor::new(data.clone());
-        let individual = compute_hashes(
-            &mut individual_reader,
-            &HashOptions::new(vec![algorithm]),
-        )
-        .expect("individual hashing must succeed");
+        let individual = compute_hashes(&mut individual_reader, &HashOptions::new(vec![algorithm]))
+            .expect("individual hashing must succeed");
         assert_eq!(
             combined.get(&algorithm),
             individual.get(&algorithm),
@@ -72,8 +72,8 @@ fn forced_soft_and_auto_produce_identical_hashes() {
     let data = patterned_data(200_000);
     let auto = HashOptions::new(AlgorithmId::ALL.to_vec());
     let forced_soft = HashOptions::new(AlgorithmId::ALL.to_vec()).with_forced_soft(true);
-    let auto_hashes = compute_hashes(&mut Cursor::new(data.clone()), &auto)
-        .expect("auto hashing must succeed");
+    let auto_hashes =
+        compute_hashes(&mut Cursor::new(data.clone()), &auto).expect("auto hashing must succeed");
     let soft_hashes = compute_hashes(&mut Cursor::new(data), &forced_soft)
         .expect("forced soft hashing must succeed");
     assert_eq!(auto_hashes, soft_hashes);
@@ -113,8 +113,7 @@ fn blake3_parallel_path_matches_streaming() {
     let streaming = compute_hashes(&mut Cursor::new(data.clone()), &streaming_options)
         .expect("streaming hashing must succeed");
 
-    let parallel_options =
-        HashOptions::new(vec![AlgorithmId::Blake3]).with_mmap_threshold(Some(0));
+    let parallel_options = HashOptions::new(vec![AlgorithmId::Blake3]).with_mmap_threshold(Some(0));
     assert_eq!(
         compute_hashes_file(&path, &parallel_options).expect("parallel file hashing must succeed"),
         streaming
@@ -123,8 +122,7 @@ fn blake3_parallel_path_matches_streaming() {
     let above_threshold =
         HashOptions::new(vec![AlgorithmId::Blake3]).with_mmap_threshold(Some(u64::MAX));
     assert_eq!(
-        compute_hashes_file(&path, &above_threshold)
-            .expect("streaming file hashing must succeed"),
+        compute_hashes_file(&path, &above_threshold).expect("streaming file hashing must succeed"),
         streaming
     );
 
@@ -151,8 +149,8 @@ fn empty_file_hashes_empty_digests() {
     let dir = tempfile::tempdir().expect("tempdir must be created");
     let path = dir.path().join("empty.bin");
     fs::write(&path, b"").expect("file must be written");
-    let options = HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Md5])
-        .with_mmap_threshold(Some(0));
+    let options =
+        HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Md5]).with_mmap_threshold(Some(0));
     let hashes = compute_hashes_file(&path, &options).expect("empty file hashing must succeed");
     assert_eq!(
         hashes.get(&AlgorithmId::Blake3).map(String::as_str),

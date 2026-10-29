@@ -40,7 +40,9 @@ class SummaryCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Expanded(child: Text(title, style: theme.textTheme.titleMedium)),
+                Expanded(
+                  child: Text(title, style: theme.textTheme.titleMedium),
+                ),
                 if (trailingWidget != null) trailingWidget,
               ],
             ),
@@ -76,8 +78,9 @@ class _SummaryMetricTile extends StatelessWidget {
       children: <Widget>[
         Text(
           metric.label,
-          style: theme.textTheme.labelSmall
-              ?.copyWith(color: scheme.onSurfaceVariant),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 2),
         Row(

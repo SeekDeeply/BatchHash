@@ -24,10 +24,7 @@ class EntryList extends StatelessWidget {
     return Column(
       children: <Widget>[
         for (final BatchEntry entry in entries)
-          EntryTile(
-            key: ValueKey<String>('entry-${entry.path}'),
-            entry: entry,
-          ),
+          EntryTile(key: ValueKey<String>('entry-${entry.path}'), entry: entry),
       ],
     );
   }
@@ -59,11 +56,7 @@ class EntryTile extends StatelessWidget {
           color: statusColor,
           semanticLabel: 'Status ${entry.status.label}',
         ),
-        title: Text(
-          entry.path,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: Text(entry.path, maxLines: 1, overflow: TextOverflow.ellipsis),
         subtitle: Text(
           _subtitle(),
           maxLines: 2,

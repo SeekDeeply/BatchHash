@@ -33,10 +33,7 @@ fn version_prints_product_and_version() {
 
 #[test]
 fn algorithms_lists_the_sixteen_registry_entries() {
-    let output = Command::new(bin())
-        .arg("algorithms")
-        .output()
-        .expect("run");
+    let output = Command::new(bin()).arg("algorithms").output().expect("run");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     // One header line plus one line per registered algorithm.
@@ -127,7 +124,8 @@ fn report_command_round_trips_json_to_csv() {
     );
     let csv = String::from_utf8_lossy(&convert.stdout);
     assert!(csv.starts_with("path,size,mtime,status"), "csv: {csv}");
-    let reimported = import_report(convert.stdout.as_slice(), ReportFormat::Csv).expect("import csv");
+    let reimported =
+        import_report(convert.stdout.as_slice(), ReportFormat::Csv).expect("import csv");
     assert_eq!(reimported.entries.len(), 1);
     assert_eq!(reimported.entries[0].path, "a.txt");
 }
@@ -188,7 +186,9 @@ fn suffix_apply_then_undo_restores_the_original_name() {
     assert_eq!(renamed.len(), 1, "renamed: {renamed:?}");
     let new_name = renamed[0].clone();
     assert!(
-        new_name.starts_with("movie") && new_name.ends_with(".mkv") && new_name.len() > "movie.mkv".len(),
+        new_name.starts_with("movie")
+            && new_name.ends_with(".mkv")
+            && new_name.len() > "movie.mkv".len(),
         "new_name: {new_name}"
     );
 
@@ -203,7 +203,10 @@ fn suffix_apply_then_undo_restores_the_original_name() {
         "stderr: {}",
         String::from_utf8_lossy(&undo.stderr)
     );
-    assert!(temp.path().join("movie.mkv").exists(), "original name restored");
+    assert!(
+        temp.path().join("movie.mkv").exists(),
+        "original name restored"
+    );
 }
 
 #[test]
@@ -222,8 +225,7 @@ fn extract_classifies_suffixed_and_plain_names() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let document: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("valid json");
+    let document: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid json");
     assert_eq!(document["total"], 2);
     assert_eq!(document["parsed"], 1);
     assert_eq!(document["not_suffixed"], 1);

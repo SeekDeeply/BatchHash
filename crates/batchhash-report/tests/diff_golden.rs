@@ -184,10 +184,7 @@ fn no_algorithm_intersection_matches_golden_fixture() {
         vec![entry(
             "a.mkv",
             10,
-            vec![(
-                AlgorithmId::Sha256,
-                digest(AlgorithmId::Sha256, 'b'),
-            )],
+            vec![(AlgorithmId::Sha256, digest(AlgorithmId::Sha256, 'b'))],
         )],
     );
     let diff = diff_reports(&left, &right, &options()).expect("diff");

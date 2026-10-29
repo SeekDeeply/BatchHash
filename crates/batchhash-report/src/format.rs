@@ -90,10 +90,7 @@ impl ReportFormat {
     pub const fn can_diff(self) -> bool {
         matches!(
             self,
-            ReportFormat::Json
-                | ReportFormat::Csv
-                | ReportFormat::Markdown
-                | ReportFormat::Txt
+            ReportFormat::Json | ReportFormat::Csv | ReportFormat::Markdown | ReportFormat::Txt
         )
     }
 }
@@ -304,9 +301,7 @@ pub fn import_report(bytes: &[u8], format: ReportFormat) -> Result<Report, Impor
         ReportFormat::Csv => import_csv(bytes),
         ReportFormat::Md5sum => import_checksum(bytes, ReportFormat::Md5sum),
         ReportFormat::Bsd => import_checksum(bytes, ReportFormat::Bsd),
-        ReportFormat::Markdown | ReportFormat::Txt => {
-            Err(ImportError::UnsupportedFormat(format))
-        }
+        ReportFormat::Markdown | ReportFormat::Txt => Err(ImportError::UnsupportedFormat(format)),
     }
 }
 
@@ -319,7 +314,9 @@ pub fn detect_report_format(filename: &str, bytes: &[u8]) -> Option<ReportFormat
     if let Some(format) = sniff_report_format(bytes) {
         return Some(format);
     }
-    let extension = Path::new(filename).extension().and_then(|ext| ext.to_str())?;
+    let extension = Path::new(filename)
+        .extension()
+        .and_then(|ext| ext.to_str())?;
     format_from_extension(&extension.to_ascii_lowercase())
 }
 
@@ -340,9 +337,7 @@ pub fn export_diff(
         ReportFormat::Csv => export_diff_csv(diff),
         ReportFormat::Markdown => Ok(export_diff_markdown(diff)),
         ReportFormat::Txt => Ok(export_diff_txt(diff)),
-        ReportFormat::Md5sum | ReportFormat::Bsd => {
-            Err(ExportError::UnsupportedDiffFormat(format))
-        }
+        ReportFormat::Md5sum | ReportFormat::Bsd => Err(ExportError::UnsupportedDiffFormat(format)),
     }
 }
 
@@ -429,18 +424,18 @@ fn export_markdown(report: &Report) -> String {
     );
     push_markdown_row(&mut out, "Root", &report.root);
     push_markdown_row(&mut out, "Root kind", report.root_kind.as_str());
-    push_markdown_row(
-        &mut out,
-        "Case sensitive",
-        bool_str(report.case_sensitive),
-    );
+    push_markdown_row(&mut out, "Case sensitive", bool_str(report.case_sensitive));
     push_markdown_row(&mut out, "Algorithms", &algorithm_list(&report.algorithms));
     push_markdown_row(
         &mut out,
         "Suffix algorithm",
         report.suffix_config.algorithm.stable_id(),
     );
-    push_markdown_row(&mut out, "Suffix length", &report.suffix_config.length.to_string());
+    push_markdown_row(
+        &mut out,
+        "Suffix length",
+        &report.suffix_config.length.to_string(),
+    );
     push_markdown_row(
         &mut out,
         "Suffix case",
@@ -495,7 +490,9 @@ fn export_markdown(report: &Report) -> String {
             entry.error_kind.map(ErrorKind::as_str).unwrap_or(""),
         ));
         out.push_str(" | ");
-        out.push_str(&markdown_cell(entry.suffix_applied.as_deref().unwrap_or("")));
+        out.push_str(&markdown_cell(
+            entry.suffix_applied.as_deref().unwrap_or(""),
+        ));
         out.push_str(" | ");
         out.push_str(
             entry
@@ -508,7 +505,13 @@ fn export_markdown(report: &Report) -> String {
         out.push_str(" |");
         for algorithm in &report.algorithms {
             out.push(' ');
-            out.push_str(entry.hashes.get(algorithm).map(String::as_str).unwrap_or(""));
+            out.push_str(
+                entry
+                    .hashes
+                    .get(algorithm)
+                    .map(String::as_str)
+                    .unwrap_or(""),
+            );
             out.push_str(" |");
         }
         out.push('\n');
@@ -529,7 +532,11 @@ fn export_txt(report: &Report) -> String {
     out.push_str("================\n");
     push_txt_line(&mut out, "tool", &report.tool);
     push_txt_line(&mut out, "tool_version", &report.tool_version);
-    push_txt_line(&mut out, "schema_version", &report.schema_version.to_string());
+    push_txt_line(
+        &mut out,
+        "schema_version",
+        &report.schema_version.to_string(),
+    );
     push_txt_line(&mut out, "generated_at", &report.generated_at);
     push_txt_line(&mut out, "root", &report.root);
     push_txt_line(&mut out, "root_kind", report.root_kind.as_str());
@@ -553,7 +560,11 @@ fn export_txt(report: &Report) -> String {
     push_txt_line(&mut out, "ok", &report.summary.ok.to_string());
     push_txt_line(&mut out, "failed", &report.summary.failed.to_string());
     push_txt_line(&mut out, "skipped", &report.summary.skipped.to_string());
-    push_txt_line(&mut out, "total_bytes", &report.summary.total_bytes.to_string());
+    push_txt_line(
+        &mut out,
+        "total_bytes",
+        &report.summary.total_bytes.to_string(),
+    );
     push_txt_line(&mut out, "truncated", bool_str(report.summary.truncated));
 
     out.push('\n');
@@ -570,7 +581,12 @@ fn export_txt(report: &Report) -> String {
         "suffix_algorithm",
         "renamed_to",
     ];
-    labels.extend(report.algorithms.iter().map(|algorithm| algorithm.stable_id()));
+    labels.extend(
+        report
+            .algorithms
+            .iter()
+            .map(|algorithm| algorithm.stable_id()),
+    );
     let width = labels
         .iter()
         .map(|label| label.chars().count())
@@ -581,7 +597,12 @@ fn export_txt(report: &Report) -> String {
     for entry in report.entries.iter().take(rendered) {
         push_txt_aligned(&mut out, "path", &entry.path, width);
         push_txt_aligned(&mut out, "size", &entry.size.to_string(), width);
-        push_txt_aligned(&mut out, "mtime", entry.mtime.as_deref().unwrap_or(""), width);
+        push_txt_aligned(
+            &mut out,
+            "mtime",
+            entry.mtime.as_deref().unwrap_or(""),
+            width,
+        );
         push_txt_aligned(&mut out, "status", entry_status_str(entry.status), width);
         push_txt_aligned(
             &mut out,
@@ -614,7 +635,11 @@ fn export_txt(report: &Report) -> String {
             push_txt_aligned(
                 &mut out,
                 algorithm.stable_id(),
-                entry.hashes.get(algorithm).map(String::as_str).unwrap_or(""),
+                entry
+                    .hashes
+                    .get(algorithm)
+                    .map(String::as_str)
+                    .unwrap_or(""),
                 width,
             );
         }
@@ -918,12 +943,12 @@ struct ChecksumLine {
 }
 
 fn parse_md5sum_line(line: &str, line_number: usize) -> Result<ChecksumLine, ImportError> {
-    let split = line.find(char::is_whitespace).ok_or_else(|| {
-        ImportError::MalformedLine {
+    let split = line
+        .find(char::is_whitespace)
+        .ok_or_else(|| ImportError::MalformedLine {
             line: line_number,
             reason: "missing digest/path separator".to_string(),
-        }
-    })?;
+        })?;
     let digest = &line[..split];
     let remainder = line[split..].trim_start();
     let remainder = remainder.strip_prefix('*').unwrap_or(remainder);
@@ -1090,18 +1115,36 @@ fn export_diff_csv(diff: &batchhash_types::DiffReport) -> Result<String, ExportE
             row.reason.clone(),
             algorithm_list(&row.algorithms_compared),
             algorithm_list(&row.changed_algorithms),
-            row.left.as_ref().map(|entry| entry.path.clone()).unwrap_or_default(),
-            row.left.as_ref().map(|entry| entry.size.to_string()).unwrap_or_default(),
-            row.left_status.map(entry_status_str).unwrap_or("").to_string(),
+            row.left
+                .as_ref()
+                .map(|entry| entry.path.clone())
+                .unwrap_or_default(),
+            row.left
+                .as_ref()
+                .map(|entry| entry.size.to_string())
+                .unwrap_or_default(),
+            row.left_status
+                .map(entry_status_str)
+                .unwrap_or("")
+                .to_string(),
             row.left
                 .as_ref()
                 .and_then(|entry| entry.error_kind)
                 .map(ErrorKind::as_str)
                 .unwrap_or("")
                 .to_string(),
-            row.right.as_ref().map(|entry| entry.path.clone()).unwrap_or_default(),
-            row.right.as_ref().map(|entry| entry.size.to_string()).unwrap_or_default(),
-            row.right_status.map(entry_status_str).unwrap_or("").to_string(),
+            row.right
+                .as_ref()
+                .map(|entry| entry.path.clone())
+                .unwrap_or_default(),
+            row.right
+                .as_ref()
+                .map(|entry| entry.size.to_string())
+                .unwrap_or_default(),
+            row.right_status
+                .map(entry_status_str)
+                .unwrap_or("")
+                .to_string(),
             row.right
                 .as_ref()
                 .and_then(|entry| entry.error_kind)
@@ -1159,16 +1202,32 @@ fn export_diff_markdown(diff: &batchhash_types::DiffReport) -> String {
         out.push_str(&algorithm_list(&row.changed_algorithms));
         out.push_str(" | ");
         out.push_str(&markdown_cell(
-            row.left.as_ref().map(|entry| entry.path.as_str()).unwrap_or(""),
+            row.left
+                .as_ref()
+                .map(|entry| entry.path.as_str())
+                .unwrap_or(""),
         ));
         out.push_str(" | ");
-        out.push_str(&row.left.as_ref().map(|entry| entry.size.to_string()).unwrap_or_default());
+        out.push_str(
+            &row.left
+                .as_ref()
+                .map(|entry| entry.size.to_string())
+                .unwrap_or_default(),
+        );
         out.push_str(" | ");
         out.push_str(&markdown_cell(
-            row.right.as_ref().map(|entry| entry.path.as_str()).unwrap_or(""),
+            row.right
+                .as_ref()
+                .map(|entry| entry.path.as_str())
+                .unwrap_or(""),
         ));
         out.push_str(" | ");
-        out.push_str(&row.right.as_ref().map(|entry| entry.size.to_string()).unwrap_or_default());
+        out.push_str(
+            &row.right
+                .as_ref()
+                .map(|entry| entry.size.to_string())
+                .unwrap_or_default(),
+        );
         out.push_str(" |\n");
     }
     if let Some(note) = truncation_note(diff.rows.len()) {
@@ -1218,13 +1277,19 @@ fn export_diff_txt(diff: &batchhash_types::DiffReport) -> String {
         push_txt_aligned(
             &mut out,
             "left_path",
-            row.left.as_ref().map(|entry| entry.path.as_str()).unwrap_or(""),
+            row.left
+                .as_ref()
+                .map(|entry| entry.path.as_str())
+                .unwrap_or(""),
             width,
         );
         push_txt_aligned(
             &mut out,
             "right_path",
-            row.right.as_ref().map(|entry| entry.path.as_str()).unwrap_or(""),
+            row.right
+                .as_ref()
+                .map(|entry| entry.path.as_str())
+                .unwrap_or(""),
             width,
         );
         out.push('\n');
@@ -1282,7 +1347,9 @@ fn format_from_extension(extension: &str) -> Option<ReportFormat> {
 }
 
 fn strip_bom(bytes: &[u8]) -> &[u8] {
-    bytes.strip_prefix(b"\xEF\xBB\xBF".as_slice()).unwrap_or(bytes)
+    bytes
+        .strip_prefix(b"\xEF\xBB\xBF".as_slice())
+        .unwrap_or(bytes)
 }
 
 fn push_markdown_row(out: &mut String, key: &str, value: &str) {
@@ -1433,7 +1500,10 @@ mod tests {
         assert_eq!(algorithm_from_bsd_tag("MD5"), Some(AlgorithmId::Md5));
         assert_eq!(algorithm_from_bsd_tag("SHA256"), Some(AlgorithmId::Sha256));
         assert_eq!(algorithm_from_bsd_tag("BLAKE3"), Some(AlgorithmId::Blake3));
-        assert_eq!(algorithm_from_bsd_tag("sha3-512"), Some(AlgorithmId::Sha3_512));
+        assert_eq!(
+            algorithm_from_bsd_tag("sha3-512"),
+            Some(AlgorithmId::Sha3_512)
+        );
         assert_eq!(algorithm_from_bsd_tag("NOT-A-HASH"), None);
     }
 

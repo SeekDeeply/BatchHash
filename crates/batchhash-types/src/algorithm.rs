@@ -450,7 +450,12 @@ mod tests {
     #[test]
     fn digest_lengths_are_consistent() {
         for spec in &REGISTRY {
-            assert_eq!(spec.hex_len, spec.digest_len * 2, "{} length", spec.stable_id);
+            assert_eq!(
+                spec.hex_len,
+                spec.digest_len * 2,
+                "{} length",
+                spec.stable_id
+            );
         }
         assert_eq!(AlgorithmId::Md5.hex_len(), 32);
         assert_eq!(AlgorithmId::Sha1.hex_len(), 40);
@@ -493,17 +498,17 @@ mod tests {
                 spec_by_suffix_prefix(spec.suffix_prefix).map(|s| s.id),
                 Some(spec.id)
             );
-            assert_eq!(
-                AlgorithmId::from_stable_id(spec.stable_id),
-                Some(spec.id)
-            );
+            assert_eq!(AlgorithmId::from_stable_id(spec.stable_id), Some(spec.id));
         }
     }
 
     #[test]
     fn length_inference_reports_ambiguity() {
         assert_eq!(AlgorithmId::infer_by_hex_len(40), vec![AlgorithmId::Sha1]);
-        assert_eq!(AlgorithmId::infer_by_hex_len(32), vec![AlgorithmId::Md5, AlgorithmId::Xxh3_128]);
+        assert_eq!(
+            AlgorithmId::infer_by_hex_len(32),
+            vec![AlgorithmId::Md5, AlgorithmId::Xxh3_128]
+        );
         assert_eq!(
             AlgorithmId::infer_by_hex_len(8),
             vec![AlgorithmId::Crc32, AlgorithmId::Crc32c]

@@ -20,11 +20,7 @@ import 'widgets/adaptive_scaffold.dart';
 /// independent of native code. Dynamic color always falls back to a seeded
 /// Material 3 scheme.
 class BatchHashApp extends StatefulWidget {
-  const BatchHashApp({
-    super.key,
-    this.service,
-    this.enableDynamicColor = true,
-  });
+  const BatchHashApp({super.key, this.service, this.enableDynamicColor = true});
 
   final BatchHashService? service;
   final bool enableDynamicColor;

@@ -89,8 +89,8 @@ fn sink_observes_every_read_chunk_once() {
         chunk_count += 1;
         chunk_bytes += chunk.len();
     };
-    let hashes = compute_hashes_with_sink(&mut reader, &options, &mut sink)
-        .expect("hashing must succeed");
+    let hashes =
+        compute_hashes_with_sink(&mut reader, &options, &mut sink).expect("hashing must succeed");
 
     assert_eq!(chunk_bytes, data.len());
     assert_eq!(chunk_count, reader.read_calls);

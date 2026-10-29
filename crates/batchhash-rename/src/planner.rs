@@ -433,9 +433,7 @@ fn build_row(entry_index: usize, entry: &FileEntry, options: &RenamePlanOptions)
                 original_name,
                 proposed_name: String::new(),
                 status: RenameRowStatus::InvalidName,
-                reason: Some(
-                    "filename has a bracket group that is not a valid suffix".to_string(),
-                ),
+                reason: Some("filename has a bracket group that is not a valid suffix".to_string()),
             };
         }
         SuffixParseResult::NotSuffixed => {}
@@ -554,8 +552,8 @@ fn target_key(row: &RenamePlanRow, case_insensitive: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use batchhash_types::{AlgorithmId, EntryStatus, ErrorKind, RootKind};
     use crate::suffix::SuffixFormat;
+    use batchhash_types::{AlgorithmId, EntryStatus, ErrorKind, RootKind};
     use std::fs;
     use std::path::Path;
     use tempfile::tempdir;
@@ -685,10 +683,7 @@ mod tests {
             &RenamePlanOptions::default(),
             &StdRenameFs,
         );
-        assert_eq!(
-            plan.rows[0].status,
-            RenameRowStatus::SkippedAlreadySuffixed
-        );
+        assert_eq!(plan.rows[0].status, RenameRowStatus::SkippedAlreadySuffixed);
         assert_eq!(plan.summary.skipped, 1);
     }
 
@@ -798,8 +793,7 @@ mod tests {
         let conflicted = temp.path().join("conflicted.txt");
         fs::write(&ready, b"ready").expect("ready file");
         fs::write(&conflicted, b"conflicted").expect("conflicted file");
-        fs::write(temp.path().join("conflicted[ABCDE].txt"), b"existing")
-            .expect("existing target");
+        fs::write(temp.path().join("conflicted[ABCDE].txt"), b"existing").expect("existing target");
 
         let plan = plan_renames(
             &[make_entry(&ready, true), make_entry(&conflicted, true)],

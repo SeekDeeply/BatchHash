@@ -10,8 +10,7 @@ class BatchHashAppState {
   final BatchHashService service;
   final ValueNotifier<List<BatchEntry>> entries =
       ValueNotifier<List<BatchEntry>>(const <BatchEntry>[]);
-  final ValueNotifier<ReportModel?> report =
-      ValueNotifier<ReportModel?>(null);
+  final ValueNotifier<ReportModel?> report = ValueNotifier<ReportModel?>(null);
 
   void dispose() {
     entries.dispose();

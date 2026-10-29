@@ -57,7 +57,11 @@ fn nist_and_reference_digests_match() {
     for (algorithm, input, expected) in CASES {
         let actual = digest(*algorithm, input.as_bytes());
         assert_eq!(actual, *expected, "{algorithm} digest for {input:?}");
-        assert_eq!(actual.len(), algorithm.hex_len(), "{algorithm} digest length");
+        assert_eq!(
+            actual.len(),
+            algorithm.hex_len(),
+            "{algorithm} digest length"
+        );
         assert!(
             actual
                 .bytes()

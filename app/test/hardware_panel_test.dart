@@ -73,10 +73,12 @@ void main() {
     final ColorScheme scheme = schemeOf(tester);
 
     expectSectionsDistinct(tester);
-    final Icon cpuIcon =
-        tester.widget<Icon>(find.byKey(const ValueKey<String>('hardware-cpu-icon')));
-    final Icon gpuIcon =
-        tester.widget<Icon>(find.byKey(const ValueKey<String>('hardware-gpu-icon')));
+    final Icon cpuIcon = tester.widget<Icon>(
+      find.byKey(const ValueKey<String>('hardware-cpu-icon')),
+    );
+    final Icon gpuIcon = tester.widget<Icon>(
+      find.byKey(const ValueKey<String>('hardware-gpu-icon')),
+    );
     expect(cpuIcon.icon, Icons.bolt);
     expect(gpuIcon.icon, Icons.bolt);
     expect(cpuIcon.color, scheme.tertiary);
@@ -104,17 +106,18 @@ void main() {
     final ColorScheme scheme = schemeOf(tester);
 
     expectSectionsDistinct(tester);
-    final Icon cpuIcon =
-        tester.widget<Icon>(find.byKey(const ValueKey<String>('hardware-cpu-icon')));
-    final Icon gpuIcon =
-        tester.widget<Icon>(find.byKey(const ValueKey<String>('hardware-gpu-icon')));
+    final Icon cpuIcon = tester.widget<Icon>(
+      find.byKey(const ValueKey<String>('hardware-cpu-icon')),
+    );
+    final Icon gpuIcon = tester.widget<Icon>(
+      find.byKey(const ValueKey<String>('hardware-gpu-icon')),
+    );
     expect(cpuIcon.icon, Icons.info_outline);
     expect(gpuIcon.icon, Icons.info_outline);
     final Container cpuContainer = tester.widget<Container>(
       find.byKey(const ValueKey<String>('hardware-cpu-state-container')),
     );
-    final BoxDecoration decoration =
-        cpuContainer.decoration! as BoxDecoration;
+    final BoxDecoration decoration = cpuContainer.decoration! as BoxDecoration;
     expect(decoration.color, scheme.surfaceContainerHighest);
     expect(stateLabelOf(tester, 'cpu'), 'Software fallback in use');
     expect(stateLabelOf(tester, 'gpu'), 'Software fallback in use');
@@ -127,10 +130,12 @@ void main() {
     final ColorScheme scheme = schemeOf(tester);
 
     expectSectionsDistinct(tester);
-    final Icon cpuIcon =
-        tester.widget<Icon>(find.byKey(const ValueKey<String>('hardware-cpu-icon')));
-    final Icon gpuIcon =
-        tester.widget<Icon>(find.byKey(const ValueKey<String>('hardware-gpu-icon')));
+    final Icon cpuIcon = tester.widget<Icon>(
+      find.byKey(const ValueKey<String>('hardware-cpu-icon')),
+    );
+    final Icon gpuIcon = tester.widget<Icon>(
+      find.byKey(const ValueKey<String>('hardware-gpu-icon')),
+    );
     expect(cpuIcon.icon, Icons.help_outline);
     expect(gpuIcon.icon, Icons.help_outline);
     expect(cpuIcon.color, scheme.outline);

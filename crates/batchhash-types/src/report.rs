@@ -290,7 +290,9 @@ impl Report {
                 }
             }
             if entry.status.is_ok() && entry.hashes.is_empty() {
-                return Err(ReportValidationError::OkEntryWithoutHashes(entry.path.clone()));
+                return Err(ReportValidationError::OkEntryWithoutHashes(
+                    entry.path.clone(),
+                ));
             }
             if let Some(suffix_algorithm) = entry.suffix_algorithm {
                 if !self.algorithms.contains(&suffix_algorithm) {
@@ -321,7 +323,10 @@ pub enum ReportValidationError {
     #[error("invalid entry path {path}: {source}")]
     Path { path: String, source: PathError },
     #[error("hash for {path} uses undeclared algorithm {algorithm}")]
-    HashNotDeclared { path: String, algorithm: AlgorithmId },
+    HashNotDeclared {
+        path: String,
+        algorithm: AlgorithmId,
+    },
     #[error("hash for {path} ({algorithm}) has length {actual}, expected {expected}")]
     HashLengthMismatch {
         path: String,

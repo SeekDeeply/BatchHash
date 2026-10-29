@@ -28,9 +28,7 @@ const List<BatchEntry> _entries = <BatchEntry>[
 Future<ColorScheme> pumpEntries(WidgetTester tester) async {
   setViewSize(tester, const Size(800, 900));
   await tester.pumpWidget(
-    wrapInApp(
-      const SingleChildScrollView(child: EntryList(entries: _entries)),
-    ),
+    wrapInApp(const SingleChildScrollView(child: EntryList(entries: _entries))),
   );
   await tester.pumpAndSettle();
   return Theme.of(tester.element(find.byType(EntryList))).colorScheme;

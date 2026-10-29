@@ -431,7 +431,10 @@ mod tests {
 
     #[test]
     fn buffer_size_defaults_and_clamps() {
-        assert_eq!(HashOptions::default().effective_buffer_size(), DEFAULT_BUFFER_SIZE);
+        assert_eq!(
+            HashOptions::default().effective_buffer_size(),
+            DEFAULT_BUFFER_SIZE
+        );
         let small = HashOptions::default().with_buffer_size(1);
         assert_eq!(small.effective_buffer_size(), MIN_BUFFER_SIZE);
         let huge = HashOptions::default().with_buffer_size(usize::MAX);
@@ -488,8 +491,7 @@ mod tests {
 
     #[test]
     fn cancellation_is_checked_at_chunk_boundaries() {
-        let options = HashOptions::new(vec![AlgorithmId::Md5])
-            .with_buffer_size(MIN_BUFFER_SIZE);
+        let options = HashOptions::new(vec![AlgorithmId::Md5]).with_buffer_size(MIN_BUFFER_SIZE);
         let data = vec![7u8; MIN_BUFFER_SIZE * 3];
         let mut reader = Cursor::new(data);
         let cancel = AtomicBool::new(false);
@@ -501,8 +503,7 @@ mod tests {
 
     #[test]
     fn sink_observes_each_chunk_exactly_once() {
-        let options = HashOptions::new(vec![AlgorithmId::Md5])
-            .with_buffer_size(MIN_BUFFER_SIZE);
+        let options = HashOptions::new(vec![AlgorithmId::Md5]).with_buffer_size(MIN_BUFFER_SIZE);
         let data = vec![3u8; MIN_BUFFER_SIZE + 10];
         let mut reader = Cursor::new(data);
         let mut chunk_lengths = Vec::new();

@@ -76,11 +76,11 @@ class FakeBatchHashService implements BatchHashService {
 
   /// Fixed report used by the compare and report pages.
   ReportModel get sampleReport => ReportModel(
-        root: rootPath,
-        generatedAt: generatedAt,
-        algorithms: const <String>['blake3', 'sha256'],
-        entries: sampleHashedEntries,
-      );
+    root: rootPath,
+    generatedAt: generatedAt,
+    algorithms: const <String>['blake3', 'sha256'],
+    entries: sampleHashedEntries,
+  );
 
   /// Fixed comparison rows covering every status the UI renders.
   List<DiffRowModel> get sampleDiffRows => _buildDiffRows();
@@ -209,8 +209,10 @@ class FakeBatchHashService implements BatchHashService {
   }) async {
     final String targetDirectory = directory ?? rootPath;
     final List<ReportFormat> ordered = formats.toList()
-      ..sort((ReportFormat left, ReportFormat right) =>
-          left.index.compareTo(right.index));
+      ..sort(
+        (ReportFormat left, ReportFormat right) =>
+            left.index.compareTo(right.index),
+      );
     return <ExportedReport>[
       for (final ReportFormat format in ordered)
         ExportedReport(
@@ -249,8 +251,9 @@ class FakeBatchHashService implements BatchHashService {
 
   @override
   Future<bool> undoBatch(String batchId) async {
-    final int index =
-        _history.indexWhere((HistoryBatchModel batch) => batch.id == batchId);
+    final int index = _history.indexWhere(
+      (HistoryBatchModel batch) => batch.id == batchId,
+    );
     if (index < 0 || _history[index].undone) {
       return false;
     }
@@ -258,10 +261,7 @@ class FakeBatchHashService implements BatchHashService {
     return true;
   }
 
-  List<BatchEntry> _buildEntries({
-    required String root,
-    required bool hashed,
-  }) {
+  List<BatchEntry> _buildEntries({required String root, required bool hashed}) {
     final List<BatchEntry> entries = <BatchEntry>[];
     for (var index = 0; index < _relativePaths.length; index += 1) {
       final String relativePath = _relativePaths[index];
@@ -308,21 +308,33 @@ class FakeBatchHashService implements BatchHashService {
   List<DiffRowModel> _buildDiffRows() {
     final BatchEntry alphaLeft = _diffEntry('docs/alpha.md', hashSeed: 'alpha');
     final BatchEntry betaLeft = _diffEntry('docs/beta.md', hashSeed: 'beta');
-    final BatchEntry gammaLeft =
-        _diffEntry('docs/gamma.md', hashSeed: 'gamma-v1', size: 2048);
-    final BatchEntry deltaLeft =
-        _diffEntry('docs/delta.md', hashSeed: 'delta-v1', size: 3072);
+    final BatchEntry gammaLeft = _diffEntry(
+      'docs/gamma.md',
+      hashSeed: 'gamma-v1',
+      size: 2048,
+    );
+    final BatchEntry deltaLeft = _diffEntry(
+      'docs/delta.md',
+      hashSeed: 'delta-v1',
+      size: 3072,
+    );
     final BatchEntry mainLeft = _diffEntry('src/main.rs', hashSeed: 'main');
     final BatchEntry mainRight = _diffEntry('tests/main.rs', hashSeed: 'main');
     final BatchEntry libLeft = _diffEntry('src/lib.rs', hashSeed: 'lib');
-    final BatchEntry corruptLeft =
-        _diffEntry('data/corrupt.bin', hashSeed: 'corrupt', size: 1024);
-    final BatchEntry unstableLeft =
-        _diffEntry('logs/unstable.log', hashSeed: 'unstable-v1');
-    final BatchEntry duplicateLeft =
-        _diffEntry('tmp/dup.rs', hashSeed: 'dup');
-    final BatchEntry outOfRootLeft =
-        _diffEntry('outside/out-of-root.txt', hashSeed: 'outside');
+    final BatchEntry corruptLeft = _diffEntry(
+      'data/corrupt.bin',
+      hashSeed: 'corrupt',
+      size: 1024,
+    );
+    final BatchEntry unstableLeft = _diffEntry(
+      'logs/unstable.log',
+      hashSeed: 'unstable-v1',
+    );
+    final BatchEntry duplicateLeft = _diffEntry('tmp/dup.rs', hashSeed: 'dup');
+    final BatchEntry outOfRootLeft = _diffEntry(
+      'outside/out-of-root.txt',
+      hashSeed: 'outside',
+    );
     return <DiffRowModel>[
       DiffRowModel(
         path: 'docs/alpha.md',
@@ -403,11 +415,7 @@ class FakeBatchHashService implements BatchHashService {
     ];
   }
 
-  BatchEntry _diffEntry(
-    String path, {
-    String hashSeed = '',
-    int size = 1024,
-  }) {
+  BatchEntry _diffEntry(String path, {String hashSeed = '', int size = 1024}) {
     return BatchEntry(
       path: '$rootPath/$path',
       size: size,
@@ -431,19 +439,19 @@ class FakeBatchHashService implements BatchHashService {
   }
 
   int _hexLength(String algorithm) => switch (algorithm) {
-        'md5' => 32,
-        'sha1' => 40,
-        'sha512' => 128,
-        'sha3-256' => 64,
-        'blake2b' => 128,
-        'blake2s' => 64,
-        'sha256' => 64,
-        'blake3' => 64,
-        'xxh3' => 16,
-        'crc32' => 8,
-        'crc32c' => 8,
-        _ => 64,
-      };
+    'md5' => 32,
+    'sha1' => 40,
+    'sha512' => 128,
+    'sha3-256' => 64,
+    'blake2b' => 128,
+    'blake2s' => 64,
+    'sha256' => 64,
+    'blake3' => 64,
+    'xxh3' => 16,
+    'crc32' => 8,
+    'crc32c' => 8,
+    _ => 64,
+  };
 
   String _digest(String seed, int hexChars) {
     final StringBuffer buffer = StringBuffer();
@@ -466,6 +474,9 @@ class _DetectedRenderingHardwareProvider implements RenderingHardwareProvider {
 
   @override
   Future<RenderingHardwareModel> probe() async {
-    return const RenderingHardwareModel(accelerated: true, gpuBackend: 'vulkan');
+    return const RenderingHardwareModel(
+      accelerated: true,
+      gpuBackend: 'vulkan',
+    );
   }
 }

@@ -338,7 +338,9 @@ mod tests {
     #[test]
     fn basename_mode_keeps_only_the_last_component() {
         assert_eq!(
-            insensitive().normalize_basename("sub/../other/a.mkv").unwrap(),
+            insensitive()
+                .normalize_basename("sub/../other/a.mkv")
+                .unwrap(),
             "a.mkv"
         );
         assert_eq!(
@@ -346,7 +348,9 @@ mod tests {
             "a.mkv"
         );
         assert_eq!(
-            insensitive().normalize_basename("/abs/path/cafe\u{301}.mkv").unwrap(),
+            insensitive()
+                .normalize_basename("/abs/path/cafe\u{301}.mkv")
+                .unwrap(),
             "caf\u{e9}.mkv"
         );
         assert_eq!(
@@ -381,7 +385,9 @@ mod tests {
             Err(NormalizeError::OutOfRoot)
         );
         assert_eq!(
-            normalizer.relative_to_root("/data/media", "/data/media").unwrap(),
+            normalizer
+                .relative_to_root("/data/media", "/data/media")
+                .unwrap(),
             ""
         );
         // A filesystem root prefix matches everything.

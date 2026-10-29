@@ -56,7 +56,10 @@ fn fd_offset_and_length_are_respected() {
     file.seek(SeekFrom::Start(0)).expect("rewind must succeed");
     let mut reread = Vec::new();
     file.read_to_end(&mut reread).expect("reread must succeed");
-    assert_eq!(reread, data, "caller descriptor must stay open and readable");
+    assert_eq!(
+        reread, data,
+        "caller descriptor must stay open and readable"
+    );
 }
 
 #[test]
@@ -70,7 +73,8 @@ fn original_descriptor_is_never_closed() {
     let options = options();
 
     for offset in 0..3u64 {
-        compute_hashes_from_fd(fd, offset, Some(16), &options).expect("repeated reads must succeed");
+        compute_hashes_from_fd(fd, offset, Some(16), &options)
+            .expect("repeated reads must succeed");
     }
 
     file.seek(SeekFrom::Start(0)).expect("rewind must succeed");

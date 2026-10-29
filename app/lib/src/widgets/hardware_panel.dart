@@ -36,9 +36,7 @@ class HardwarePanel extends StatelessWidget {
     }
     final bool anySoftware = backends.any(
       (String backend) =>
-          backend == 'software' ||
-          backend == 'fallback' ||
-          backend == 'scalar',
+          backend == 'software' || backend == 'fallback' || backend == 'scalar',
     );
     if (anySoftware) {
       return AccelerationState.softwareFallback;
@@ -81,12 +79,11 @@ class HardwarePanel extends StatelessWidget {
   static Color stateContainerColor(
     AccelerationState state,
     ColorScheme scheme,
-  ) =>
-      switch (state) {
-        AccelerationState.detected => scheme.tertiaryContainer,
-        AccelerationState.softwareFallback => scheme.surfaceContainerHighest,
-        AccelerationState.unknown => scheme.surface,
-      };
+  ) => switch (state) {
+    AccelerationState.detected => scheme.tertiaryContainer,
+    AccelerationState.softwareFallback => scheme.surfaceContainerHighest,
+    AccelerationState.unknown => scheme.surface,
+  };
 
   static Color stateBorderColor(AccelerationState state, ColorScheme scheme) =>
       switch (state) {
@@ -110,8 +107,14 @@ class HardwarePanel extends StatelessWidget {
                   ? 'none reported'
                   : hash.detectedFeatures.join(', '),
             ),
-            _InfoRow(label: 'BLAKE3 backend', value: hash.blake3BackendReported),
-            _InfoRow(label: 'SHA-256 backend', value: hash.sha256BackendReported),
+            _InfoRow(
+              label: 'BLAKE3 backend',
+              value: hash.blake3BackendReported,
+            ),
+            _InfoRow(
+              label: 'SHA-256 backend',
+              value: hash.sha256BackendReported,
+            ),
             _InfoRow(label: 'Backend policy', value: hash.backendPolicy),
             _InfoRow(
               label: 'Multithreading',
@@ -120,9 +123,7 @@ class HardwarePanel extends StatelessWidget {
           ];
     final List<Widget> gpuRows = rendering == null
         ? const <Widget>[]
-        : <Widget>[
-            _InfoRow(label: 'GPU backend', value: rendering.gpuBackend),
-          ];
+        : <Widget>[_InfoRow(label: 'GPU backend', value: rendering.gpuBackend)];
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -142,8 +143,9 @@ class HardwarePanel extends StatelessWidget {
               state: hashState(hash),
               iconKey: const ValueKey<String>('hardware-cpu-icon'),
               labelKey: const ValueKey<String>('hardware-cpu-state-label'),
-              containerKey:
-                  const ValueKey<String>('hardware-cpu-state-container'),
+              containerKey: const ValueKey<String>(
+                'hardware-cpu-state-container',
+              ),
               rows: cpuRows,
             ),
             const SizedBox(height: 12),
@@ -153,8 +155,9 @@ class HardwarePanel extends StatelessWidget {
               state: renderingState(rendering),
               iconKey: const ValueKey<String>('hardware-gpu-icon'),
               labelKey: const ValueKey<String>('hardware-gpu-state-label'),
-              containerKey:
-                  const ValueKey<String>('hardware-gpu-state-container'),
+              containerKey: const ValueKey<String>(
+                'hardware-gpu-state-container',
+              ),
               rows: gpuRows,
             ),
           ],
@@ -189,8 +192,8 @@ class _HardwarePanelLoaderState extends State<HardwarePanelLoader> {
   Future<void> _load() async {
     try {
       final HardwareInfoModel hashInfo = await widget.service.probeHardware();
-      final RenderingHardwareModel renderingInfo =
-          await widget.service.probeRenderingHardware();
+      final RenderingHardwareModel renderingInfo = await widget.service
+          .probeRenderingHardware();
       if (!mounted) {
         return;
       }
@@ -287,9 +290,7 @@ class _HardwareSection extends StatelessWidget {
                 semanticLabel: HardwarePanel.stateLabel(state),
               ),
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(title, style: theme.textTheme.titleSmall),
-              ),
+              Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
             ],
           ),
           const SizedBox(height: 4),
@@ -300,10 +301,7 @@ class _HardwareSection extends StatelessWidget {
               color: HardwarePanel.stateAccentColor(state, scheme),
             ),
           ),
-          if (rows.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 8),
-            ...rows,
-          ],
+          if (rows.isNotEmpty) ...<Widget>[const SizedBox(height: 8), ...rows],
         ],
       ),
     );
@@ -328,13 +326,12 @@ class _InfoRow extends StatelessWidget {
             width: 132,
             child: Text(
               label,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ),
-          Expanded(
-            child: Text(value, style: theme.textTheme.bodySmall),
-          ),
+          Expanded(child: Text(value, style: theme.textTheme.bodySmall)),
         ],
       ),
     );

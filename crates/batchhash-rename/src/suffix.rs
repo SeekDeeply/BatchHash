@@ -98,9 +98,7 @@ pub enum SuffixError {
     #[error("filename has an unparseable suffix-like bracket group")]
     UnparseableName,
     /// The formatted name cannot fit into the platform filename limit.
-    #[error(
-        "formatted name needs {utf16_len} UTF-16 code units, limit is {max_utf16_len}"
-    )]
+    #[error("formatted name needs {utf16_len} UTF-16 code units, limit is {max_utf16_len}")]
     NameTooLong {
         /// Length of the candidate name in UTF-16 code units.
         utf16_len: usize,
@@ -401,8 +399,9 @@ mod tests {
             .expect("formatting a name without extension must succeed");
         assert_eq!(no_extension, "README[ABCDE]");
 
-        let multi_dot = format_filename("archive.tar.gz", &digest(), &format, DEFAULT_MAX_UTF16_LEN)
-            .expect("formatting a multi-dot name must succeed");
+        let multi_dot =
+            format_filename("archive.tar.gz", &digest(), &format, DEFAULT_MAX_UTF16_LEN)
+                .expect("formatting a multi-dot name must succeed");
         assert_eq!(multi_dot, "archive.tar[ABCDE].gz");
     }
 
@@ -431,15 +430,30 @@ mod tests {
     fn format_rejects_already_suffixed_or_unparseable_names() {
         let format = upper_format(5);
         assert_eq!(
-            format_filename("movie[ABCDE].mkv", &digest(), &format, DEFAULT_MAX_UTF16_LEN),
+            format_filename(
+                "movie[ABCDE].mkv",
+                &digest(),
+                &format,
+                DEFAULT_MAX_UTF16_LEN
+            ),
             Err(SuffixError::AlreadySuffixed)
         );
         assert_eq!(
-            format_filename("movie[blake3:ABCDE].mkv", &digest(), &format, DEFAULT_MAX_UTF16_LEN),
+            format_filename(
+                "movie[blake3:ABCDE].mkv",
+                &digest(),
+                &format,
+                DEFAULT_MAX_UTF16_LEN
+            ),
             Err(SuffixError::AlreadySuffixed)
         );
         assert_eq!(
-            format_filename("movie[1080p].mkv", &digest(), &format, DEFAULT_MAX_UTF16_LEN),
+            format_filename(
+                "movie[1080p].mkv",
+                &digest(),
+                &format,
+                DEFAULT_MAX_UTF16_LEN
+            ),
             Err(SuffixError::UnparseableName)
         );
         assert_eq!(

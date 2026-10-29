@@ -11,10 +11,7 @@ void main() {
   ) async {
     setViewSize(tester, const Size(500, 900));
     await tester.pumpWidget(
-      BatchHashApp(
-        service: FakeBatchHashService(),
-        enableDynamicColor: false,
-      ),
+      BatchHashApp(service: FakeBatchHashService(), enableDynamicColor: false),
     );
     await tester.pumpAndSettle();
 
@@ -22,16 +19,21 @@ void main() {
       find.byKey(const ValueKey<String>('adaptive-navigation-bar')),
       findsOneWidget,
     );
-    final NavigationBar navigationBar =
-        tester.widget<NavigationBar>(find.byType(NavigationBar));
+    final NavigationBar navigationBar = tester.widget<NavigationBar>(
+      find.byType(NavigationBar),
+    );
     final List<String> labels = <String>[
       for (final Widget destination in navigationBar.destinations)
         (destination as NavigationDestination).label,
     ];
-    expect(
-      labels,
-      <String>['Hash', 'Rename', 'Report', 'Compare', 'History', 'Settings'],
-    );
+    expect(labels, <String>[
+      'Hash',
+      'Rename',
+      'Report',
+      'Compare',
+      'History',
+      'Settings',
+    ]);
     expect(find.text('Batch hashing'), findsOneWidget);
   });
 }

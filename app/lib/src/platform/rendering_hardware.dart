@@ -14,6 +14,9 @@ class UnknownRenderingHardwareProvider implements RenderingHardwareProvider {
 
   @override
   Future<RenderingHardwareModel> probe() async {
-    return const RenderingHardwareModel(accelerated: false, gpuBackend: 'unknown');
+    return const RenderingHardwareModel(
+      accelerated: false,
+      gpuBackend: 'unknown',
+    );
   }
 }

@@ -306,11 +306,9 @@ impl<'a> ProgressReporter<'a> {
                 Err(poisoned) => poisoned.into_inner(),
             };
             let throttled = !force
-                && state
-                    .last_emit
-                    .is_some_and(|last_emit| {
-                        now.saturating_duration_since(last_emit) < PROGRESS_INTERVAL
-                    });
+                && state.last_emit.is_some_and(|last_emit| {
+                    now.saturating_duration_since(last_emit) < PROGRESS_INTERVAL
+                });
             if throttled {
                 return;
             }
@@ -406,10 +404,7 @@ mod tests {
     fn io_error_classification_is_machine_readable() {
         let not_found = HashError::Io(io::Error::new(io::ErrorKind::NotFound, "missing"));
         assert_eq!(classify_hash_error(&not_found).0, ErrorKind::NotFound);
-        let denied = HashError::Io(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "denied",
-        ));
+        let denied = HashError::Io(io::Error::new(io::ErrorKind::PermissionDenied, "denied"));
         assert_eq!(classify_hash_error(&denied).0, ErrorKind::PermissionDenied);
         let other = HashError::Io(io::Error::other("other"));
         assert_eq!(classify_hash_error(&other).0, ErrorKind::IoError);

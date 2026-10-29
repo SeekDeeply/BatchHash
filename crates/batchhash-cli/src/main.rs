@@ -87,9 +87,7 @@ fn run(argv: &[String]) -> CliResult<()> {
         "scan-diff" => cmd_scan_diff(rest),
         "suffix" => cmd_suffix(rest),
         "extract" => cmd_extract(rest),
-        other => Err(format!(
-            "unknown command '{other}' (run 'batchhash help')"
-        )),
+        other => Err(format!("unknown command '{other}' (run 'batchhash help')")),
     }
 }
 
@@ -186,11 +184,7 @@ fn rfc3339_from(time: Option<SystemTime>) -> Option<String> {
 }
 
 fn default_algorithms() -> Vec<AlgorithmId> {
-    vec![
-        AlgorithmId::Sha256,
-        AlgorithmId::Md5,
-        AlgorithmId::Blake3,
-    ]
+    vec![AlgorithmId::Sha256, AlgorithmId::Md5, AlgorithmId::Blake3]
 }
 
 fn parse_algorithms(list: &str) -> CliResult<Vec<AlgorithmId>> {
@@ -220,9 +214,7 @@ fn parse_format(name: &str) -> CliResult<ReportFormat> {
                 || format.extension() == name
                 || (*format == ReportFormat::Markdown && name == "md")
         })
-        .ok_or_else(|| {
-            format!("unknown format '{name}' (json, csv, markdown, txt, md5sum, bsd)")
-        })
+        .ok_or_else(|| format!("unknown format '{name}' (json, csv, markdown, txt, md5sum, bsd)"))
 }
 
 fn emit(text: &str, out: Option<&Path>) -> CliResult<()> {
@@ -580,7 +572,10 @@ fn cmd_report(args: &[String]) -> CliResult<()> {
     emit(&text, parsed.value("out").map(Path::new))?;
     eprintln!(
         "{} entrie(s): {} ok, {} failed, {} skipped, root {}",
-        report.summary.total, report.summary.ok, report.summary.failed, report.summary.skipped,
+        report.summary.total,
+        report.summary.ok,
+        report.summary.failed,
+        report.summary.skipped,
         report.root
     );
     Ok(())
@@ -968,8 +963,8 @@ fn cmd_suffix_undo(args: &[String]) -> CliResult<()> {
     }
     emit(&text, parsed.value("out").map(Path::new))?;
     if parsed.switch("apply") && !parsed.switch("dry-run") {
-        let results = apply_undo(&plan, &mut StdFsBackend, &mut store)
-            .map_err(|error| error.to_string())?;
+        let results =
+            apply_undo(&plan, &mut StdFsBackend, &mut store).map_err(|error| error.to_string())?;
         eprintln!(
             "undo: {} operation(s) processed, {ready} were ready",
             results.len()

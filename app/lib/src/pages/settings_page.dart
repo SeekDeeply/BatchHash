@@ -24,8 +24,9 @@ class SettingsPage extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             'Theme, acceleration reporting and app information.',
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 16),
           Card(

@@ -19,8 +19,7 @@ use crate::pathnorm::{NormalizeError, PathNormalizer};
 
 /// Reason attached to rows compared only by presence and size because the two
 /// sides do not declare a single common algorithm.
-pub const NO_COMMON_ALGORITHMS_REASON: &str =
-    "no common algorithms; presence/size comparison only";
+pub const NO_COMMON_ALGORITHMS_REASON: &str = "no common algorithms; presence/size comparison only";
 
 /// Reason attached to rows where a file changed while it was being scanned.
 pub const UNSTABLE_REASON: &str = "file changed during scan (unstable)";
@@ -189,10 +188,8 @@ pub fn diff_report_vs_entries(
 ) -> Result<DiffReport, DiffError> {
     report.validate().map_err(DiffError::LeftReport)?;
 
-    let right_entries: Vec<ReportEntry> = entries
-        .iter()
-        .map(report_entry_from_file_entry)
-        .collect();
+    let right_entries: Vec<ReportEntry> =
+        entries.iter().map(report_entry_from_file_entry).collect();
     let mut right_algorithm_list: Vec<AlgorithmId> = Vec::new();
     for entry in &right_entries {
         for algorithm in entry.hashes.keys() {
@@ -204,7 +201,12 @@ pub fn diff_report_vs_entries(
 
     let normalizer = PathNormalizer::new(options.case_sensitive);
     let left_index = index_entries(&report.entries, options.mode, &normalizer, &report.root);
-    let right_index = index_entries(&right_entries, options.mode, &normalizer, &right_source.label);
+    let right_index = index_entries(
+        &right_entries,
+        options.mode,
+        &normalizer,
+        &right_source.label,
+    );
     let rows = join_rows(&left_index, &right_index, &compared, options.mode, true);
 
     let left_source = DiffSource {
@@ -506,14 +508,8 @@ fn join_rows(
     for key in keys {
         let left_group = left.by_key.get(key).map(|group| group.as_slice());
         let right_group = right.by_key.get(key).map(|group| group.as_slice());
-        if let Some(row) = rows_for_key(
-            key,
-            left_group,
-            right_group,
-            compared,
-            mode,
-            mark_removed,
-        ) {
+        if let Some(row) = rows_for_key(key, left_group, right_group, compared, mode, mark_removed)
+        {
             rows.push(row);
         }
     }
@@ -863,11 +859,7 @@ mod tests {
     use batchhash_types::{HardwareReport, RootKind};
     use indexmap::IndexMap;
 
-    fn make_entry(
-        path: &str,
-        size: u64,
-        hashes: &[(AlgorithmId, String)],
-    ) -> ReportEntry {
+    fn make_entry(path: &str, size: u64, hashes: &[(AlgorithmId, String)]) -> ReportEntry {
         let mut map = IndexMap::new();
         for (algorithm, digest) in hashes {
             map.insert(*algorithm, digest.clone());
@@ -993,11 +985,7 @@ mod tests {
         );
         // Path traversal must never reach the join.
         invalid.entries[0].path = "../a.mkv".to_string();
-        let valid = make_report(
-            "2026-01-02T00:00:00Z",
-            vec![AlgorithmId::Md5],
-            Vec::new(),
-        );
+        let valid = make_report("2026-01-02T00:00:00Z", vec![AlgorithmId::Md5], Vec::new());
         assert!(matches!(
             diff_reports(&invalid, &valid, &options()),
             Err(DiffError::LeftReport(_))
@@ -1015,11 +1003,7 @@ mod tests {
             vec![AlgorithmId::Md5],
             vec![cancelled],
         );
-        let right = make_report(
-            "2026-01-02T00:00:00Z",
-            vec![AlgorithmId::Md5],
-            Vec::new(),
-        );
+        let right = make_report("2026-01-02T00:00:00Z", vec![AlgorithmId::Md5], Vec::new());
         let diff = diff_reports(&left, &right, &options()).expect("valid reports");
         assert_eq!(diff.rows[0].status, DiffStatus::Unknown);
         assert_eq!(diff.summary.removed, 0);
@@ -1084,14 +1068,14 @@ mod tests {
         let right = make_report(
             "2026-01-02T00:00:00Z",
             vec![AlgorithmId::Crc32],
-            vec![make_entry("c/x.mkv", 10, &[(AlgorithmId::Crc32, crc32('0'))])],
+            vec![make_entry(
+                "c/x.mkv",
+                10,
+                &[(AlgorithmId::Crc32, crc32('0'))],
+            )],
         );
-        let diff = diff_reports(
-            &left,
-            &right,
-            &options().with_mode(DiffMode::Basename),
-        )
-        .expect("valid reports");
+        let diff = diff_reports(&left, &right, &options().with_mode(DiffMode::Basename))
+            .expect("valid reports");
         assert_eq!(diff.rows.len(), 1);
         assert_eq!(diff.rows[0].status, DiffStatus::Ambiguous);
         assert_eq!(diff.rows[0].key, "x.mkv");

@@ -41,11 +41,17 @@ fn event_log() -> (Arc<Mutex<Vec<BatchEvent>>>, impl Fn(BatchEvent) + Sync) {
 #[test]
 fn batch_hashes_all_entries_in_input_order() {
     let dir = tempfile::tempdir().expect("tempdir must be created");
-    let specs = [("a.bin", 1_000usize), ("b.bin", 500_000usize), ("c.bin", 3usize)];
+    let specs = [
+        ("a.bin", 1_000usize),
+        ("b.bin", 500_000usize),
+        ("c.bin", 3usize),
+    ];
     let mut entries = Vec::new();
     let mut expected_bytes = 0u64;
     for (name, len) in specs {
-        let data: Vec<u8> = (0..len).map(|index| ((index + name.len()) % 251) as u8).collect();
+        let data: Vec<u8> = (0..len)
+            .map(|index| ((index + name.len()) % 251) as u8)
+            .collect();
         expected_bytes += len as u64;
         entries.push(write_file(dir.path(), name, &data));
     }
@@ -73,7 +79,10 @@ fn batch_hashes_all_entries_in_input_order() {
     let (_, second_callback) = event_log();
     let second = hash_entries(&entries, &options, &CancelToken::new(), &second_callback);
     for (left, right) in outcome.entries.iter().zip(second.entries.iter()) {
-        assert_eq!(left.hashes, right.hashes, "repeated batches must be deterministic");
+        assert_eq!(
+            left.hashes, right.hashes,
+            "repeated batches must be deterministic"
+        );
     }
 
     let recorded = log.lock().expect("event log lock");

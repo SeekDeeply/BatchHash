@@ -74,8 +74,10 @@ class _HashPageState extends State<HashPage> {
       _cancelled = false;
     });
     try {
-      final List<BatchEntry> entries = await widget.state.service
-          .scanDirectory(_sampleFolder, recursive: recursive);
+      final List<BatchEntry> entries = await widget.state.service.scanDirectory(
+        _sampleFolder,
+        recursive: recursive,
+      );
       if (!mounted) {
         return;
       }
@@ -218,8 +220,9 @@ class _HashPageState extends State<HashPage> {
     final String? error = _error;
     final HashProgress? progress = _progress;
     final Duration? elapsed = _elapsed;
-    final int okCount =
-        _entries.where((BatchEntry entry) => entry.status == EntryStatus.ok).length;
+    final int okCount = _entries
+        .where((BatchEntry entry) => entry.status == EntryStatus.ok)
+        .length;
     final int failedCount = _entries
         .where((BatchEntry entry) => entry.status == EntryStatus.failed)
         .length;
@@ -240,8 +243,9 @@ class _HashPageState extends State<HashPage> {
           Text(
             'Pick files or a folder, choose the algorithms, then hash everything '
             'in a single pass. Files never leave this device.',
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 16),
           _buildToolbar(),
@@ -271,7 +275,7 @@ class _HashPageState extends State<HashPage> {
                   onSelected: _computing
                       ? null
                       : (bool selected) =>
-                          _toggleAlgorithm(algorithm, selected),
+                            _toggleAlgorithm(algorithm, selected),
                 ),
             ],
           ),
@@ -364,7 +368,8 @@ class _HashPageState extends State<HashPage> {
             const EmptyState(
               icon: Icons.fingerprint,
               title: 'No files selected',
-              message: 'Choose files or a folder to start hashing. '
+              message:
+                  'Choose files or a folder to start hashing. '
                   'Everything stays on this device.',
             ),
           ],
@@ -410,10 +415,12 @@ class _MessageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color background =
-        isError ? scheme.errorContainer : scheme.secondaryContainer;
-    final Color foreground =
-        isError ? scheme.onErrorContainer : scheme.onSecondaryContainer;
+    final Color background = isError
+        ? scheme.errorContainer
+        : scheme.secondaryContainer;
+    final Color foreground = isError
+        ? scheme.onErrorContainer
+        : scheme.onSecondaryContainer;
     return Card(
       color: background,
       child: Padding(
@@ -429,9 +436,7 @@ class _MessageCard extends StatelessWidget {
             Expanded(
               child: Text(
                 message,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
+                style: Theme.of(context).textTheme.bodySmall
                     ?.copyWith(color: foreground),
               ),
             ),

@@ -8,10 +8,7 @@ import 'support/test_helpers.dart';
 Future<void> pumpAppAt(WidgetTester tester, Size size) async {
   setViewSize(tester, size);
   await tester.pumpWidget(
-    BatchHashApp(
-      service: FakeBatchHashService(),
-      enableDynamicColor: false,
-    ),
+    BatchHashApp(service: FakeBatchHashService(), enableDynamicColor: false),
   );
   await tester.pumpAndSettle();
 }

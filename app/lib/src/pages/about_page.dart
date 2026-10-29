@@ -31,8 +31,9 @@ class AboutPage extends StatelessWidget {
                       Text('BatchHash', style: theme.textTheme.headlineSmall),
                       Text(
                         'Version 0.1.0 (P0 preview)',
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: scheme.onSurfaceVariant),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -83,8 +84,9 @@ class AboutPage extends StatelessWidget {
             Text(
               'Hashing and renaming run locally. No file content leaves the '
               'device.',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: scheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),

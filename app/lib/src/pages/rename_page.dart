@@ -69,14 +69,15 @@ class _RenamePageState extends State<RenamePage> {
       _message = null;
     });
     try {
-      final RenameExecuteResult result =
-          await widget.state.service.executeRenames(plan);
+      final RenameExecuteResult result = await widget.state.service
+          .executeRenames(plan);
       if (!mounted) {
         return;
       }
       setState(() {
         _executing = false;
-        _message = 'Renamed ${result.applied} files. '
+        _message =
+            'Renamed ${result.applied} files. '
             'Skipped ${result.skipped}, failed ${result.failed}.';
       });
     } catch (error) {
@@ -111,20 +112,25 @@ class _RenamePageState extends State<RenamePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text('Rename with hash suffix', style: theme.textTheme.headlineSmall),
+              Text(
+                'Rename with hash suffix',
+                style: theme.textTheme.headlineSmall,
+              ),
               const SizedBox(height: 4),
               Text(
                 'Append a short digest to file names so duplicates can be told '
                 'apart. Names are previewed before anything is touched.',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
               if (entries.isEmpty) ...<Widget>[
                 const SizedBox(height: 48),
                 const EmptyState(
                   icon: Icons.drive_file_rename_outline,
                   title: 'No hashed files yet',
-                  message: 'Run a hash first. Renaming only starts from a batch '
+                  message:
+                      'Run a hash first. Renaming only starts from a batch '
                       'with known digests.',
                 ),
               ] else ...<Widget>[
@@ -133,7 +139,10 @@ class _RenamePageState extends State<RenamePage> {
                   children: <Widget>[
                     SizedBox(
                       width: 120,
-                      child: Text('Algorithm', style: theme.textTheme.bodyMedium),
+                      child: Text(
+                        'Algorithm',
+                        style: theme.textTheme.bodyMedium,
+                      ),
                     ),
                     Expanded(
                       child: InputDecorator(
@@ -243,9 +252,8 @@ class _RenamePageState extends State<RenamePage> {
                     ),
                     FilledButton.tonalIcon(
                       key: const ValueKey<String>('rename-execute-button'),
-                      onPressed: plan == null ||
-                              plan.readyCount == 0 ||
-                              _executing
+                      onPressed:
+                          plan == null || plan.readyCount == 0 || _executing
                           ? null
                           : _execute,
                       icon: const Icon(Icons.drive_file_rename_outline),
@@ -343,19 +351,19 @@ class _InlineMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color background =
-        isError ? scheme.errorContainer : scheme.secondaryContainer;
-    final Color foreground =
-        isError ? scheme.onErrorContainer : scheme.onSecondaryContainer;
+    final Color background = isError
+        ? scheme.errorContainer
+        : scheme.secondaryContainer;
+    final Color foreground = isError
+        ? scheme.onErrorContainer
+        : scheme.onSecondaryContainer;
     return Card(
       color: background,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Text(
           message,
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall
+          style: Theme.of(context).textTheme.bodySmall
               ?.copyWith(color: foreground),
         ),
       ),

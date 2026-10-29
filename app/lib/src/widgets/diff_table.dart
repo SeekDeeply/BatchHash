@@ -47,16 +47,18 @@ class DiffTable extends StatelessWidget {
               Expanded(
                 child: Text(
                   leftLabel,
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   rightLabel,
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ],
@@ -118,17 +120,11 @@ class DiffRowTile extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: _DiffCell(
-                      entry: row.left,
-                      foreground: foreground,
-                    ),
+                    child: _DiffCell(entry: row.left, foreground: foreground),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: _DiffCell(
-                      entry: row.right,
-                      foreground: foreground,
-                    ),
+                    child: _DiffCell(entry: row.right, foreground: foreground),
                   ),
                   const SizedBox(width: 8),
                   StatusChip(
@@ -148,8 +144,7 @@ class DiffRowTile extends StatelessWidget {
                 ],
               ),
             ),
-            if (expanded)
-              _DiffDetails(row: row, foreground: foreground),
+            if (expanded) _DiffDetails(row: row, foreground: foreground),
           ],
         ),
       ),
@@ -158,10 +153,7 @@ class DiffRowTile extends StatelessWidget {
 }
 
 class _DiffCell extends StatelessWidget {
-  const _DiffCell({
-    required this.entry,
-    required this.foreground,
-  });
+  const _DiffCell({required this.entry, required this.foreground});
 
   final BatchEntry? entry;
   final Color foreground;
@@ -173,8 +165,9 @@ class _DiffCell extends StatelessWidget {
     if (value == null) {
       return Text(
         'not present',
-        style: theme.textTheme.bodySmall
-            ?.copyWith(color: theme.colorScheme.outline),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.outline,
+        ),
       );
     }
     final String summary = value.hashes.isEmpty
@@ -194,8 +187,9 @@ class _DiffCell extends StatelessWidget {
           summary,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );

@@ -70,8 +70,9 @@ class _HistoryPageState extends State<HistoryPage> {
           Text(
             'Every rename batch is recorded so it can be undone later. '
             'Batches are listed newest first.',
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
           ),
           if (message != null) ...<Widget>[
             const SizedBox(height: 12),
@@ -81,8 +82,9 @@ class _HistoryPageState extends State<HistoryPage> {
                 padding: const EdgeInsets.all(12),
                 child: Text(
                   message,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: scheme.onSecondaryContainer),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSecondaryContainer,
+                  ),
                 ),
               ),
             ),
@@ -91,61 +93,67 @@ class _HistoryPageState extends State<HistoryPage> {
           Expanded(
             child: FutureBuilder<List<HistoryBatchModel>>(
               future: _future,
-              builder: (
-                BuildContext context,
-                AsyncSnapshot<List<HistoryBatchModel>> snapshot,
-              ) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final Object? error = snapshot.error;
-                if (error != null) {
-                  return Center(
-                    child: Text('Could not load history: $error'),
-                  );
-                }
-                final List<HistoryBatchModel> batches =
-                    snapshot.data ?? const <HistoryBatchModel>[];
-                if (batches.isEmpty) {
-                  return const EmptyState(
-                    icon: Icons.history,
-                    title: 'No batches yet',
-                    message: 'Renamed batches will appear here and can be '
-                        'undone from this page.',
-                  );
-                }
-                return ListView.separated(
-                  itemCount: batches.length,
-                  separatorBuilder: (BuildContext context, int index) =>
-                      const SizedBox(height: 8),
-                  itemBuilder: (BuildContext context, int index) {
-                    final HistoryBatchModel batch = batches[index];
-                    return Card(
-                      child: ListTile(
-                        leading: Icon(
-                          batch.undone ? Icons.undo : Icons.history,
-                          color: batch.undone ? scheme.outline : scheme.tertiary,
-                        ),
-                        title: Text('Batch ${batch.id}'),
-                        subtitle: Text(
-                          '${batch.fileCount} files · '
-                          '${batch.appliedCount} renamed · '
-                          '${formatTimestamp(batch.createdAt)}',
-                        ),
-                        trailing: batch.undone
-                            ? StatusChip(
-                                label: 'undone',
-                                color: scheme.outline,
-                              )
-                            : TextButton(
-                                onPressed: _busy ? null : () => _undo(batch),
-                                child: const Text('Undo'),
-                              ),
-                      ),
+              builder:
+                  (
+                    BuildContext context,
+                    AsyncSnapshot<List<HistoryBatchModel>> snapshot,
+                  ) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final Object? error = snapshot.error;
+                    if (error != null) {
+                      return Center(
+                        child: Text('Could not load history: $error'),
+                      );
+                    }
+                    final List<HistoryBatchModel> batches =
+                        snapshot.data ?? const <HistoryBatchModel>[];
+                    if (batches.isEmpty) {
+                      return const EmptyState(
+                        icon: Icons.history,
+                        title: 'No batches yet',
+                        message:
+                            'Renamed batches will appear here and can be '
+                            'undone from this page.',
+                      );
+                    }
+                    return ListView.separated(
+                      itemCount: batches.length,
+                      separatorBuilder: (BuildContext context, int index) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (BuildContext context, int index) {
+                        final HistoryBatchModel batch = batches[index];
+                        return Card(
+                          child: ListTile(
+                            leading: Icon(
+                              batch.undone ? Icons.undo : Icons.history,
+                              color: batch.undone
+                                  ? scheme.outline
+                                  : scheme.tertiary,
+                            ),
+                            title: Text('Batch ${batch.id}'),
+                            subtitle: Text(
+                              '${batch.fileCount} files · '
+                              '${batch.appliedCount} renamed · '
+                              '${formatTimestamp(batch.createdAt)}',
+                            ),
+                            trailing: batch.undone
+                                ? StatusChip(
+                                    label: 'undone',
+                                    color: scheme.outline,
+                                  )
+                                : TextButton(
+                                    onPressed: _busy
+                                        ? null
+                                        : () => _undo(batch),
+                                    child: const Text('Undo'),
+                                  ),
+                          ),
+                        );
+                      },
                     );
                   },
-                );
-              },
             ),
           ),
         ],

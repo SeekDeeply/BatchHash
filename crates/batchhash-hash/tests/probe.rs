@@ -6,13 +6,7 @@ use batchhash_types::{BackendPolicy, HardwareReport};
 const ALLOWED_BLAKE3_BACKENDS: [&str; 5] = ["avx512", "avx2", "neon", "portable", "unknown"];
 const ALLOWED_SHA256_BACKENDS: [&str; 4] = ["sha-ni", "aarch64-sha2", "soft", "unknown"];
 const ALLOWED_FEATURES: [&str; 7] = [
-    "SSE2",
-    "SSE4.1",
-    "AVX2",
-    "AVX-512F",
-    "SHA-NI",
-    "NEON",
-    "SHA2",
+    "SSE2", "SSE4.1", "AVX2", "AVX-512F", "SHA-NI", "NEON", "SHA2",
 ];
 
 #[test]
@@ -78,8 +72,14 @@ fn hardware_info_converts_to_report_block() {
     assert_eq!(report.arch, expected.arch);
     assert_eq!(report.detected_features, expected.detected_features);
     assert_eq!(report.backend_policy, expected.backend_policy);
-    assert_eq!(report.blake3_backend_reported, expected.blake3_backend_reported);
-    assert_eq!(report.sha256_backend_reported, expected.sha256_backend_reported);
+    assert_eq!(
+        report.blake3_backend_reported,
+        expected.blake3_backend_reported
+    );
+    assert_eq!(
+        report.sha256_backend_reported,
+        expected.sha256_backend_reported
+    );
     assert_eq!(report.source, expected.source);
     assert_eq!(report.multithread, expected.multithread);
 }

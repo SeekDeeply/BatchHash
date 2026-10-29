@@ -8,10 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/test_helpers.dart';
 
-Future<FakeBatchHashService> pumpCompare(
-  WidgetTester tester,
-  Size size,
-) async {
+Future<FakeBatchHashService> pumpCompare(WidgetTester tester, Size size) async {
   setViewSize(tester, size);
   final FakeBatchHashService fake = FakeBatchHashService();
   final BatchHashAppState state = BatchHashAppState(service: fake);
@@ -60,7 +57,9 @@ void main() {
   ) async {
     await pumpCompare(tester, const Size(1000, 1400));
     final ThemeData theme = Theme.of(
-      tester.element(find.byKey(const ValueKey<String>('compare-policy-banner'))),
+      tester.element(
+        find.byKey(const ValueKey<String>('compare-policy-banner')),
+      ),
     );
     final Material changedRow = tester.widget<Material>(
       find.byKey(const ValueKey<String>('diff-row-bg-docs/gamma.md')),

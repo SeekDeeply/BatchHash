@@ -274,7 +274,13 @@ mod tests {
 
     #[test]
     fn relative_path_validation_accepts_safe_paths() {
-        for path in ["a.mkv", "sub/a.mkv", "sub/../a.mkv", "./a.mkv", "sub//a.mkv"] {
+        for path in [
+            "a.mkv",
+            "sub/a.mkv",
+            "sub/../a.mkv",
+            "./a.mkv",
+            "sub//a.mkv",
+        ] {
             assert!(validate_relative_path(path).is_ok(), "{path}");
         }
     }
@@ -314,8 +320,14 @@ mod tests {
 
     #[test]
     fn display_path_join_handles_separators() {
-        assert_eq!(join_display_path("/data/media", "sub/a.mkv"), "/data/media/sub/a.mkv");
-        assert_eq!(join_display_path("C:\\media", "sub/a.mkv"), "C:\\media\\sub/a.mkv");
+        assert_eq!(
+            join_display_path("/data/media", "sub/a.mkv"),
+            "/data/media/sub/a.mkv"
+        );
+        assert_eq!(
+            join_display_path("C:\\media", "sub/a.mkv"),
+            "C:\\media\\sub/a.mkv"
+        );
         assert_eq!(join_display_path("", "a.mkv"), "a.mkv");
     }
 }

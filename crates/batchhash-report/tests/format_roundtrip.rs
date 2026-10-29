@@ -21,11 +21,7 @@ fn digest(algorithm: AlgorithmId, fill: char) -> String {
     fill.to_string().repeat(algorithm.hex_len())
 }
 
-fn record(
-    path: impl Into<String>,
-    size: u64,
-    hashes: Vec<(AlgorithmId, String)>,
-) -> ReportEntry {
+fn record(path: impl Into<String>, size: u64, hashes: Vec<(AlgorithmId, String)>) -> ReportEntry {
     let mut map = IndexMap::new();
     for (algorithm, value) in hashes {
         map.insert(algorithm, value);
@@ -104,13 +100,7 @@ fn checksum_report(algorithm: AlgorithmId, files: &[(&str, char)]) -> Report {
     report.generated_at = "2026-10-20T00:00:00Z".to_string();
     report.entries = files
         .iter()
-        .map(|(path, fill)| {
-            record(
-                *path,
-                0,
-                vec![(algorithm, digest(algorithm, *fill))],
-            )
-        })
+        .map(|(path, fill)| record(*path, 0, vec![(algorithm, digest(algorithm, *fill))]))
         .collect();
     report.recompute_summary();
     report

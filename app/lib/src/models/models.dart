@@ -88,7 +88,8 @@ enum ReportFormat {
   };
 
   String get description => switch (this) {
-    ReportFormat.json => 'Canonical machine readable report with a schema version.',
+    ReportFormat.json =>
+      'Canonical machine readable report with a schema version.',
     ReportFormat.csv => 'Fixed columns for spreadsheets.',
     ReportFormat.markdown => 'Human readable table, truncated at 500 rows.',
     ReportFormat.txt => 'Aligned plain text, truncated at 500 rows.',
@@ -252,11 +253,13 @@ class RenamePlanModel {
   final bool uppercase;
   final List<RenamePlanRowModel> rows;
 
-  int get readyCount =>
-      rows.where((RenamePlanRowModel row) => row.status == RenameRowStatus.ready).length;
+  int get readyCount => rows
+      .where((RenamePlanRowModel row) => row.status == RenameRowStatus.ready)
+      .length;
 
-  int get conflictCount =>
-      rows.where((RenamePlanRowModel row) => row.status == RenameRowStatus.conflict).length;
+  int get conflictCount => rows
+      .where((RenamePlanRowModel row) => row.status == RenameRowStatus.conflict)
+      .length;
 
   int get blockedCount => rows.length - readyCount;
 }

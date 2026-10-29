@@ -34,10 +34,11 @@ class _ReportPageState extends State<ReportPage> {
       _message = null;
     });
     try {
-      final List<ExportedReport> files = await widget.state.service.exportReport(
-        report: report,
-        formats: Set<ReportFormat>.of(_formats),
-      );
+      final List<ExportedReport> files = await widget.state.service
+          .exportReport(
+            report: report,
+            formats: Set<ReportFormat>.of(_formats),
+          );
       if (!mounted) {
         return;
       }
@@ -86,15 +87,17 @@ class _ReportPageState extends State<ReportPage> {
               Text(
                 'Write the current batch out in one or more formats. '
                 'JSON and CSV are lossless and can be imported again.',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
               if (report == null) ...<Widget>[
                 const SizedBox(height: 48),
                 const EmptyState(
                   icon: Icons.description_outlined,
                   title: 'No report yet',
-                  message: 'Run a hash first to build a report, then choose the '
+                  message:
+                      'Run a hash first to build a report, then choose the '
                       'formats to export.',
                 ),
               ] else ...<Widget>[
@@ -133,7 +136,7 @@ class _ReportPageState extends State<ReportPage> {
                     onChanged: _exporting
                         ? null
                         : (bool? selected) =>
-                            _toggleFormat(format, selected ?? false),
+                              _toggleFormat(format, selected ?? false),
                     title: Text(format.label),
                     subtitle: Text(format.description),
                     secondary: Icon(_iconFor(format)),
@@ -213,19 +216,19 @@ class _InlineMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color background =
-        isError ? scheme.errorContainer : scheme.secondaryContainer;
-    final Color foreground =
-        isError ? scheme.onErrorContainer : scheme.onSecondaryContainer;
+    final Color background = isError
+        ? scheme.errorContainer
+        : scheme.secondaryContainer;
+    final Color foreground = isError
+        ? scheme.onErrorContainer
+        : scheme.onSecondaryContainer;
     return Card(
       color: background,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Text(
           message,
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall
+          style: Theme.of(context).textTheme.bodySmall
               ?.copyWith(color: foreground),
         ),
       ),

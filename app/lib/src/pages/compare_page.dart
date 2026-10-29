@@ -105,12 +105,12 @@ class _ComparePageState extends State<ComparePage> {
 
   Future<void> _load(ReportModel report) async {
     try {
-      final List<DiffRowModel> rows =
-          await widget.state.service.diffReportAgainstDirectory(
-        report: report,
-        directory: report.root,
-        recursive: true,
-      );
+      final List<DiffRowModel> rows = await widget.state.service
+          .diffReportAgainstDirectory(
+            report: report,
+            directory: report.root,
+            recursive: true,
+          );
       if (!mounted) {
         return;
       }
@@ -145,12 +145,15 @@ class _ComparePageState extends State<ComparePage> {
     final List<DiffRowModel> visibleRows = _rows
         .where((DiffRowModel row) => _filter.matches(row.status))
         .toList();
-    final int changedCount =
-        _rows.where((DiffRowModel row) => row.status == DiffStatus.changed).length;
-    final int addedCount =
-        _rows.where((DiffRowModel row) => row.status == DiffStatus.added).length;
-    final int removedCount =
-        _rows.where((DiffRowModel row) => row.status == DiffStatus.removed).length;
+    final int changedCount = _rows
+        .where((DiffRowModel row) => row.status == DiffStatus.changed)
+        .length;
+    final int addedCount = _rows
+        .where((DiffRowModel row) => row.status == DiffStatus.added)
+        .length;
+    final int removedCount = _rows
+        .where((DiffRowModel row) => row.status == DiffStatus.removed)
+        .length;
     final int ambiguousCount = _rows
         .where((DiffRowModel row) => row.status == DiffStatus.ambiguous)
         .length;
@@ -164,8 +167,9 @@ class _ComparePageState extends State<ComparePage> {
           Text(
             'Match a baseline report against the current state of a folder and '
             'review what changed.',
-            style: theme.textTheme.bodyMedium
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 16),
           const _PolicyBanner(),
@@ -227,7 +231,8 @@ class _ComparePageState extends State<ComparePage> {
             const EmptyState(
               icon: Icons.compare_arrows,
               title: 'Nothing to compare',
-              message: 'Hash a folder first, then compare the report against '
+              message:
+                  'Hash a folder first, then compare the report against '
                   'the current contents.',
             )
           else if (narrow)
@@ -279,22 +284,22 @@ class _ComparePageState extends State<ComparePage> {
   Widget _buildNarrowContent(List<DiffRowModel> rows) {
     return switch (_pane) {
       ComparePane.left => EntryList(
-          entries: <BatchEntry>[
-            for (final DiffRowModel row in rows)
-              if (row.left != null) row.left!,
-          ],
-        ),
+        entries: <BatchEntry>[
+          for (final DiffRowModel row in rows)
+            if (row.left != null) row.left!,
+        ],
+      ),
       ComparePane.right => EntryList(
-          entries: <BatchEntry>[
-            for (final DiffRowModel row in rows)
-              if (row.right != null) row.right!,
-          ],
-        ),
+        entries: <BatchEntry>[
+          for (final DiffRowModel row in rows)
+            if (row.right != null) row.right!,
+        ],
+      ),
       ComparePane.differences => DiffTable(
-          rows: rows,
-          expandedPath: _expandedPath,
-          onRowTap: _toggleRow,
-        ),
+        rows: rows,
+        expandedPath: _expandedPath,
+        onRowTap: _toggleRow,
+      ),
     };
   }
 }
@@ -323,8 +328,9 @@ class _PolicyBanner extends StatelessWidget {
               'Comparison policy: only algorithms present in both reports are '
               'compared. Files without a shared digest fall back to path and '
               'size. Paths are normalized and compared case-sensitively.',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: scheme.onSecondaryContainer),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSecondaryContainer,
+              ),
             ),
           ),
         ],
@@ -342,19 +348,19 @@ class _MessageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color background =
-        isError ? scheme.errorContainer : scheme.secondaryContainer;
-    final Color foreground =
-        isError ? scheme.onErrorContainer : scheme.onSecondaryContainer;
+    final Color background = isError
+        ? scheme.errorContainer
+        : scheme.secondaryContainer;
+    final Color foreground = isError
+        ? scheme.onErrorContainer
+        : scheme.onSecondaryContainer;
     return Card(
       color: background,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Text(
           message,
-          style: Theme.of(context)
-              .textTheme
-              .bodySmall
+          style: Theme.of(context).textTheme.bodySmall
               ?.copyWith(color: foreground),
         ),
       ),

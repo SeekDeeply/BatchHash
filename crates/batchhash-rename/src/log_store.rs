@@ -381,8 +381,9 @@ impl LogStore {
             params![],
             |row| row.get(0),
         )?;
-        u32::try_from(version)
-            .map_err(|_| LogError::InvalidStoredValue(format!("schema version out of range: {version}")))
+        u32::try_from(version).map_err(|_| {
+            LogError::InvalidStoredValue(format!("schema version out of range: {version}"))
+        })
     }
 
     /// Insert one batch record.
@@ -554,11 +555,7 @@ impl LogStore {
     /// Already-undone operations are reported as [`UndoStatus::AlreadyUndone`]
     /// so a repeated undo is visibly a no-op. Pending and conflicted
     /// operations are skipped.
-    pub fn plan_undo(
-        &self,
-        batch_id: &str,
-        fs: &dyn RenameFs,
-    ) -> Result<UndoPlan, LogError> {
+    pub fn plan_undo(&self, batch_id: &str, fs: &dyn RenameFs) -> Result<UndoPlan, LogError> {
         if !self.batch_exists(batch_id)? {
             return Err(LogError::BatchNotFound(batch_id.to_string()));
         }
@@ -804,8 +801,9 @@ impl RawOperation {
         let algorithm = AlgorithmId::from_stable_id(&self.algorithm).ok_or_else(|| {
             LogError::InvalidStoredValue(format!("unknown algorithm id: {}", self.algorithm))
         })?;
-        let state = OperationState::from_str_name(&self.state)
-            .ok_or_else(|| LogError::InvalidStoredValue(format!("unknown state: {}", self.state)))?;
+        let state = OperationState::from_str_name(&self.state).ok_or_else(|| {
+            LogError::InvalidStoredValue(format!("unknown state: {}", self.state))
+        })?;
         Ok(RenameOperation {
             id: self.id,
             batch_id: self.batch_id,
@@ -904,7 +902,9 @@ mod tests {
 
     fn insert_applied(store: &mut LogStore, batch_id: &str, original: &str, new: &str) -> i64 {
         let operation = test_operation(batch_id, original, new);
-        let id = store.insert_operation(&operation).expect("insert operation");
+        let id = store
+            .insert_operation(&operation)
+            .expect("insert operation");
         store
             .record_result(id, "renamed", None, OperationState::Applied)
             .expect("record applied");
@@ -935,7 +935,9 @@ mod tests {
             let mut store = LogStore::open(&db).expect("open store");
             store.create_batch(&batch).expect("create batch");
             let operation = test_operation(&batch.id, "/tmp/a.txt", "/tmp/a[ABCDE].txt");
-            let id = store.insert_operation(&operation).expect("insert operation");
+            let id = store
+                .insert_operation(&operation)
+                .expect("insert operation");
             assert!(id > 0);
             let operations = store
                 .operations_for_batch(&batch.id)
@@ -986,7 +988,10 @@ mod tests {
         store.create_batch(&older).expect("create older");
         let batches = store.list_batches().expect("list batches");
         assert_eq!(
-            batches.iter().map(|batch| batch.id.as_str()).collect::<Vec<_>>(),
+            batches
+                .iter()
+                .map(|batch| batch.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["b-older", "b-newer"]
         );
     }
@@ -997,7 +1002,9 @@ mod tests {
         let batch = test_batch();
         store.create_batch(&batch).expect("create batch");
         let operation = test_operation(&batch.id, "/tmp/a.txt", "/tmp/a[ABCDE].txt");
-        let id = store.insert_operation(&operation).expect("insert operation");
+        let id = store
+            .insert_operation(&operation)
+            .expect("insert operation");
 
         assert_eq!(
             store.operation_state(id).expect("state"),
@@ -1051,9 +1058,16 @@ mod tests {
         let batch = test_batch();
         store.create_batch(&batch).expect("create batch");
         let operation = test_operation(&batch.id, "/tmp/a.txt", "/tmp/a[ABCDE].txt");
-        let id = store.insert_operation(&operation).expect("insert operation");
+        let id = store
+            .insert_operation(&operation)
+            .expect("insert operation");
         store
-            .record_result(id, "failed", Some("already_exists"), OperationState::Conflict)
+            .record_result(
+                id,
+                "failed",
+                Some("already_exists"),
+                OperationState::Conflict,
+            )
             .expect("pending to conflict");
         assert_eq!(
             store.operation_state(id).expect("state"),
@@ -1113,9 +1127,7 @@ mod tests {
             &renamed_three.to_string_lossy(),
         );
 
-        let plan = store
-            .plan_undo(&batch.id, &StdRenameFs)
-            .expect("plan undo");
+        let plan = store.plan_undo(&batch.id, &StdRenameFs).expect("plan undo");
         assert_eq!(plan.batch_id, batch.id);
         assert_eq!(plan.rows.len(), 3);
         assert_eq!(plan.rows[0].operation_id, id_three);
@@ -1128,10 +1140,7 @@ mod tests {
             plan.rows[1].from,
             renamed_two.to_string_lossy().into_owned()
         );
-        assert_eq!(
-            plan.rows[1].to,
-            original_two.to_string_lossy().into_owned()
-        );
+        assert_eq!(plan.rows[1].to, original_two.to_string_lossy().into_owned());
 
         let error = store
             .plan_undo("missing-batch", &StdRenameFs)
@@ -1164,9 +1173,7 @@ mod tests {
         );
         store.mark_undone(id).expect("mark undone");
 
-        let plan = store
-            .plan_undo(&batch.id, &StdRenameFs)
-            .expect("plan undo");
+        let plan = store.plan_undo(&batch.id, &StdRenameFs).expect("plan undo");
         assert_eq!(plan.rows.len(), 1);
         assert_eq!(plan.rows[0].operation_id, id);
         assert_eq!(plan.rows[0].status, UndoStatus::AlreadyUndone);
@@ -1217,16 +1224,14 @@ mod tests {
             .record_result(operation_id, "renamed", None, OperationState::Applied)
             .expect("record applied");
 
-        let undo_plan = store
-            .plan_undo(&batch.id, &StdRenameFs)
-            .expect("plan undo");
+        let undo_plan = store.plan_undo(&batch.id, &StdRenameFs).expect("plan undo");
         assert_eq!(undo_plan.rows.len(), 1);
         assert_eq!(undo_plan.rows[0].status, UndoStatus::Ready);
         assert_eq!(undo_plan.rows[0].from, renamed);
         assert_eq!(undo_plan.rows[0].to, original_display);
 
-        let undo_results = apply_undo(&undo_plan, &mut StdFsBackend::new(), &mut store)
-            .expect("apply undo");
+        let undo_results =
+            apply_undo(&undo_plan, &mut StdFsBackend::new(), &mut store).expect("apply undo");
         assert_eq!(undo_results.len(), 1);
         assert_eq!(undo_results[0].status, UndoResultStatus::Undone);
         assert_eq!(
@@ -1243,8 +1248,8 @@ mod tests {
             .plan_undo(&batch.id, &StdRenameFs)
             .expect("second plan");
         assert_eq!(second_plan.rows[0].status, UndoStatus::AlreadyUndone);
-        let second_results = apply_undo(&second_plan, &mut StdFsBackend::new(), &mut store)
-            .expect("second apply");
+        let second_results =
+            apply_undo(&second_plan, &mut StdFsBackend::new(), &mut store).expect("second apply");
         assert_eq!(second_results[0].status, UndoResultStatus::Skipped);
         assert!(original.exists());
 

@@ -722,6 +722,9 @@ pub struct HashEntriesRequest {
 /// Request for [plan_renames_request]: pure suffix planning over known entries.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlanRenamesRequest {
+    /// Root the entry paths are relative to (defaults to the process directory).
+    #[serde(default)]
+    pub root: Option<String>,
     /// Entries to plan, with the hash required by the suffix algorithm.
     pub entries: Vec<EntryInputDto>,
     /// Algorithm whose digest supplies the suffix token.
@@ -995,10 +998,11 @@ pub fn plan_renames_request(request: &PlanRenamesRequest) -> Result<RenamePlanDt
         case: request.case.clone(),
         prefix: request.prefix,
     })?;
+    let root = request.root.clone().unwrap_or_else(|| ".".to_string());
     let entries: Vec<FileEntry> = request
         .entries
         .iter()
-        .map(|entry| entry_from_input(entry, "."))
+        .map(|entry| entry_from_input(entry, &root))
         .collect();
     let options = batchhash_rename::planner::RenamePlanOptions {
         format: suffix,

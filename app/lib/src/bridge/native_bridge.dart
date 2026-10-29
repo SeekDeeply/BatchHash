@@ -159,11 +159,13 @@ class BatchHashNative {
     required List<Map<String, Object?>> entries,
     required String algorithm,
     required int length,
+    String? root,
     bool uppercase = true,
     bool prefix = false,
     bool overwrite = false,
   }) {
     return _callMap('bh_plan_renames', <String, Object?>{
+      if (root != null) 'root': root,
       'entries': entries,
       'algorithm': algorithm,
       'length': length,

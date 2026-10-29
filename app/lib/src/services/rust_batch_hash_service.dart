@@ -127,6 +127,7 @@ class RustBatchHashService implements BatchHashService {
     bool uppercase = true,
   }) async {
     final data = native.planRenames(
+      root: _lastRoot,
       entries: entries.map(_entryJson).toList(),
       algorithm: algorithm,
       length: length,
@@ -360,16 +361,26 @@ class RustBatchHashService implements BatchHashService {
     return null;
   }
 
+  /// Accepts both shapes: the bridge DTO sends a list of algorithm/hex pairs,
+  /// the canonical report JSON stores hashes as a map keyed by algorithm id.
   Map<String, String> _hashes(Object? raw) {
-    if (raw is! List<Object?>) {
-      return const <String, String>{};
-    }
     final hashes = <String, String>{};
-    for (final item in raw.cast<Map<String, Object?>>()) {
-      final algorithm = item['algorithm'];
-      final hex = item['hex'];
-      if (algorithm is String && hex is String) {
-        hashes[algorithm] = hex;
+    if (raw is List<Object?>) {
+      for (final item in raw.cast<Map<String, Object?>>()) {
+        final algorithm = item['algorithm'];
+        final hex = item['hex'];
+        if (algorithm is String && hex is String) {
+          hashes[algorithm] = hex;
+        }
+      }
+      return hashes;
+    }
+    if (raw is Map<String, Object?>) {
+      for (final entry in raw.entries) {
+        final value = entry.value;
+        if (value is String) {
+          hashes[entry.key] = value;
+        }
       }
     }
     return hashes;

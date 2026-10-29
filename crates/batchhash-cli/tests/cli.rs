@@ -234,5 +234,7 @@ fn extract_classifies_suffixed_and_plain_names() {
         .iter()
         .find(|entry| entry["status"] == "parsed")
         .expect("parsed entry");
-    assert_eq!(tagged["hex"], "ABCDE1234");
+    // Digests are canonical lowercase everywhere, including parsed tokens.
+    assert_eq!(tagged["hex"], "abcde1234");
+    assert_eq!(tagged["token"], "ABCDE1234");
 }

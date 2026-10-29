@@ -302,3 +302,18 @@ pub unsafe extern "C" fn bh_list_batches(request: *const c_char) -> *mut c_char 
     })
 }
 
+
+/// Build canonical report JSON from entries the UI already holds.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_build_report(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::BuildReportRequest = parse_request(request, false)?;
+        let report_json = api::build_report_request(&parsed)?;
+        Ok(json!({ "report_json": report_json }))
+    })
+}
+

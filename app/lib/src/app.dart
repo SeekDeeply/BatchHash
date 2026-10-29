@@ -10,15 +10,16 @@ import 'pages/report_page.dart';
 import 'pages/settings_page.dart';
 import 'services/batch_hash_service.dart';
 import 'services/fake_batch_hash_service.dart';
+import 'services/rust_batch_hash_service.dart';
 import 'theme.dart';
 import 'widgets/adaptive_scaffold.dart';
 
 /// Root of the BatchHash Flutter shell.
 ///
-/// A single [BatchHashService] is injected here. When none is supplied the
-/// deterministic fake is used, which keeps the P0 preview and the widget tests
-/// independent of native code. Dynamic color always falls back to a seeded
-/// Material 3 scheme.
+/// A single [BatchHashService] is injected here. When none is supplied the app
+/// tries the native Rust bridge first and falls back to the deterministic fake,
+/// which keeps widget tests and platforms without the library working. Dynamic
+/// color always falls back to a seeded Material 3 scheme.
 class BatchHashApp extends StatefulWidget {
   const BatchHashApp({super.key, this.service, this.enableDynamicColor = true});
 
@@ -38,7 +39,10 @@ class _BatchHashAppState extends State<BatchHashApp> {
   @override
   void initState() {
     super.initState();
-    _service = widget.service ?? FakeBatchHashService();
+    _service =
+        widget.service ??
+        RustBatchHashService.tryCreate() ??
+        FakeBatchHashService();
     _appState = BatchHashAppState(service: _service);
     _destinations = <AppDestination>[
       AppDestination(

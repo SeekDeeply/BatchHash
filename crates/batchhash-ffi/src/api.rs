@@ -114,6 +114,12 @@ pub struct EntryDto {
     pub error_message: Option<String>,
     /// Hashes in canonical registry order.
     pub hashes: Vec<HashDto>,
+    /// Suffix token written by a rename batch, when applicable.
+    #[serde(default)]
+    pub suffix_applied: Option<String>,
+    /// Root-relative name after a rename batch, when applicable.
+    #[serde(default)]
+    pub renamed_to: Option<String>,
 }
 
 /// One path the scanner could not represent as an entry.
@@ -214,6 +220,12 @@ pub struct BatchRequestDto {
 /// One row of the rename plan.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlanRowDto {
+    /// Original root-relative path.
+    #[serde(default)]
+    pub original_path: String,
+    /// Proposed root-relative path.
+    #[serde(default)]
+    pub proposed_path: String,
     /// Original file name.
     pub original_name: String,
     /// Proposed file name.
@@ -440,6 +452,8 @@ pub fn run_batch_request(request: &BatchRequestDto) -> Result<BatchResultDto, Ap
         plan.rows
             .iter()
             .map(|row| PlanRowDto {
+                original_path: row.original_path.clone(),
+                proposed_path: proposed_path_for(&row.original_path, &row.proposed_name),
                 original_name: row.original_name.clone(),
                 proposed_name: row.proposed_name.clone(),
                 status: plan_row_status_str(row.status).to_string(),
@@ -464,7 +478,18 @@ pub fn run_batch_request(request: &BatchRequestDto) -> Result<BatchResultDto, Ap
         failed: run.report.summary.failed,
         skipped_count: run.report.summary.skipped,
         total_bytes: run.report.summary.total_bytes,
-        entries: run.entries.iter().map(entry_dto).collect(),
+        entries: {
+            let mut dtos: Vec<EntryDto> = run.entries.iter().map(entry_dto).collect();
+            for dto in dtos.iter_mut() {
+                if let Some(report_entry) =
+                    run.report.entries.iter().find(|entry| entry.path == dto.path)
+                {
+                    dto.suffix_applied = report_entry.suffix_applied.clone();
+                    dto.renamed_to = report_entry.renamed_to.clone();
+                }
+            }
+            dtos
+        },
         skipped: run
             .skipped_paths
             .iter()
@@ -544,6 +569,14 @@ pub fn parse_suffix_token(name: &str) -> Option<String> {
     }
 }
 
+/// Join a proposed file name onto the parent directory of an original path.
+fn proposed_path_for(original_path: &str, proposed_name: &str) -> String {
+    match original_path.rsplit_once('/') {
+        Some((parent, _)) => format!("{parent}/{proposed_name}"),
+        None => proposed_name.to_string(),
+    }
+}
+
 fn parse_algorithms(ids: &[String]) -> Result<Vec<AlgorithmId>, ApiError> {
     if ids.is_empty() {
         return Err(ApiError::invalid("at least one algorithm is required"));
@@ -611,6 +644,8 @@ fn entry_dto(entry: &FileEntry) -> EntryDto {
                 hex: hex.clone(),
             })
             .collect(),
+        suffix_applied: None,
+        renamed_to: None,
     }
 }
 
@@ -979,11 +1014,20 @@ pub fn plan_renames_request(request: &PlanRenamesRequest) -> Result<RenamePlanDt
         rows: plan
             .rows
             .iter()
-            .map(|row| PlanRowDto {
-                original_name: row.original_name.clone(),
-                proposed_name: row.proposed_name.clone(),
-                status: plan_row_status_str(row.status).to_string(),
-                reason: row.reason.clone(),
+            .map(|row| {
+                let original_path = request
+                    .entries
+                    .get(row.entry_index)
+                    .map(|entry| entry.path.clone())
+                    .unwrap_or_else(|| row.original_name.clone());
+                PlanRowDto {
+                    original_path: original_path.clone(),
+                    proposed_path: proposed_path_for(&original_path, &row.proposed_name),
+                    original_name: row.original_name.clone(),
+                    proposed_name: row.proposed_name.clone(),
+                    status: plan_row_status_str(row.status).to_string(),
+                    reason: row.reason.clone(),
+                }
             })
             .collect(),
         summary: PlanSummaryDto {
@@ -1073,6 +1117,8 @@ fn entry_dto_diff(entry: &batchhash_types::DiffEntry) -> EntryDto {
                 hex: hex.clone(),
             })
             .collect(),
+        suffix_applied: None,
+        renamed_to: None,
     }
 }
 
@@ -1169,5 +1215,55 @@ pub fn list_batches_request(request: &ListBatchesRequest) -> Result<Vec<BatchInf
         });
     }
     Ok(out)
+}
+
+
+/// Request for [build_report_request]: canonical report JSON from entries.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuildReportRequest {
+    /// Batch root label.
+    pub root: String,
+    /// Algorithms declared by the report.
+    pub algorithms: Vec<String>,
+    /// Entries with their hashes.
+    #[serde(default)]
+    pub entries: Vec<EntryInputDto>,
+    /// Case sensitivity recorded in the report.
+    #[serde(default)]
+    pub case_sensitive: Option<bool>,
+    /// Injected timestamp (defaults to now).
+    #[serde(default)]
+    pub generated_at: Option<String>,
+}
+
+/// Build canonical report JSON from entries the UI already holds.
+pub fn build_report_request(request: &BuildReportRequest) -> Result<String, ApiError> {
+    let algorithms = parse_algorithms(&request.algorithms)?;
+    let entries: Vec<FileEntry> = request
+        .entries
+        .iter()
+        .map(|entry| entry_from_input(entry, &request.root))
+        .collect();
+    let hardware: HardwareReport = batchhash_hash::probe_auto().into();
+    let mut report = batchhash_core::build_report(
+        &request.root,
+        batchhash_types::RootKind::Fs,
+        request
+            .case_sensitive
+            .unwrap_or_else(batchhash_core::default_case_sensitive),
+        &algorithms,
+        hardware,
+        &entries,
+    );
+    report.generated_at = request
+        .generated_at
+        .clone()
+        .unwrap_or_else(batchhash_core::now_rfc3339);
+    report.sort_entries();
+    report
+        .validate()
+        .map_err(|error| ApiError::new("invalid_report", error.to_string()))?;
+    export_report(&report, ReportFormat::Json)
+        .map_err(|error| ApiError::new("export", error.to_string()))
 }
 

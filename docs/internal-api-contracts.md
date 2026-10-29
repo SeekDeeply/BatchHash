@@ -151,6 +151,28 @@ re-exports the four engine crates and owns the two orchestration pieces:
   realtime-directory diff), the dry-run %BT%plan%BT%, per-row %BT%rename_results%BT% and the
   %BT%batch_id%BT% for undo.
 
+## batchhash-ffi
+
+%BT%%BT%%BT%rust
+pub mod api;    // serialisable request/response structs (no raw pointers)
+pub mod c_api;  // JSON C ABI consumed by Dart through dart:ffi
+%BT%%BT%%BT%
+
+* %BT%api::algorithms/probe/scan_request/run_batch_request/undo/export%BT% are plain
+  Rust functions returning serialisable DTOs; they are unit tested and are the
+  intended input surface if a code generator (for example flutter_rust_bridge) is
+  added later. No business logic lives in the binding layer: everything calls
+  batchhash-core.
+* %BT%c_api%BT% exposes %BT%bh_api_version%BT%, %BT%bh_algorithms%BT%, %BT%bh_probe%BT%, %BT%bh_scan%BT%,
+  %BT%bh_run_batch%BT%, %BT%bh_undo%BT%, %BT%bh_export_report%BT% and %BT%bh_free%BT%. Requests and
+  responses are UTF-8 JSON; the envelope is
+  %BT%{"ok": true, "api_version": 1, "data": ...}%BT% or
+  %BT%{"ok": false, "api_version": 1, "kind": "...", "error": "..."}%BT%.
+* Panics never cross the boundary (%BT%catch_unwind%BT%); returned pointers must be
+  released with %BT%bh_free%BT%; a null request is only tolerated by %BT%bh_probe%BT%.
+* See docs/bridge.md for the full contract, the Dart loader order and the CI job
+  that exercises Rust and Dart together.
+
 ## Cross-crate rules
 
 * `batchhash-types` is read-only for everyone except the Lead.

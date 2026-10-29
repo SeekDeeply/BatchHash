@@ -19,7 +19,8 @@ UI 采用 Flutter + Material Design 3（动态取色、自适应布局），核�
 | 后缀写名、纯计划、SQLite 日志、跨会话撤销 | 已实现 | 计划不写盘、冲突检测、状态机、端到端 rename→log→undo |
 | 开发者 CLI（hash/report/diff/scan-diff/suffix/extract/probe） | 已实现 | 二进制端到端测试；见 [docs/cli.md](docs/cli.md) |
 | Flutter UI 外壳（MD3、自适应、双列对比、硬件面板） | 已实现（假数据服务） | `flutter analyze` + widget 测试 |
-| flutter_rust_bridge 真实桥接 | P0.5 进行中 | CI 构建产物 |
+| 原生桥接（JSON C ABI + dart:ffi） | 已实现 | CI job `Bridge (Rust FFI + Dart)`：真跑 Rust 库 |
+| UI 页面接入真实桥接（替换 fake 服务） | P0.5 进行中 | widget 测试 + 桥接测试 |
 
 ## 构建策略（重要）
 
@@ -77,6 +78,7 @@ scripts/              CI 构建辅助脚本（本地不执行构建）
 | [docs/android-saf.md](docs/android-saf.md) | Android SAF / fd / Kotlin 重命名职责边界 |
 | [docs/privacy-and-security.md](docs/privacy-and-security.md) | 隐私、截断哈希安全语义、导入校验 |
 | [docs/cli.md](docs/cli.md) | 开发者 CLI 命令、选项与退出码 |
+| [docs/bridge.md](docs/bridge.md) | 原生桥接 ABI 契约、Dart 绑定与 CI 校验方式 |
 | [docs/ci.md](docs/ci.md) | CI 流水线结构与"禁止本地构建"的落地方式 |
 
 ## 安全语义

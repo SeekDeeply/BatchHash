@@ -6,7 +6,20 @@
 UI 采用 Flutter + Material Design 3（动态取色、自适应布局），核心引擎使用 Rust 并通过
 `flutter_rust_bridge` 2.x 桥接。支持 Windows / macOS / Linux / Android / iOS。
 
-> 规划版本：v1.5 Final。本仓库当前处于 **P0（核心引擎 + CI 骨架）→ P0.5（桥接与平台基线）** 阶段。
+> 规划版本：v1.5 Final。**P0 已完成**：Rust 引擎四件套 + 报告/对比/写名/撤销 + 开发者 CLI + Flutter UI 外壳，
+> 全部由 CI 验证（格式、clippy、工作区测试、Flutter analyze/test、五平台 debug 构建）。当前向 **P0.5（flutter_rust_bridge 桥接）** 推进。
+
+## 当前状态
+
+| 能力 | 状态 | 验证方式（全部在 CI） |
+|---|---|---|
+| 16 算法单遍多哈希、fd 输入、Rayon 批处理、取消/进度/ETA | 已实现 | `cargo test --workspace`（含已知向量、单遍读取计数、scheduler 行为测试） |
+| 报告六导四入（JSON/CSV/MD/TXT/md5sum/BSD） | 已实现 | 金标准字节比对 + 往返测试 + 导入上限/穿越/未来 schema 拒绝 |
+| PathNormalizer + full outer join Diff + 流式对比 | 已实现 | 归一化用例表、8 组 diff 金标准、duplicate/ambiguous/incomplete 语义 |
+| 后缀写名、纯计划、SQLite 日志、跨会话撤销 | 已实现 | 计划不写盘、冲突检测、状态机、端到端 rename→log→undo |
+| 开发者 CLI（hash/report/diff/scan-diff/suffix/extract/probe） | 已实现 | 二进制端到端测试；见 [docs/cli.md](docs/cli.md) |
+| Flutter UI 外壳（MD3、自适应、双列对比、硬件面板） | 已实现（假数据服务） | `flutter analyze` + widget 测试 |
+| flutter_rust_bridge 真实桥接 | P0.5 进行中 | CI 构建产物 |
 
 ## 构建策略（重要）
 
@@ -63,6 +76,8 @@ scripts/              CI 构建辅助脚本（本地不执行构建）
 | [docs/rename-log-schema.md](docs/rename-log-schema.md) | 重命名日志 SQLite schema 与撤销状态机 |
 | [docs/android-saf.md](docs/android-saf.md) | Android SAF / fd / Kotlin 重命名职责边界 |
 | [docs/privacy-and-security.md](docs/privacy-and-security.md) | 隐私、截断哈希安全语义、导入校验 |
+| [docs/cli.md](docs/cli.md) | 开发者 CLI 命令、选项与退出码 |
+| [docs/ci.md](docs/ci.md) | CI 流水线结构与"禁止本地构建"的落地方式 |
 
 ## 安全语义
 

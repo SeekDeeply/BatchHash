@@ -217,3 +217,88 @@ pub fn call_json<T: Serialize>(value: T) -> String {
     }))
     .unwrap_or_else(|_| "{\"ok\":false,\"kind\":\"internal\",\"error\":\"serialise\"}".to_string())
 }
+
+/// Hash explicit root-relative paths. Request: see api::HashEntriesRequest.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_hash_entries(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::HashEntriesRequest = parse_request(request, false)?;
+        let run = api::hash_entries_request(&parsed)?;
+        serde_json::to_value(run).map_err(internal_error)
+    })
+}
+
+/// Plan suffix renames from entries that already carry their hashes.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_plan_renames(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::PlanRenamesRequest = parse_request(request, false)?;
+        let plan = api::plan_renames_request(&parsed)?;
+        serde_json::to_value(plan).map_err(internal_error)
+    })
+}
+
+/// Import a report file and return its canonical JSON.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_import_report(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::ImportReportRequest = parse_request(request, false)?;
+        let json = api::import_report_request(&parsed)?;
+        Ok(json!({ "report_json": json }))
+    })
+}
+
+/// Compare two stored reports.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_diff_reports(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::DiffReportsRequest = parse_request(request, false)?;
+        let diff = api::diff_reports_request(&parsed)?;
+        serde_json::to_value(diff).map_err(internal_error)
+    })
+}
+
+/// Compare a stored report against a live directory scan.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_diff_directory(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::DiffDirectoryRequest = parse_request(request, false)?;
+        let diff = api::diff_directory_request(&parsed)?;
+        serde_json::to_value(diff).map_err(internal_error)
+    })
+}
+
+/// List the batches stored in a rename log.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_list_batches(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::ListBatchesRequest = parse_request(request, false)?;
+        let batches = api::list_batches_request(&parsed)?;
+        serde_json::to_value(batches).map_err(internal_error)
+    })
+}
+

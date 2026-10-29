@@ -257,3 +257,166 @@ fn c_abi_probe_accepts_an_empty_request() {
     let profile = call_ok(unsafe { c_api::bh_probe(std::ptr::null()) });
     assert!(profile["arch"].is_string());
 }
+
+#[test]
+fn hash_entries_request_hashes_explicit_paths() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("a.txt"), b"alpha");
+    write(&temp.path().join("nested/b.txt"), b"bravo");
+
+    let run = batchhash_ffi::api::hash_entries_request(
+        &batchhash_ffi::api::HashEntriesRequest {
+            root: temp.path().to_string_lossy().into_owned(),
+            paths: vec!["a.txt".to_string(), "nested/b.txt".to_string()],
+            algorithms: vec!["md5".to_string()],
+            follow_links: false,
+        },
+    )
+    .expect("hash entries");
+    assert_eq!(run.total, 2);
+    assert_eq!(run.ok, 2);
+    assert_eq!(run.entries.len(), 2);
+    assert!(run.entries.iter().all(|entry| entry.hashes.len() == 1));
+    // Path traversal is rejected, not silently dropped.
+    let rejected = batchhash_ffi::api::hash_entries_request(
+        &batchhash_ffi::api::HashEntriesRequest {
+            root: temp.path().to_string_lossy().into_owned(),
+            paths: vec!["../escape.txt".to_string()],
+            algorithms: vec!["md5".to_string()],
+            follow_links: false,
+        },
+    )
+    .expect("hash entries");
+    assert_eq!(rejected.total, 0);
+    assert_eq!(rejected.skipped.len(), 1);
+}
+
+#[test]
+fn plan_renames_request_uses_the_supplied_hashes() {
+    let entry = batchhash_ffi::api::EntryInputDto {
+        path: "movie.mkv".to_string(),
+        display_path: None,
+        size: 5,
+        mtime: None,
+        hashes: vec![batchhash_ffi::api::HashDto {
+            algorithm: "md5".to_string(),
+            hex: "0123456789abcdef0123456789abcdef".to_string(),
+        }],
+    };
+    let plan = batchhash_ffi::api::plan_renames_request(&batchhash_ffi::api::PlanRenamesRequest {
+        entries: vec![entry],
+        algorithm: "md5".to_string(),
+        length: 8,
+        case: Some("upper".to_string()),
+        prefix: false,
+        overwrite: false,
+    })
+    .expect("plan");
+    assert_eq!(plan.summary.ready, 1);
+    assert_eq!(plan.rows.len(), 1);
+    assert!(plan.rows[0].proposed_name.starts_with("movie["));
+}
+
+#[test]
+fn import_diff_and_history_round_trip() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("a.txt"), b"alpha");
+    let log_db = temp.path().join("log/rename.db");
+
+    let mut request = batch_request(temp.path(), vec!["md5"]);
+    request.suffix = Some(SuffixDto {
+        algorithm: "md5".to_string(),
+        length: 8,
+        case: None,
+        prefix: false,
+    });
+    request.apply_renames = true;
+    request.log_db = Some(log_db.to_string_lossy().into_owned());
+    let applied = run_batch_request(&request).expect("run");
+
+    // Import the exported JSON through the bridge.
+    let report_path = temp.path().join("report.json");
+    write(&report_path, applied.report_json.as_bytes());
+    let imported = batchhash_ffi::api::import_report_request(
+        &batchhash_ffi::api::ImportReportRequest {
+            path: report_path.to_string_lossy().into_owned(),
+        },
+    )
+    .expect("import");
+    assert!(imported.contains("\"schema_version\": 1"));
+
+    // A report compared with itself is unchanged.
+    let diff = batchhash_ffi::api::diff_reports_request(&batchhash_ffi::api::DiffReportsRequest {
+        left_json: imported.clone(),
+        right_json: imported.clone(),
+        case_sensitive: None,
+    })
+    .expect("diff");
+    assert_eq!(diff.summary.changed, 0);
+    assert_eq!(diff.summary.removed, 0);
+
+    // Comparing against the live directory sees the renamed file.
+    let directory_diff =
+        batchhash_ffi::api::diff_directory_request(&batchhash_ffi::api::DiffDirectoryRequest {
+            report_json: imported,
+            directory: temp.path().to_string_lossy().into_owned(),
+            case_sensitive: None,
+            follow_links: false,
+        })
+        .expect("directory diff");
+    assert_eq!(directory_diff.summary.total, directory_diff.rows.len() as u64);
+
+    // The rename log lists the applied batch.
+    let batches = batchhash_ffi::api::list_batches_request(&batchhash_ffi::api::ListBatchesRequest {
+        db: log_db.to_string_lossy().into_owned(),
+    })
+    .expect("history");
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].file_count, 1);
+    assert_eq!(batches[0].applied_count, 1);
+    assert_eq!(batches[0].undone_count, 0);
+}
+
+#[test]
+fn c_abi_plan_and_diff_functions() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("a.txt"), b"alpha");
+
+    let plan_request = serde_json::json!({
+        "entries": [{
+            "path": "a.txt",
+            "hashes": [{"algorithm": "md5", "hex": "0123456789abcdef0123456789abcdef"}]
+        }],
+        "algorithm": "md5",
+        "length": 8,
+    });
+    let text = CString::new(serde_json::to_string(&plan_request).expect("json")).expect("cstr");
+    let plan = call_ok(unsafe { c_api::bh_plan_renames(text.as_ptr()) });
+    assert_eq!(plan["summary"]["ready"], 1);
+
+    let batch = serde_json::json!({
+        "root": temp.path().to_string_lossy(),
+        "algorithms": ["md5"],
+    });
+    let batch_text = CString::new(serde_json::to_string(&batch).expect("json")).expect("cstr");
+    let run = call_ok(unsafe { c_api::bh_run_batch(batch_text.as_ptr()) });
+    let report_json = run["report_json"].as_str().expect("report json").to_string();
+
+    let diff_request = serde_json::json!({
+        "left_json": report_json,
+        "right_json": report_json,
+    });
+    let diff_text = CString::new(serde_json::to_string(&diff_request).expect("json")).expect("cstr");
+    let diff = call_ok(unsafe { c_api::bh_diff_reports(diff_text.as_ptr()) });
+    assert_eq!(diff["summary"]["total"], 1);
+
+    let hash_request = serde_json::json!({
+        "root": temp.path().to_string_lossy(),
+        "paths": ["a.txt"],
+        "algorithms": ["sha256"],
+    });
+    let hash_text = CString::new(serde_json::to_string(&hash_request).expect("json")).expect("cstr");
+    let hashed = call_ok(unsafe { c_api::bh_hash_entries(hash_text.as_ptr()) });
+    assert_eq!(hashed["ok"], 1);
+}
+

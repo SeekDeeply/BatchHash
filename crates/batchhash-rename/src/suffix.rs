@@ -15,7 +15,7 @@
 //! should enable [`SuffixFormat::prefix_enabled`].
 
 use batchhash_types::{
-    default_suffix_algorithm, is_hex, spec_by_suffix_prefix, AlgorithmId, HexCase,
+    default_suffix_algorithm, is_hex, spec_by_suffix_prefix, AlgorithmId, HexCase, REGISTRY,
 };
 use serde::{Deserialize, Serialize};
 
@@ -308,10 +308,23 @@ fn utf16_len(value: &str) -> usize {
     value.encode_utf16().count()
 }
 
+/// Longest hex token accepted when parsing an existing filename.
+///
+/// Writing is limited to MIN_SUFFIX_LENGTH..=MAX_SUFFIX_LENGTH, but reverse
+/// extraction must also recognise full digests written by other tools (a 40
+/// character SHA-1, a 64 character BLAKE3, and so on), so parsing accepts any
+/// length up to the longest registered digest.
+fn max_parse_token_length() -> usize {
+    REGISTRY
+        .iter()
+        .map(|spec| spec.hex_len)
+        .max()
+        .unwrap_or(usize::from(MAX_SUFFIX_LENGTH))
+}
+
 fn is_hex_token(value: &str) -> bool {
     let min = usize::from(MIN_SUFFIX_LENGTH);
-    let max = usize::from(MAX_SUFFIX_LENGTH);
-    (min..=max).contains(&value.len()) && is_hex(value)
+    (min..=max_parse_token_length()).contains(&value.len()) && is_hex(value)
 }
 
 fn parse_suffix_token(content: &str) -> Option<ParsedSuffix> {

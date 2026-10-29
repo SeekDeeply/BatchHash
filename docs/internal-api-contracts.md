@@ -128,6 +128,29 @@ pub use log_store::{LogStore, BatchRecord, RenameOperation, OperationState, Undo
   renamed file still exists and the original name is free, marks conflicts instead of overwriting.
   Every write is an explicit call returning `Result`; use transactions.
 
+## batchhash-core
+
+%BT%%BT%%BT%rust
+pub mod scan;      // deterministic directory scanning into FileEntry
+pub mod pipeline;  // scan -> hash -> optional suffix write -> report -> rename log
+%BT%%BT%%BT%
+
+The facade crate is the only entry point the Flutter bridge and the CLI use. It
+re-exports the four engine crates and owns the two orchestration pieces:
+
+* %BT%scan(root, &ScanOptions) -> Result<ScanOutcome, ScanError>%BT% - forward-slash
+  relative paths, sorted entry order, symlink loop detection, unreadable children
+  become failed entries, unrepresentable paths go to %BT%ScanOutcome::skipped%BT%.
+* %BT%run_batch(&BatchRequest, &CancelToken, &(dyn Fn(PipelineEvent) + Sync)) ->
+  Result<BatchRun, PipelineError>%BT% - emits %BT%Phase%BT% / %BT%Progress%BT% /
+  %BT%EntryDone%BT% events, refuses to touch the filesystem after cancellation,
+  writes the SQLite rename log, annotates the report with
+  %BT%suffix_applied%BT%/%BT%suffix_algorithm%BT%/%BT%renamed_to%BT%, excludes the log database
+  from the scan and validates the report before returning.
+* %BT%BatchRun%BT% carries the final %BT%Report%BT%, the hashed %BT%entries%BT% (used by
+  realtime-directory diff), the dry-run %BT%plan%BT%, per-row %BT%rename_results%BT% and the
+  %BT%batch_id%BT% for undo.
+
 ## Cross-crate rules
 
 * `batchhash-types` is read-only for everyone except the Lead.

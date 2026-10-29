@@ -238,3 +238,76 @@ fn extract_classifies_suffixed_and_plain_names() {
     assert_eq!(tagged["hex"], "abcde1234");
     assert_eq!(tagged["token"], "ABCDE1234");
 }
+
+#[test]
+fn hash_write_suffix_renames_once_and_reports_the_token() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let file = temp.path().join("movie.mkv");
+    write_file(&file, b"movie-bytes");
+    let db = temp.path().join("log/rename.db");
+    let report_path = temp.path().join("report.json");
+
+    let output = Command::new(bin())
+        .args(["hash", "--algo", "md5", "--suffix-algo", "md5"])
+        .args(["--length", "8", "--write-suffix", "--format", "json", "--out"])
+        .arg(&report_path)
+        .arg("--db")
+        .arg(&db)
+        .arg(temp.path())
+        .output()
+        .expect("run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let bytes = fs::read(&report_path).expect("read report");
+    let report = import_report(&bytes, ReportFormat::Json).expect("import report");
+    let entry = report.entries.first().expect("one entry");
+    let token = entry.suffix_applied.clone().expect("suffix_applied");
+    assert_eq!(token.len(), 8);
+    assert_eq!(entry.suffix_algorithm, Some(AlgorithmId::Md5));
+    let renamed_to = entry.renamed_to.clone().expect("renamed_to");
+    assert!(renamed_to.contains('[') && renamed_to.ends_with("].mkv"));
+    assert!(db.exists(), "the rename log must be written");
+    assert!(!file.exists(), "the file must be renamed");
+    assert!(temp.path().join(&renamed_to).exists());
+
+    // Re-running is idempotent: the already suffixed name is skipped.
+    let again = Command::new(bin())
+        .args(["hash", "--algo", "md5", "--suffix-algo", "md5"])
+        .args(["--length", "8", "--write-suffix", "--dry-run", "--format", "json"])
+        .arg(format!("--db={}", db.display()))
+        .arg(temp.path())
+        .output()
+        .expect("run");
+    assert!(
+        again.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&again.stderr);
+    assert!(stderr.contains("0 ready"), "stderr: {stderr}");
+}
+
+#[test]
+fn hash_write_suffix_dry_run_does_not_rename() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let file = temp.path().join("movie.mkv");
+    write_file(&file, b"movie-bytes");
+
+    let output = Command::new(bin())
+        .args(["hash", "--algo", "md5", "--write-suffix", "--dry-run"])
+        .args(["--format", "json", "--quiet"])
+        .arg(temp.path())
+        .output()
+        .expect("run");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(file.exists(), "a dry run must not rename");
+}
+

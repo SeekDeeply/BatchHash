@@ -33,6 +33,28 @@ batchhash hash <path...> \
 - 默认算法为 `sha256,md5,blake3`；报告头记录 `hardware` 与 `algorithms`。
 - 进度条只在 stderr 是终端时输出，`--quiet` 关闭。
 
+### hash --write-suffix（合并流程）
+
+一次 I/O 完成「计算哈希 + 写名字后缀 + 生成报告 + 记录日志」：
+
+```sh
+# 只规划后缀（不重命名）
+batchhash hash /data/media --algo sha256 --write-suffix --dry-run --format json
+
+# 真正重命名，并写入 SQLite 日志
+batchhash hash /data/media \
+  --algo sha256 --write-suffix \
+  --suffix-algo blake3 --length 8 --case upper \
+  --db /data/media/.batchhash-rename.db \
+  --format markdown --out report.md
+```
+
+- 报告中的每个被改写条目都会带 `suffix_applied` / `suffix_algorithm` / `renamed_to`，
+  方便之后反向校验。
+- 日志数据库默认放在被扫描根目录下（`.batchhash-rename.db`），并且**会被自动排除**在扫描结果之外，
+  连同 `-wal` / `-shm` 辅助文件。
+- 取消（cancel）发生在重命名阶段之前时，不会改动任何文件。
+
 ### report
 
 检测 → 导入 → 再导出，用于格式转换与规范化。

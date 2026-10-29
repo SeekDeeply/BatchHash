@@ -21,6 +21,7 @@ batchhash-types = { path = "crates/batchhash-types" }
 batchhash-hash = { path = "crates/batchhash-hash" }
 batchhash-report = { path = "crates/batchhash-report" }
 batchhash-rename = { path = "crates/batchhash-rename" }
+batchhash-core = { path = "crates/batchhash-core" }
 
 serde = { version = "1.0.210", features = ["derive"] }
 serde_json = { version = "1.0.128", features = ["preserve_order"] }

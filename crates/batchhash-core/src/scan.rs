@@ -19,9 +19,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use batchhash_types::{
-    validate_relative_path, EntryStatus, ErrorKind, FileEntry, RootKind,
-};
+use batchhash_types::{validate_relative_path, EntryStatus, ErrorKind, FileEntry, RootKind};
 
 /// Maximum directory depth the scanner walks before reporting an error.
 pub const DEFAULT_MAX_DEPTH: usize = 64;

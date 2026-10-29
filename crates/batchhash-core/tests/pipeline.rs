@@ -5,9 +5,7 @@
 use std::fs;
 use std::path::Path;
 
-use batchhash_core::pipeline::{
-    run_batch, BatchPhase, BatchRequest, PipelineError, PipelineEvent,
-};
+use batchhash_core::pipeline::{run_batch, BatchPhase, BatchRequest, PipelineError, PipelineEvent};
 use batchhash_core::scan::{scan, ScanOptions};
 use batchhash_hash::CancelToken;
 use batchhash_rename::suffix::{SuffixFormat, SuffixParseResult};
@@ -50,7 +48,11 @@ fn scan_orders_entries_and_normalises_relative_paths() {
     for entry in &outcome.entries {
         assert!(entry.status.is_ok());
         assert_eq!(entry.root_kind, RootKind::Fs);
-        assert!(entry.display_path.contains(&entry.relative_path.replace('/', std::path::MAIN_SEPARATOR_STR)));
+        assert!(entry.display_path.contains(
+            &entry
+                .relative_path
+                .replace('/', std::path::MAIN_SEPARATOR_STR)
+        ));
     }
 }
 
@@ -71,7 +73,10 @@ fn scan_reports_a_missing_root() {
     let temp = tempfile::tempdir().expect("tempdir");
     let error = scan(&temp.path().join("nope"), &ScanOptions::default()).expect_err("must fail");
     let message = error.to_string();
-    assert!(message.contains("cannot read batch root"), "message: {message}");
+    assert!(
+        message.contains("cannot read batch root"),
+        "message: {message}"
+    );
 }
 
 #[cfg(unix)]
@@ -89,11 +94,8 @@ fn scan_detects_symlink_loops_when_following_links() {
         .collect();
     assert_eq!(names, vec!["dir/file.txt"]);
 
-    let followed = scan(
-        temp.path(),
-        &ScanOptions::default().with_follow_links(true),
-    )
-    .expect("scan");
+    let followed =
+        scan(temp.path(), &ScanOptions::default().with_follow_links(true)).expect("scan");
     // The loop terminates and no entry appears twice.
     let mut paths: Vec<&str> = followed
         .entries
@@ -129,7 +131,11 @@ fn pipeline_hashes_and_builds_a_valid_report() {
     assert_eq!(run.report.summary.total, 2);
     assert_eq!(run.report.summary.ok, 2);
     assert_eq!(run.report.entries.len(), 2);
-    assert!(run.report.entries.iter().all(|entry| entry.hashes.len() == 2));
+    assert!(run
+        .report
+        .entries
+        .iter()
+        .all(|entry| entry.hashes.len() == 2));
     assert!(run.plan.is_none());
     assert!(run.batch_id.is_none());
     assert!(!run.cancelled);
@@ -151,8 +157,8 @@ fn pipeline_suffix_dry_run_never_touches_the_filesystem() {
     let file = temp.path().join("movie.mkv");
     write(&file, b"movie");
 
-    let request = BatchRequest::new(temp.path(), vec![AlgorithmId::Md5])
-        .with_suffix_dry_run(md5_format());
+    let request =
+        BatchRequest::new(temp.path(), vec![AlgorithmId::Md5]).with_suffix_dry_run(md5_format());
     let run = run_batch(&request, &CancelToken::new(), &no_events).expect("run");
     let plan = run.plan.expect("plan");
     assert_eq!(plan.summary.ready, 1);
@@ -169,8 +175,8 @@ fn pipeline_suffix_apply_writes_log_and_annotates_the_report() {
     write(&file, b"movie");
     let db = temp.path().join("logs/rename.db");
 
-    let request = BatchRequest::new(temp.path(), vec![AlgorithmId::Md5])
-        .with_suffix(md5_format(), &db);
+    let request =
+        BatchRequest::new(temp.path(), vec![AlgorithmId::Md5]).with_suffix(md5_format(), &db);
     let run = run_batch(&request, &CancelToken::new(), &no_events).expect("run");
     assert!(db.exists(), "rename log must be created");
     let batch_id = run.batch_id.clone().expect("batch id");
@@ -253,7 +259,8 @@ fn invalid_suffix_format_is_rejected_before_scanning() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut format = md5_format();
     format.length = 3;
-    let request = BatchRequest::new(temp.path(), vec![AlgorithmId::Md5]).with_suffix_dry_run(format);
+    let request =
+        BatchRequest::new(temp.path(), vec![AlgorithmId::Md5]).with_suffix_dry_run(format);
     let error = run_batch(&request, &CancelToken::new(), &no_events).expect_err("must fail");
     assert!(matches!(error, PipelineError::Suffix(_)));
 }

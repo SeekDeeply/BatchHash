@@ -197,9 +197,7 @@ fn parse_format(name: &str) -> CliResult<ReportFormat> {
                 || format.extension() == name
                 || (*format == ReportFormat::Markdown && name == "md")
         })
-        .ok_or_else(|| {
-            format!("unknown format '{name}' (json, csv, markdown, txt, md5sum, bsd)")
-        })
+        .ok_or_else(|| format!("unknown format '{name}' (json, csv, markdown, txt, md5sum, bsd)"))
 }
 
 fn emit(text: &str, out: Option<&Path>) -> CliResult<()> {
@@ -316,11 +314,7 @@ fn cmd_hash(args: &[String]) -> CliResult<()> {
     }
     let algorithms = match parsed.value("algo") {
         Some(list) => parse_algorithms(list)?,
-        None => vec![
-            AlgorithmId::Sha256,
-            AlgorithmId::Md5,
-            AlgorithmId::Blake3,
-        ],
+        None => vec![AlgorithmId::Sha256, AlgorithmId::Md5, AlgorithmId::Blake3],
     };
     let format = match parsed.value("format") {
         Some(name) => parse_format(name)?,
@@ -438,7 +432,10 @@ fn cmd_report(args: &[String]) -> CliResult<()> {
     emit(&text, parsed.value("out").map(Path::new))?;
     eprintln!(
         "{} entrie(s): {} ok, {} failed, {} skipped, root {}",
-        report.summary.total, report.summary.ok, report.summary.failed, report.summary.skipped,
+        report.summary.total,
+        report.summary.ok,
+        report.summary.failed,
+        report.summary.skipped,
         report.root
     );
     Ok(())
@@ -717,8 +714,8 @@ fn cmd_suffix_undo(args: &[String]) -> CliResult<()> {
     }
     emit(&text, parsed.value("out").map(Path::new))?;
     if parsed.switch("apply") && !parsed.switch("dry-run") {
-        let results = apply_undo(&plan, &mut StdFsBackend, &mut store)
-            .map_err(|error| error.to_string())?;
+        let results =
+            apply_undo(&plan, &mut StdFsBackend, &mut store).map_err(|error| error.to_string())?;
         eprintln!(
             "undo: {} operation(s) processed, {ready} were ready",
             results.len()

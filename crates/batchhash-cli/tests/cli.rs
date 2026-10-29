@@ -252,7 +252,14 @@ fn hash_write_suffix_renames_once_and_reports_the_token() {
 
     let output = Command::new(bin())
         .args(["hash", "--algo", "md5", "--suffix-algo", "md5"])
-        .args(["--length", "8", "--write-suffix", "--format", "json", "--out"])
+        .args([
+            "--length",
+            "8",
+            "--write-suffix",
+            "--format",
+            "json",
+            "--out",
+        ])
         .arg(&report_path)
         .arg("--db")
         .arg(&db)
@@ -282,7 +289,14 @@ fn hash_write_suffix_renames_once_and_reports_the_token() {
     assert!(db.exists());
     let again = Command::new(bin())
         .args(["hash", "--algo", "md5", "--suffix-algo", "md5"])
-        .args(["--length", "8", "--write-suffix", "--dry-run", "--format", "json"])
+        .args([
+            "--length",
+            "8",
+            "--write-suffix",
+            "--dry-run",
+            "--format",
+            "json",
+        ])
         .arg(format!("--db={}", db.display()))
         .arg(temp.path())
         .output()
@@ -315,4 +329,3 @@ fn hash_write_suffix_dry_run_does_not_rename() {
     );
     assert!(file.exists(), "a dry run must not rename");
 }
-

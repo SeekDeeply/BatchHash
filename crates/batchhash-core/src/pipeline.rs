@@ -329,10 +329,7 @@ pub fn run_batch(
         mark_all_cancelled(&mut run.report, &entries);
         run.entries = entries;
         run.cancelled = true;
-        run.report.generated_at = request
-            .generated_at
-            .clone()
-            .unwrap_or_else(now_rfc3339);
+        run.report.generated_at = request.generated_at.clone().unwrap_or_else(now_rfc3339);
         run.report.sort_entries();
         run.report.validate()?;
         run.elapsed_ms = elapsed_millis(started);
@@ -399,10 +396,7 @@ pub fn run_batch(
     }
     run.entries = hashed;
 
-    run.report.generated_at = request
-        .generated_at
-        .clone()
-        .unwrap_or_else(now_rfc3339);
+    run.report.generated_at = request.generated_at.clone().unwrap_or_else(now_rfc3339);
     run.report.recompute_summary();
     run.report.sort_entries();
     run.report.validate()?;
@@ -507,7 +501,10 @@ fn annotate_suffix(
     }
 }
 
-fn proposed_relative_path(original_relative: &str, row: &batchhash_rename::planner::RenamePlanRow) -> String {
+fn proposed_relative_path(
+    original_relative: &str,
+    row: &batchhash_rename::planner::RenamePlanRow,
+) -> String {
     match original_relative.rsplit_once('/') {
         Some((parent, _)) => format!("{parent}/{}", row.proposed_name),
         None => row.proposed_name.clone(),

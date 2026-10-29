@@ -87,11 +87,25 @@ class BatchHashNative {
       'macos' => 'libbatchhash_ffi.dylib',
       _ => 'libbatchhash_ffi.so',
     };
-    try {
-      return BatchHashNative.open(name);
-    } on BridgeUnavailable {
-      return null;
+    // Desktop bundles keep the library next to the executable, in a lib/
+    // subdirectory (Linux) or in Contents/Frameworks (macOS .app); Android
+    // resolves the plain file name from the APK native library directory.
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    final candidates = <String>[
+      '$exeDir/$name',
+      '$exeDir/lib/$name',
+      '$exeDir/../Frameworks/$name',
+      '$exeDir/../Resources/$name',
+      name,
+    ];
+    for (final candidate in candidates) {
+      try {
+        return BatchHashNative.open(candidate);
+      } on BridgeUnavailable {
+        continue;
+      }
     }
+    return null;
   }
 
   /// Bridge contract version, C ABI version, tool name and tool version.

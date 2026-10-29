@@ -1,0 +1,104 @@
+name: Release check
+
+# Verifies that release-profile artifacts actually contain the Rust core before a
+# version tag is pushed. Dispatch it, then read the job log; the same steps run
+# inside release.yml when a v* tag is created.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux-release:
+    name: Linux release bundle + native library
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install GTK toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: |
+          flutter create --platforms=linux --project-name batchhash .
+          flutter pub get
+      - name: Build the Rust core
+        run: cargo build -p batchhash-ffi --release
+      - name: Build release
+        working-directory: app
+        run: flutter build linux --release
+      - name: Bundle and verify the native library
+        run: |
+          set -e
+          bundle="app/build/linux/x64/release/bundle/lib"
+          mkdir -p "$bundle"
+          cp target/release/libbatchhash_ffi.so "$bundle/"
+          test -f "$bundle/libbatchhash_ffi.so"
+          tar -czf /tmp/BatchHash-linux-check.tar.gz -C app/build/linux/x64/release/bundle .
+          tar -tzf /tmp/BatchHash-linux-check.tar.gz | grep 'lib/libbatchhash_ffi.so'
+          echo "release bundle contains the Rust core"
+
+  android-release:
+    name: Android release artifacts + native library
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Rust (stable, Android targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-ndk
+        run: |
+          if ! command -v cargo-ndk >/dev/null 2>&1; then
+            cargo install cargo-ndk --locked
+          fi
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: |
+          flutter create --platforms=android --project-name batchhash .
+          flutter pub get
+      - name: Build the Rust core for Android
+        run: |
+          set -e
+          cargo ndk -t arm64-v8a -t x86_64 -o app/android/app/src/main/jniLibs \
+            build -p batchhash-ffi --release
+          test -f app/android/app/src/main/jniLibs/arm64-v8a/libbatchhash_ffi.so
+          test -f app/android/app/src/main/jniLibs/x86_64/libbatchhash_ffi.so
+      - name: Build release artifacts
+        working-directory: app
+        run: |
+          flutter build appbundle --release
+          flutter build apk --release --split-per-abi
+      - name: Verify the native library is packaged
+        run: |
+          set -e
+          for apk in app/build/app/outputs/flutter-apk/app-*-release.apk; do
+            echo "checking $apk"
+            unzip -l "$apk" | grep -E 'lib/arm64-v8a/libbatchhash_ffi.so'
+          done
+          unzip -l app/build/app/outputs/bundle/release/app-release.aab | grep -E 'lib/arm64-v8a/libbatchhash_ffi.so'
+          echo "release artifacts contain the Rust core"

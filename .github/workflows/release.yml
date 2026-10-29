@@ -26,9 +26,29 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust (stable, Android targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Install cargo-ndk
+        run: |
+          if ! command -v cargo-ndk >/dev/null 2>&1; then
+            cargo install cargo-ndk --locked
+          fi
       - name: Generate platform scaffolding
         working-directory: app
-        run: flutter create --platforms=android --project-name batchhash .
+        run: |
+          flutter create --platforms=android --project-name batchhash .
+          flutter pub get
+      - name: Build the Rust core for Android
+        run: |
+          set -e
+          cargo ndk -t arm64-v8a -t x86_64 -o app/android/app/src/main/jniLibs \
+            build -p batchhash-ffi --release
+          test -f app/android/app/src/main/jniLibs/arm64-v8a/libbatchhash_ffi.so
+          test -f app/android/app/src/main/jniLibs/x86_64/libbatchhash_ffi.so
       - name: Configure signing (optional)
         if: env.ANDROID_KEYSTORE_BASE64 != ''
         env:
@@ -45,9 +65,16 @@ jobs:
       - name: Build release
         working-directory: app
         run: |
-          flutter pub get
           flutter build appbundle --release
           flutter build apk --release --split-per-abi
+      - name: Verify the native library is packaged
+        run: |
+          set -e
+          for apk in app/build/app/outputs/flutter-apk/app-*-release.apk; do
+            echo "checking $apk"
+            unzip -l "$apk" | grep -E 'lib/arm64-v8a/libbatchhash_ffi.so'
+          done
+          unzip -l app/build/app/outputs/bundle/release/app-release.aab | grep -E 'lib/arm64-v8a/libbatchhash_ffi.so'
       - name: Collect artifacts
         run: |
           mkdir -p dist
@@ -69,9 +96,31 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust (stable, iOS targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
       - name: Generate platform scaffolding
         working-directory: app
-        run: flutter create --platforms=ios --project-name batchhash .
+        run: |
+          flutter create --platforms=ios --project-name batchhash .
+          flutter pub get
+      # NOTE: the static library is built and shipped with the release, but wiring
+      # it into the Runner target (-force_load / local podspec) is still pending,
+      # so an iOS build falls back to the fake service until that lands.
+      - name: Build the Rust core (static library)
+        run: |
+          set -e
+          cargo build -p batchhash-ffi --release --target aarch64-apple-ios
+          cargo build -p batchhash-ffi --release --target aarch64-apple-ios-sim
+          mkdir -p dist
+          lipo -create \
+            target/aarch64-apple-ios/release/libbatchhash_ffi.a \
+            target/aarch64-apple-ios-sim/release/libbatchhash_ffi.a \
+            -output dist/libbatchhash_ffi-fat.a
+          ls -lh dist
       - name: Import signing certificate (optional)
         if: env.APPLE_CERTIFICATE_BASE64 != ''
         env:
@@ -120,14 +169,29 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
       - name: Generate platform scaffolding
         working-directory: app
-        run: flutter create --platforms=macos --project-name batchhash .
+        run: |
+          flutter create --platforms=macos --project-name batchhash .
+          flutter pub get
+      - name: Build the Rust core
+        run: cargo build -p batchhash-ffi --release
       - name: Build release
         working-directory: app
+        run: flutter build macos --release
+      - name: Bundle the native library
         run: |
-          flutter pub get
-          flutter build macos --release
+          set -e
+          app_path=$(ls -d app/build/macos/Build/Products/Release/*.app | head -1)
+          frameworks="$app_path/Contents/Frameworks"
+          mkdir -p "$frameworks"
+          cp target/release/libbatchhash_ffi.dylib "$frameworks/"
+          test -f "$frameworks/libbatchhash_ffi.dylib"
+          codesign --force --verbose=2 --sign - "$frameworks/libbatchhash_ffi.dylib"
       - name: Package
         run: |
           mkdir -p dist
@@ -151,14 +215,27 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
       - name: Generate platform scaffolding
         working-directory: app
-        run: flutter create --platforms=windows --project-name batchhash .
+        run: |
+          flutter create --platforms=windows --project-name batchhash .
+          flutter pub get
+      - name: Build the Rust core
+        run: cargo build -p batchhash-ffi --release
       - name: Build release
         working-directory: app
+        run: flutter build windows --release
+      - name: Bundle the native library
+        shell: pwsh
         run: |
-          flutter pub get
-          flutter build windows --release
+          $release = "app/build/windows/x64/runner/Release"
+          Copy-Item "target/release/batchhash_ffi.dll" -Destination $release
+          if (-not (Test-Path "$release/batchhash_ffi.dll")) { throw "batchhash_ffi.dll is missing" }
+          Get-ChildItem $release | Select-Object -First 10 Name
       - name: Package
         shell: pwsh
         run: |
@@ -183,18 +260,32 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
       - name: Generate platform scaffolding
         working-directory: app
-        run: flutter create --platforms=linux --project-name batchhash .
+        run: |
+          flutter create --platforms=linux --project-name batchhash .
+          flutter pub get
+      - name: Build the Rust core
+        run: cargo build -p batchhash-ffi --release
       - name: Build release
         working-directory: app
+        run: flutter build linux --release
+      - name: Bundle the native library
         run: |
-          flutter pub get
-          flutter build linux --release
+          set -e
+          bundle="app/build/linux/x64/release/bundle/lib"
+          mkdir -p "$bundle"
+          cp target/release/libbatchhash_ffi.so "$bundle/"
+          test -f "$bundle/libbatchhash_ffi.so"
       - name: Package
         run: |
           mkdir -p dist
           tar -czf dist/BatchHash-linux.tar.gz -C app/build/linux/x64/release/bundle .
+          tar -tzf dist/BatchHash-linux.tar.gz | grep 'lib/libbatchhash_ffi.so'
           ls -lh dist
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')

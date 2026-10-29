@@ -1,0 +1,24 @@
+[package]
+name = "batchhash-ffi"
+description = "BatchHash native bridge: JSON C ABI over batchhash-core for the Flutter app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "batchhash_ffi"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[dependencies]
+batchhash-core = { workspace = true }
+batchhash-types = { workspace = true }
+batchhash-hash = { workspace = true }
+batchhash-report = { workspace = true }
+batchhash-rename = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

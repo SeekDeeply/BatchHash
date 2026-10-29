@@ -88,6 +88,34 @@ jobs:
         working-directory: app
         run: flutter test --reporter expanded
 
+  bridge:
+    name: Bridge (Rust FFI + Dart)
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build native library
+        run: cargo build -p batchhash-ffi --release
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: flutter create --platforms=android,ios,linux,macos,windows --project-name batchhash .
+      - name: Pub get
+        working-directory: app
+        run: flutter pub get
+      - name: Bridge integration test
+        working-directory: app
+        env:
+          BATCHHASH_FFI_LIB: ${{ github.workspace }}/target/release/libbatchhash_ffi.so
+        run: flutter test test/bridge --reporter expanded
+
   build-linux:
     name: Build Linux (debug)
     needs: [detect, flutter]

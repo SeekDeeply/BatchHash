@@ -178,10 +178,7 @@ class BatchHashNative {
   }
 
   /// Re-export a report JSON document in another format.
-  String exportReport({
-    required String reportJson,
-    required String format,
-  }) {
+  String exportReport({required String reportJson, required String format}) {
     final data = _decodeMap(
       _callJson(_export, <String, Object?>{
         'report_json': reportJson,

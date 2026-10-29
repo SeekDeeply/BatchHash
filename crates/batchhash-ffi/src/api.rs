@@ -485,8 +485,8 @@ pub fn run_batch_request(request: &BatchRequestDto) -> Result<BatchResultDto, Ap
 
 /// Plan and optionally execute an undo for one batch.
 pub fn undo(request: &UndoRequestDto) -> Result<UndoResultDto, ApiError> {
-    let mut store = LogStore::open(&request.db)
-        .map_err(|error| ApiError::new("log", error.to_string()))?;
+    let mut store =
+        LogStore::open(&request.db).map_err(|error| ApiError::new("log", error.to_string()))?;
     let batch_id = match &request.batch_id {
         Some(id) => id.clone(),
         None => store

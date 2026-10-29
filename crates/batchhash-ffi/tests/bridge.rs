@@ -36,7 +36,10 @@ fn batch_request(root: &std::path::Path, algorithms: Vec<&str>) -> BatchRequestD
 fn algorithms_cover_the_registry() {
     let list = algorithms();
     assert_eq!(list.len(), batchhash_types::REGISTRY.len());
-    let sha256 = list.iter().find(|item| item.id == "sha256").expect("sha256");
+    let sha256 = list
+        .iter()
+        .find(|item| item.id == "sha256")
+        .expect("sha256");
     assert_eq!(sha256.hex_len, 64);
     assert!(sha256.suffix_usable);
     let crc32 = list.iter().find(|item| item.id == "crc32").expect("crc32");
@@ -219,7 +222,8 @@ fn c_abi_scan_and_batch() {
         "root": temp.path().to_string_lossy(),
         "follow_links": false,
     });
-    let scan_text = CString::new(serde_json::to_string(&scan_request).expect("json")).expect("cstr");
+    let scan_text =
+        CString::new(serde_json::to_string(&scan_request).expect("json")).expect("cstr");
     let scanned = call_ok(unsafe { c_api::bh_scan(scan_text.as_ptr()) });
     assert_eq!(scanned["entries"].as_array().expect("entries").len(), 1);
 
@@ -229,7 +233,12 @@ fn c_abi_scan_and_batch() {
     });
     let batch_text = CString::new(serde_json::to_string(&batch).expect("json")).expect("cstr");
     let run = call_ok(unsafe { c_api::bh_run_batch(batch_text.as_ptr()) });
-    assert_eq!(run["ok"].as_u64().unwrap_or(run["total"].as_u64().unwrap_or(1)), 1);
+    assert_eq!(
+        run["ok"]
+            .as_u64()
+            .unwrap_or(run["total"].as_u64().unwrap_or(1)),
+        1
+    );
     assert_eq!(run["entries"].as_array().expect("entries").len(), 1);
 }
 

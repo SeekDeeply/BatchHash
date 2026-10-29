@@ -19,9 +19,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use serde::Serialize;
 use serde_json::json;
 
-use crate::api::{
-    self, ApiError, BatchRequestDto, ProbeRequest, ScanRequest, UndoRequestDto,
-};
+use crate::api::{self, ApiError, BatchRequestDto, ProbeRequest, ScanRequest, UndoRequestDto};
 
 /// Version of the C ABI (bumped when the envelope shape changes).
 pub const C_ABI_VERSION: u32 = 1;

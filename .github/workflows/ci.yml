@@ -116,6 +116,72 @@ jobs:
           BATCHHASH_FFI_LIB: ${{ github.workspace }}/target/release/libbatchhash_ffi.so
         run: flutter test test/bridge --reporter expanded
 
+  package-native:
+    name: Package native library (Linux + Android)
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Generate platform scaffolding
+        working-directory: app
+        run: |
+          flutter create --platforms=android,linux --project-name batchhash .
+          flutter pub get
+      - name: Install cargo-ndk
+        run: |
+          if ! command -v cargo-ndk >/dev/null 2>&1; then
+            cargo install cargo-ndk --locked
+          fi
+      - name: Build Android native libraries
+        run: |
+          set -e
+          cargo ndk -t arm64-v8a -t x86_64 -o app/android/app/src/main/jniLibs \
+            build -p batchhash-ffi --release
+          find app/android/app/src/main/jniLibs -type f -name '*.so' -print
+          test -f app/android/app/src/main/jniLibs/arm64-v8a/libbatchhash_ffi.so
+          test -f app/android/app/src/main/jniLibs/x86_64/libbatchhash_ffi.so
+      - name: Install GTK toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+      - name: Build Linux bundle with the native library
+        run: |
+          set -e
+          cargo build -p batchhash-ffi --release
+          cd app
+          flutter build linux --debug
+          bundle="build/linux/x64/debug/bundle/lib"
+          mkdir -p "$bundle"
+          cp ../target/release/libbatchhash_ffi.so "$bundle/"
+          test -f "$bundle/libbatchhash_ffi.so"
+          ls -la "$bundle" | head -10
+      - name: Build Android APK with the native libraries
+        run: |
+          set -e
+          cd app
+          flutter build apk --debug
+          apk="build/app/outputs/flutter-apk/app-debug.apk"
+          test -f "$apk"
+          unzip -l "$apk" | grep -E 'lib/arm64-v8a/libbatchhash_ffi.so'
+          unzip -l "$apk" | grep -E 'lib/x86_64/libbatchhash_ffi.so'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batchhash-native-library
+          path: |
+            target/release/libbatchhash_ffi.so
+            app/android/app/src/main/jniLibs
+          if-no-files-found: error
+
   build-linux:
     name: Build Linux (debug)
     needs: [detect, flutter]

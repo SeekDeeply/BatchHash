@@ -245,7 +245,10 @@ fn hash_write_suffix_renames_once_and_reports_the_token() {
     let file = temp.path().join("movie.mkv");
     write_file(&file, b"movie-bytes");
     let db = temp.path().join("log/rename.db");
-    let report_path = temp.path().join("report.json");
+    // The report is written outside the scanned root so it cannot be hashed by
+    // the same run (and cannot influence the idempotency check below).
+    let out = tempfile::tempdir().expect("out dir");
+    let report_path = out.path().join("report.json");
 
     let output = Command::new(bin())
         .args(["hash", "--algo", "md5", "--suffix-algo", "md5"])
@@ -274,7 +277,9 @@ fn hash_write_suffix_renames_once_and_reports_the_token() {
     assert!(!file.exists(), "the file must be renamed");
     assert!(temp.path().join(&renamed_to).exists());
 
-    // Re-running is idempotent: the already suffixed name is skipped.
+    // Re-running is idempotent: the file already carries a suffix, and the log
+    // database inside the root is excluded from the scan.
+    assert!(db.exists());
     let again = Command::new(bin())
         .args(["hash", "--algo", "md5", "--suffix-algo", "md5"])
         .args(["--length", "8", "--write-suffix", "--dry-run", "--format", "json"])

@@ -1172,7 +1172,9 @@ mod tests {
         let mut streaming = StreamingDiff::new(&report, &options()).expect("valid report");
         let first = streaming.push_entry(file_entry("a.mkv", md5('a')));
         assert_eq!(first.len(), 1);
-        let duplicate = streaming.push_entry(file_entry("sub/a.mkv", md5('a')));
+        // Comparison defaults to case-insensitive, so a different spelling maps
+        // to the same key and must be buffered instead of emitted immediately.
+        let duplicate = streaming.push_entry(file_entry("A.MKV", md5('a')));
         assert!(duplicate.is_empty());
         let diff = streaming.finish(true);
         assert_eq!(diff.rows.len(), 1);

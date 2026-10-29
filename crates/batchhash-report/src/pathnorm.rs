@@ -404,8 +404,16 @@ mod tests {
             "sub/a.mkv"
         );
         let sensitive = sensitive();
+        // Case-sensitive mode still matches the root prefix exactly and keeps
+        // the remainder's case; only a different root prefix is out of root.
         assert_eq!(
-            sensitive.relative_to_root("/data/media/Sub/A.MKV", "/data/media"),
+            sensitive
+                .relative_to_root("/data/media/Sub/A.MKV", "/data/media")
+                .unwrap(),
+            "Sub/A.MKV"
+        );
+        assert_eq!(
+            sensitive.relative_to_root("/Data/Media/Sub/A.MKV", "/data/media"),
             Err(NormalizeError::OutOfRoot)
         );
     }

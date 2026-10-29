@@ -19,7 +19,6 @@ md-5 = { workspace = true }
 xxhash-rust = { workspace = true }
 crc32fast = { workspace = true }
 crc32c = { workspace = true }
-cpufeatures = { workspace = true }
 indexmap = { workspace = true }
 memmap2 = { workspace = true }
 thiserror = { workspace = true }

@@ -167,8 +167,6 @@ pub struct BatchRun {
     pub report: Report,
     /// Entries after hashing (input order), with hashes and statuses.
     pub entries: Vec<FileEntry>,
-    /// Entries after hashing (input order), including hashes and statuses.
-    pub entries: Vec<FileEntry>,
     /// Dry-run rename plan when suffix writing was requested.
     pub plan: Option<RenamePlan>,
     /// Per-row rename results when renames were executed.
@@ -180,7 +178,7 @@ pub struct BatchRun {
     /// Whether cancellation was requested.
     pub cancelled: bool,
     /// Wall-clock duration in milliseconds.
-    pub elapsed_ms: u128,
+    pub elapsed_ms: u64,
 }
 
 /// Failures that abort a pipeline run.

@@ -302,7 +302,6 @@ pub unsafe extern "C" fn bh_list_batches(request: *const c_char) -> *mut c_char 
     })
 }
 
-
 /// Build canonical report JSON from entries the UI already holds.
 ///
 /// # Safety
@@ -316,4 +315,3 @@ pub unsafe extern "C" fn bh_build_report(request: *const c_char) -> *mut c_char 
         Ok(json!({ "report_json": report_json }))
     })
 }
-

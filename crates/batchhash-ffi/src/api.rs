@@ -481,8 +481,11 @@ pub fn run_batch_request(request: &BatchRequestDto) -> Result<BatchResultDto, Ap
         entries: {
             let mut dtos: Vec<EntryDto> = run.entries.iter().map(entry_dto).collect();
             for dto in dtos.iter_mut() {
-                if let Some(report_entry) =
-                    run.report.entries.iter().find(|entry| entry.path == dto.path)
+                if let Some(report_entry) = run
+                    .report
+                    .entries
+                    .iter()
+                    .find(|entry| entry.path == dto.path)
                 {
                     dto.suffix_applied = report_entry.suffix_applied.clone();
                     dto.renamed_to = report_entry.renamed_to.clone();
@@ -913,13 +916,10 @@ pub fn hash_entries_request(request: &HashEntriesRequest) -> Result<BatchResultD
         let (size, mtime) = match metadata {
             Ok(metadata) => (
                 metadata.len(),
-                metadata
-                    .modified()
-                    .ok()
-                    .map(|time| {
-                        let converted: chrono::DateTime<chrono::Utc> = time.into();
-                        converted.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-                    }),
+                metadata.modified().ok().map(|time| {
+                    let converted: chrono::DateTime<chrono::Utc> = time.into();
+                    converted.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                }),
             ),
             Err(error) => {
                 let mut entry = FileEntry::new(
@@ -1141,15 +1141,14 @@ fn parse_report_json(json: &str) -> Result<Report, ApiError> {
 pub fn diff_reports_request(request: &DiffReportsRequest) -> Result<DiffResultDto, ApiError> {
     let left = parse_report_json(&request.left_json)?;
     let right = parse_report_json(&request.right_json)?;
-    let diff = batchhash_report::diff::diff_reports(&left, &right, &diff_options(request.case_sensitive))
-        .map_err(|error| ApiError::new("diff", error.to_string()))?;
+    let diff =
+        batchhash_report::diff::diff_reports(&left, &right, &diff_options(request.case_sensitive))
+            .map_err(|error| ApiError::new("diff", error.to_string()))?;
     Ok(diff_dto(&diff))
 }
 
 /// Compare a stored report against a live directory scan.
-pub fn diff_directory_request(
-    request: &DiffDirectoryRequest,
-) -> Result<DiffResultDto, ApiError> {
+pub fn diff_directory_request(request: &DiffDirectoryRequest) -> Result<DiffResultDto, ApiError> {
     let report = parse_report_json(&request.report_json)?;
     let scan_options = ScanOptions {
         follow_links: request.follow_links,
@@ -1185,8 +1184,8 @@ pub fn diff_directory_request(
 
 /// List the batches stored in a rename log, newest first.
 pub fn list_batches_request(request: &ListBatchesRequest) -> Result<Vec<BatchInfoDto>, ApiError> {
-    let store = LogStore::open(&request.db)
-        .map_err(|error| ApiError::new("log", error.to_string()))?;
+    let store =
+        LogStore::open(&request.db).map_err(|error| ApiError::new("log", error.to_string()))?;
     let batches = store
         .list_batches()
         .map_err(|error| ApiError::new("log", error.to_string()))?;
@@ -1220,7 +1219,6 @@ pub fn list_batches_request(request: &ListBatchesRequest) -> Result<Vec<BatchInf
     }
     Ok(out)
 }
-
 
 /// Request for [build_report_request]: canonical report JSON from entries.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1270,4 +1268,3 @@ pub fn build_report_request(request: &BuildReportRequest) -> Result<String, ApiE
     export_report(&report, ReportFormat::Json)
         .map_err(|error| ApiError::new("export", error.to_string()))
 }
-

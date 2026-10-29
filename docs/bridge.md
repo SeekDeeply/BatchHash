@@ -64,6 +64,35 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 找不到库时返回 `null`，调用方可以回退到 `FakeBatchHashService`（P0 的 UI 测试就是这么跑的）。
 业务错误统一抛 `BridgeException(kind, message)`，未知算法、空算法列表、缺日志路径都是 `invalid_request`。
 
+## UI 服务层
+
+%BT%app/lib/src/services/rust_batch_hash_service.dart%BT% 实现 %BT%BatchHashService%BT%，
+把桥接 DTO 映射到 UI 模型（%BT%BatchEntry%BT% / %BT%ReportModel%BT% / %BT%RenamePlanModel%BT% /
+%BT%DiffRowModel%BT% / %BT%HistoryBatchModel%BT%）：
+
+| 服务方法 | Rust 侧 |
+|---|---|
+| %BT%probeHardware%BT% | %BT%bh_probe%BT% |
+| %BT%scanDirectory%BT% | %BT%bh_scan%BT% |
+| %BT%computeHashes%BT% | %BT%bh_run_batch%BT%（单次阻塞调用，完成后发一个 100% 进度事件） |
+| %BT%planRenames%BT% | %BT%bh_plan_renames%BT%（纯计划，不落盘，复用已算好的哈希） |
+| %BT%executeRenames%BT% | %BT%bh_run_batch%BT% + %BT%apply_renames%BT%（写 SQLite 日志） |
+| %BT%exportReport%BT% | %BT%bh_build_report%BT% + %BT%bh_export_report%BT%，Dart 负责落盘 |
+| %BT%importReport%BT% | %BT%bh_import_report%BT% |
+| %BT%diffReports%BT% / %BT%diffReportAgainstDirectory%BT% | %BT%bh_diff_reports%BT% / %BT%bh_diff_directory%BT% |
+| %BT%loadHistory%BT% / %BT%undoBatch%BT% | %BT%bh_list_batches%BT% / %BT%bh_undo%BT% |
+
+%BT%BatchHashApp%BT% 的注入顺序是：显式传入的 service → %BT%RustBatchHashService.tryCreate()%BT% →
+%BT%FakeBatchHashService%BT%。因此 widget 测试（没有原生库）仍然跑 fake，而打包后的应用自动走 Rust。
+
+已知限制（诚实记录）：
+
+- %BT%computeHashes%BT% 的进度是「一次性完成事件」而非逐文件流；真正的流式进度需要给 C ABI 增加
+  句柄/回调模型，属于后续迭代。
+- %BT%executeRenames%BT% 复用 %BT%run_batch%BT% 的「扫描 → 计划 → 执行」路径，因此会重新读一遍文件；
+  语义与 UI 上展示的 dry-run 计划一致（同样的规则、同样的跳过条件）。
+- %BT%probeRenderingHardware%BT% 仍走平台层（Flutter 侧），不是 Rust；这是设计边界，不是遗漏。
+
 ## 校验方式
 
 ```sh

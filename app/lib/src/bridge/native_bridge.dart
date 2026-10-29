@@ -98,8 +98,7 @@ class BatchHashNative {
   Map<String, Object?> version() => _callNoArgMap('bh_api_version');
 
   /// Registered algorithms in canonical order.
-  List<Map<String, Object?>> algorithms() =>
-      _callNoArgList('bh_algorithms');
+  List<Map<String, Object?>> algorithms() => _callNoArgList('bh_algorithms');
 
   /// Hardware capability report.
   Map<String, Object?> probe({bool forcedSoft = false}) {
@@ -245,10 +244,7 @@ class BatchHashNative {
       _callList('bh_list_batches', <String, Object?>{'db': db});
 
   /// Re-export a report JSON document in another format.
-  String exportReport({
-    required String reportJson,
-    required String format,
-  }) {
+  String exportReport({required String reportJson, required String format}) {
     final data = _callMap('bh_export_report', <String, Object?>{
       'report_json': reportJson,
       'format': format,
@@ -294,8 +290,8 @@ class BatchHashNative {
     () => _library.lookupFunction<_NoArgNative, _NoArgDart>(name),
   );
 
-  _FreeDart get _free =>
-      _freeCached ??= _library.lookupFunction<_FreeNative, _FreeDart>('bh_free');
+  _FreeDart get _free => _freeCached ??= _library
+      .lookupFunction<_FreeNative, _FreeDart>('bh_free');
 
   Object? _decodePayload(Pointer<Utf8> pointer) {
     if (pointer == nullptr) {

@@ -264,29 +264,26 @@ fn hash_entries_request_hashes_explicit_paths() {
     write(&temp.path().join("a.txt"), b"alpha");
     write(&temp.path().join("nested/b.txt"), b"bravo");
 
-    let run = batchhash_ffi::api::hash_entries_request(
-        &batchhash_ffi::api::HashEntriesRequest {
-            root: temp.path().to_string_lossy().into_owned(),
-            paths: vec!["a.txt".to_string(), "nested/b.txt".to_string()],
-            algorithms: vec!["md5".to_string()],
-            follow_links: false,
-        },
-    )
+    let run = batchhash_ffi::api::hash_entries_request(&batchhash_ffi::api::HashEntriesRequest {
+        root: temp.path().to_string_lossy().into_owned(),
+        paths: vec!["a.txt".to_string(), "nested/b.txt".to_string()],
+        algorithms: vec!["md5".to_string()],
+        follow_links: false,
+    })
     .expect("hash entries");
     assert_eq!(run.total, 2);
     assert_eq!(run.ok, 2);
     assert_eq!(run.entries.len(), 2);
     assert!(run.entries.iter().all(|entry| entry.hashes.len() == 1));
     // Path traversal is rejected, not silently dropped.
-    let rejected = batchhash_ffi::api::hash_entries_request(
-        &batchhash_ffi::api::HashEntriesRequest {
+    let rejected =
+        batchhash_ffi::api::hash_entries_request(&batchhash_ffi::api::HashEntriesRequest {
             root: temp.path().to_string_lossy().into_owned(),
             paths: vec!["../escape.txt".to_string()],
             algorithms: vec!["md5".to_string()],
             follow_links: false,
-        },
-    )
-    .expect("hash entries");
+        })
+        .expect("hash entries");
     assert_eq!(rejected.total, 0);
     assert_eq!(rejected.skipped.len(), 1);
 }
@@ -338,12 +335,11 @@ fn import_diff_and_history_round_trip() {
     // Import the exported JSON through the bridge.
     let report_path = temp.path().join("report.json");
     write(&report_path, applied.report_json.as_bytes());
-    let imported = batchhash_ffi::api::import_report_request(
-        &batchhash_ffi::api::ImportReportRequest {
+    let imported =
+        batchhash_ffi::api::import_report_request(&batchhash_ffi::api::ImportReportRequest {
             path: report_path.to_string_lossy().into_owned(),
-        },
-    )
-    .expect("import");
+        })
+        .expect("import");
     assert!(imported.contains("\"schema_version\": 1"));
 
     // A report compared with itself is unchanged.
@@ -365,13 +361,17 @@ fn import_diff_and_history_round_trip() {
             follow_links: false,
         })
         .expect("directory diff");
-    assert_eq!(directory_diff.summary.total, directory_diff.rows.len() as u64);
+    assert_eq!(
+        directory_diff.summary.total,
+        directory_diff.rows.len() as u64
+    );
 
     // The rename log lists the applied batch.
-    let batches = batchhash_ffi::api::list_batches_request(&batchhash_ffi::api::ListBatchesRequest {
-        db: log_db.to_string_lossy().into_owned(),
-    })
-    .expect("history");
+    let batches =
+        batchhash_ffi::api::list_batches_request(&batchhash_ffi::api::ListBatchesRequest {
+            db: log_db.to_string_lossy().into_owned(),
+        })
+        .expect("history");
     assert_eq!(batches.len(), 1);
     assert_eq!(batches[0].file_count, 1);
     assert_eq!(batches[0].applied_count, 1);
@@ -401,13 +401,17 @@ fn c_abi_plan_and_diff_functions() {
     });
     let batch_text = CString::new(serde_json::to_string(&batch).expect("json")).expect("cstr");
     let run = call_ok(unsafe { c_api::bh_run_batch(batch_text.as_ptr()) });
-    let report_json = run["report_json"].as_str().expect("report json").to_string();
+    let report_json = run["report_json"]
+        .as_str()
+        .expect("report json")
+        .to_string();
 
     let diff_request = serde_json::json!({
         "left_json": report_json,
         "right_json": report_json,
     });
-    let diff_text = CString::new(serde_json::to_string(&diff_request).expect("json")).expect("cstr");
+    let diff_text =
+        CString::new(serde_json::to_string(&diff_request).expect("json")).expect("cstr");
     let diff = call_ok(unsafe { c_api::bh_diff_reports(diff_text.as_ptr()) });
     assert_eq!(diff["summary"]["total"], 1);
 
@@ -416,8 +420,8 @@ fn c_abi_plan_and_diff_functions() {
         "paths": ["a.txt"],
         "algorithms": ["sha256"],
     });
-    let hash_text = CString::new(serde_json::to_string(&hash_request).expect("json")).expect("cstr");
+    let hash_text =
+        CString::new(serde_json::to_string(&hash_request).expect("json")).expect("cstr");
     let hashed = call_ok(unsafe { c_api::bh_hash_entries(hash_text.as_ptr()) });
     assert_eq!(hashed["ok"], 1);
 }
-

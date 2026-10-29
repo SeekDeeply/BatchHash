@@ -20,7 +20,7 @@ UI 采用 Flutter + Material Design 3（动态取色、自适应布局），核�
 | 开发者 CLI（hash/report/diff/scan-diff/suffix/extract/probe） | 已实现 | 二进制端到端测试；见 [docs/cli.md](docs/cli.md) |
 | Flutter UI 外壳（MD3、自适应、双列对比、硬件面板） | 已实现（假数据服务） | `flutter analyze` + widget 测试 |
 | 原生桥接（JSON C ABI + dart:ffi） | 已实现 | CI job `Bridge (Rust FFI + Dart)`：真跑 Rust 库 |
-| UI 页面接入真实桥接（替换 fake 服务） | P0.5 进行中 | widget 测试 + 桥接测试 |
+| UI 接入真实桥接（RustBatchHashService，缺库回退 fake） | 已实现 | 桥接 job 里的服务级端到端测试 |
 
 ## 构建策略（重要）
 

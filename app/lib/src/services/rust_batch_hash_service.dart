@@ -58,9 +58,10 @@ class RustBatchHashService implements BatchHashService {
     final data = native.probe();
     return HardwareInfoModel(
       arch: data['arch'] as String? ?? 'unknown',
-      detectedFeatures: (data['detected_features'] as List<Object?>? ?? const [])
-          .map((feature) => feature.toString())
-          .toList(),
+      detectedFeatures:
+          (data['detected_features'] as List<Object?>? ?? const [])
+              .map((feature) => feature.toString())
+              .toList(),
       blake3BackendReported:
           data['blake3_backend_reported'] as String? ?? 'unknown',
       sha256BackendReported:

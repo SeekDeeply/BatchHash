@@ -92,8 +92,13 @@ jobs:
           files: dist/*
           generate_release_notes: true
 
+  # iOS is gated: the static library is built and shipped, but it is not linked
+  # into the Runner target yet, so an iOS build would silently fall back to the
+  # bundled demo data. Set the repository variable ENABLE_IOS_RELEASE=true once
+  # docs/native-packaging.md step 1 is done.
   ios:
     name: iOS (signed when secrets are configured)
+    if: vars.ENABLE_IOS_RELEASE == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

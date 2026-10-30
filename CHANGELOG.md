@@ -2,7 +2,15 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
-## [未发布] - 0.1.0
+## [0.1.0-rc.1] - 2026-10-30
+
+首个候选版本，随 GitHub Release 提供 Linux / Windows / macOS / Android 四个平台的发布产物。
+每个产物都经过 CI 断言，确认内含 Rust 原生核心（见 docs/release-checklist.md）。
+
+- iOS 未包含：静态库尚未链接进 Runner target，发布 iOS 版本会退回演示数据。
+- Android 产物使用调试签名，仅供安装体验，不可上架；上架需配置签名密钥。
+- macOS 产物为 ad-hoc 签名，未做公证。
+
 
 ### 新增
 

@@ -29,10 +29,15 @@
       `APPLE_PROVISIONING_PROFILE_BASE64` 已配置；macOS 还需公证（notarization）。
 - [ ] Windows：代码签名证书（release.yml 目前未接入）。
 
-## 4. 打 tag 与验证
+## 4. iOS 发布开关
+
+- [ ] iOS 默认被 `ENABLE_IOS_RELEASE` 变量挡住（release.yml 的 ios job）。只有完成静态库链接与
+      真机验证后，才把该仓库变量设为 `true`；否则不要放开。
+
+## 5. 打 tag 与验证
 
 - [ ] 确认 tag 提交就是上面 release-check 验证过的提交。
-- [ ] `git tag v0.1.0 && git push origin v0.1.0`（本地只打 tag，不做构建）。
+- [ ] `git tag v0.1.0-rc.1 && git push origin v0.1.0-rc.1`（本地只打 tag，不做构建）。
 - [ ] Release 工作流完成后，逐个下载产物并**再次**校验 .so/.dylib/.dll 是否存在
       （`unzip -l` / `tar -tzf`）——发布产物与 release-check 是两次独立构建。
 

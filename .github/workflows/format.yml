@@ -20,6 +20,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      - name: Refresh the lockfile
+        run: cargo generate-lockfile
       - name: Rust format
         run: cargo fmt --all
       - uses: subosito/flutter-action@v2

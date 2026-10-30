@@ -22,7 +22,8 @@ class AppStrings {
         _tables[language]?[key] ?? _tables[defaultLocale]?[key] ?? key;
     if (args != null) {
       for (final String name in args.keys) {
-        template = template!.replaceAll('{' + name + '}', args[name]!);
+        // '{' placeholder '}' with the name interpolated, e.g. '{done}'.
+        template = template!.replaceAll('{$name}', args[name]!);
       }
     }
     return template!;

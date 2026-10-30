@@ -277,7 +277,7 @@ class _HardwarePanelLoaderState extends State<HardwarePanelLoader> {
             child: Text(
               context.strings(
                 'hardware.probeFailed',
-                args: <String, String>{'error': '$error'},
+                args: <String, String>{'error': error},
               ),
               style: Theme.of(context).textTheme.bodySmall,
             ),

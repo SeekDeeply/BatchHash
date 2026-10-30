@@ -80,7 +80,8 @@ fn normalize_version(text: &str) -> String {
 }
 
 fn assert_golden(name: &str, diff: &DiffReport) {
-    let actual = normalize_version(&export_diff(diff, ReportFormat::Json).expect("diff JSON export"));
+    let actual =
+        normalize_version(&export_diff(diff, ReportFormat::Json).expect("diff JSON export"));
     let path = golden_path(name);
     if std::env::var("BLESS_GOLDEN").is_ok_and(|value| value == "1") {
         if let Some(parent) = path.parent() {

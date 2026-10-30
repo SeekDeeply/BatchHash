@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "tool": "BatchHash",
-  "tool_version": "0.1.0",
+  "tool_version": "<tool_version>",
   "generated_at": "2026-10-20T00:00:00Z",
   "strategy": {
     "mode": "basename",

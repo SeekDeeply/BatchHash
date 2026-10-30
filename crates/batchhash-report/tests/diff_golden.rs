@@ -70,8 +70,17 @@ fn golden_path(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// Replace the concrete tool version with a placeholder.
+///
+/// The fixtures pin every deterministic field, but the tool version changes with
+/// every release; substituting it keeps the goldens byte-exact for the schema
+/// while still failing on any real layout change.
+fn normalize_version(text: &str) -> String {
+    text.replace(batchhash_types::TOOL_VERSION, "<tool_version>")
+}
+
 fn assert_golden(name: &str, diff: &DiffReport) {
-    let actual = export_diff(diff, ReportFormat::Json).expect("diff JSON export");
+    let actual = normalize_version(&export_diff(diff, ReportFormat::Json).expect("diff JSON export"));
     let path = golden_path(name);
     if std::env::var("BLESS_GOLDEN").is_ok_and(|value| value == "1") {
         if let Some(parent) = path.parent() {
@@ -80,7 +89,7 @@ fn assert_golden(name: &str, diff: &DiffReport) {
         fs::write(&path, actual.as_bytes()).expect("write golden fixture");
         return;
     }
-    let expected = fs::read_to_string(&path).expect("read golden fixture");
+    let expected = normalize_version(&fs::read_to_string(&path).expect("read golden fixture"));
     assert_eq!(
         actual, expected,
         "golden fixture mismatch for {name}; regenerate with BLESS_GOLDEN=1"

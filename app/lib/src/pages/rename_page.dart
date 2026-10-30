@@ -1,11 +1,23 @@
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../theme.dart';
 import '../util/formatting.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/status_chip.dart';
+
+/// Translation key for the label of one [RenameRowStatus].
+String _rowStatusKey(RenameRowStatus status) => switch (status) {
+  RenameRowStatus.ready => 'rename.status.ready',
+  RenameRowStatus.conflict => 'rename.status.conflict',
+  RenameRowStatus.skipped => 'rename.status.skipped',
+  RenameRowStatus.missingHash => 'rename.status.missingHash',
+  RenameRowStatus.invalidName => 'rename.status.invalidName',
+  RenameRowStatus.noPermission => 'rename.status.noPermission',
+  RenameRowStatus.unsupported => 'rename.status.unsupported',
+};
 
 /// Suffix based rename workflow with a pure dry run before execution.
 class RenamePage extends StatefulWidget {
@@ -53,7 +65,10 @@ class _RenamePageState extends State<RenamePage> {
       }
       setState(() {
         _planning = false;
-        _error = 'Rename preview failed: $error';
+        _error = context.strings(
+          'rename.previewFailed',
+          args: <String, String>{'error': '$error'},
+        );
       });
     }
   }
@@ -76,9 +91,14 @@ class _RenamePageState extends State<RenamePage> {
       }
       setState(() {
         _executing = false;
-        _message =
-            'Renamed ${result.applied} files. '
-            'Skipped ${result.skipped}, failed ${result.failed}.';
+        _message = context.strings(
+          'rename.resultSummary',
+          args: <String, String>{
+            'applied': '${result.applied}',
+            'skipped': '${result.skipped}',
+            'failed': '${result.failed}',
+          },
+        );
       });
     } catch (error) {
       if (!mounted) {
@@ -86,7 +106,10 @@ class _RenamePageState extends State<RenamePage> {
       }
       setState(() {
         _executing = false;
-        _error = 'Rename execution failed: $error';
+        _error = context.strings(
+          'rename.executeFailed',
+          args: <String, String>{'error': '$error'},
+        );
       });
     }
   }
@@ -113,25 +136,22 @@ class _RenamePageState extends State<RenamePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
               Text(
-                'Rename with hash suffix',
+                context.strings('rename.title'),
                 style: theme.textTheme.headlineSmall,
               ),
               const SizedBox(height: 4),
               Text(
-                'Append a short digest to file names so duplicates can be told '
-                'apart. Names are previewed before anything is touched.',
+                context.strings('rename.subtitle'),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
               ),
               if (entries.isEmpty) ...<Widget>[
                 const SizedBox(height: 48),
-                const EmptyState(
+                EmptyState(
                   icon: Icons.drive_file_rename_outline,
-                  title: 'No hashed files yet',
-                  message:
-                      'Run a hash first. Renaming only starts from a batch '
-                      'with known digests.',
+                  title: context.strings('rename.noHashed'),
+                  message: context.strings('rename.noHashedHint'),
                 ),
               ] else ...<Widget>[
                 const SizedBox(height: 20),
@@ -140,7 +160,7 @@ class _RenamePageState extends State<RenamePage> {
                     SizedBox(
                       width: 120,
                       child: Text(
-                        'Algorithm',
+                        context.strings('rename.algorithm'),
                         style: theme.textTheme.bodyMedium,
                       ),
                     ),
@@ -190,7 +210,7 @@ class _RenamePageState extends State<RenamePage> {
                     SizedBox(
                       width: 120,
                       child: Text(
-                        'Suffix length',
+                        context.strings('rename.length'),
                         style: theme.textTheme.bodyMedium,
                       ),
                     ),
@@ -220,7 +240,7 @@ class _RenamePageState extends State<RenamePage> {
                 SwitchListTile(
                   key: const ValueKey<String>('rename-uppercase-switch'),
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Uppercase hex suffix'),
+                  title: Text(context.strings('rename.uppercase')),
                   value: _uppercase,
                   onChanged: (bool value) {
                     setState(() {
@@ -230,10 +250,15 @@ class _RenamePageState extends State<RenamePage> {
                   },
                 ),
                 Text(
-                  'Estimated collision chance: '
-                  '${formatProbabilityPercent(probability)} at suffix length '
-                  '$_length for $fileCount files. '
-                  'Recommended length: $recommended.',
+                  context.strings(
+                    'rename.collisionEstimate',
+                    args: <String, String>{
+                      'length': '$_length',
+                      'files': '$fileCount',
+                      'probability': formatProbabilityPercent(probability),
+                      'recommended': '$recommended',
+                    },
+                  ),
                   key: const ValueKey<String>('rename-collision-estimate'),
                   style: theme.textTheme.bodyMedium,
                 ),
@@ -248,7 +273,7 @@ class _RenamePageState extends State<RenamePage> {
                           ? null
                           : () => _preview(entries),
                       icon: const Icon(Icons.preview),
-                      label: const Text('Preview renames'),
+                      label: Text(context.strings('rename.preview')),
                     ),
                     FilledButton.tonalIcon(
                       key: const ValueKey<String>('rename-execute-button'),
@@ -257,7 +282,7 @@ class _RenamePageState extends State<RenamePage> {
                           ? null
                           : _execute,
                       icon: const Icon(Icons.drive_file_rename_outline),
-                      label: const Text('Apply renames'),
+                      label: Text(context.strings('rename.apply')),
                     ),
                   ],
                 ),
@@ -279,12 +304,18 @@ class _RenamePageState extends State<RenamePage> {
                     children: <Widget>[
                       Expanded(
                         child: Text(
-                          'Dry run',
+                          context.strings('rename.dryRun'),
                           style: theme.textTheme.titleMedium,
                         ),
                       ),
                       Text(
-                        '${plan.readyCount} ready · ${plan.conflictCount} conflicts',
+                        context.strings(
+                          'rename.planCounts',
+                          args: <String, String>{
+                            'ready': '${plan.readyCount}',
+                            'conflict': '${plan.conflictCount}',
+                          },
+                        ),
                         style: theme.textTheme.bodySmall,
                       ),
                     ],
@@ -328,13 +359,13 @@ class _RenamePlanTile extends StatelessWidget {
         style: theme.textTheme.bodyMedium,
       ),
       subtitle: Text(
-        target ?? message ?? 'No target name available.',
+        target ?? message ?? context.strings('rename.noTarget'),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.bodySmall,
       ),
       trailing: StatusChip(
-        label: row.status.label,
+        label: context.strings(_rowStatusKey(row.status)),
         color: renameRowStatusColor(row.status, scheme),
         icon: renameRowStatusIcon(row.status),
       ),

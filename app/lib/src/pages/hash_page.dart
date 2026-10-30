@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../util/formatting.dart';
 import '../widgets/empty_state.dart';
@@ -47,16 +48,16 @@ class _HashPageState extends State<HashPage> {
     final bool? recursive = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('Scan folder'),
-        content: const Text('Include files inside subfolders?'),
+        title: Text(context.strings('hash.recursiveTitle')),
+        content: Text(context.strings('hash.recursiveQuestion')),
         actions: <Widget>[
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('This folder only'),
+            child: Text(context.strings('hash.recursiveNo')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Include subfolders'),
+            child: Text(context.strings('hash.recursiveYes')),
           ),
         ],
       ),
@@ -95,7 +96,10 @@ class _HashPageState extends State<HashPage> {
       }
       setState(() {
         _scanning = false;
-        _error = 'Could not scan the selected input: $error';
+        _error = context.strings(
+          'hash.scanFailed',
+          args: <String, String>{'error': '$error'},
+        );
       });
     }
   }
@@ -161,7 +165,10 @@ class _HashPageState extends State<HashPage> {
         }
         setState(() {
           _computing = false;
-          _error = 'Hashing failed: $error';
+          _error = context.strings(
+            'hash.hashFailed',
+            args: <String, String>{'error': '$error'},
+          );
         });
       },
       onDone: () {
@@ -220,6 +227,15 @@ class _HashPageState extends State<HashPage> {
     final String? error = _error;
     final HashProgress? progress = _progress;
     final Duration? elapsed = _elapsed;
+    final String progressText = progress == null
+        ? ''
+        : context.strings(
+            'hash.progressText',
+            args: <String, String>{
+              'done': '${progress.completed}',
+              'total': '${progress.total}',
+            },
+          );
     final int okCount = _entries
         .where((BatchEntry entry) => entry.status == EntryStatus.ok)
         .length;
@@ -238,11 +254,13 @@ class _HashPageState extends State<HashPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('Batch hashing', style: theme.textTheme.headlineSmall),
+          Text(
+            context.strings('hash.title'),
+            style: theme.textTheme.headlineSmall,
+          ),
           const SizedBox(height: 4),
           Text(
-            'Pick files or a folder, choose the algorithms, then hash everything '
-            'in a single pass. Files never leave this device.',
+            context.strings('hash.subtitle'),
             style: theme.textTheme.bodyMedium?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
@@ -255,13 +273,16 @@ class _HashPageState extends State<HashPage> {
           ],
           if (_cancelled) ...<Widget>[
             const SizedBox(height: 12),
-            const _MessageCard(
-              message: 'Hashing was cancelled. Partial results are shown.',
+            _MessageCard(
+              message: context.strings('hash.cancelled'),
               isError: false,
             ),
           ],
           const SizedBox(height: 16),
-          Text('Algorithms', style: theme.textTheme.titleSmall),
+          Text(
+            context.strings('hash.algorithms'),
+            style: theme.textTheme.titleSmall,
+          ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -290,14 +311,16 @@ class _HashPageState extends State<HashPage> {
                     ? null
                     : _startHashing,
                 icon: const Icon(Icons.play_arrow),
-                label: Text(_computing ? 'Hashing...' : 'Start hashing'),
+                label: Text(
+                  context.strings(_computing ? 'hash.hashing' : 'hash.start'),
+                ),
               ),
               if (_computing)
                 OutlinedButton.icon(
                   key: const ValueKey<String>('hash-cancel'),
                   onPressed: _cancelHashing,
                   icon: const Icon(Icons.stop),
-                  label: const Text('Cancel'),
+                  label: Text(context.strings('hash.cancel')),
                 ),
             ],
           ),
@@ -309,42 +332,42 @@ class _HashPageState extends State<HashPage> {
             const SizedBox(height: 12),
             LinearProgressIndicator(
               value: progress.fraction,
-              semanticsLabel: 'Hash progress',
+              semanticsLabel: context.strings('hash.progressLabel'),
             ),
             const SizedBox(height: 4),
-            Text(
-              'Hashing file ${progress.completed} of ${progress.total}...',
-              style: theme.textTheme.bodySmall,
-            ),
+            Text(progressText, style: theme.textTheme.bodySmall),
           ],
           if (_entries.isNotEmpty) ...<Widget>[
             const SizedBox(height: 16),
             SummaryCard(
-              title: 'Batch summary',
+              title: context.strings('hash.summary'),
               metrics: <SummaryMetric>[
-                SummaryMetric(label: 'Files', value: '${_entries.length}'),
                 SummaryMetric(
-                  label: 'OK',
+                  label: context.strings('metric.files'),
+                  value: '${_entries.length}',
+                ),
+                SummaryMetric(
+                  label: context.strings('metric.ok'),
                   value: '$okCount',
                   color: scheme.tertiary,
                 ),
                 SummaryMetric(
-                  label: 'Failed',
+                  label: context.strings('metric.failed'),
                   value: '$failedCount',
                   color: scheme.error,
                 ),
                 SummaryMetric(
-                  label: 'Skipped',
+                  label: context.strings('metric.skipped'),
                   value: '$skippedCount',
                   color: scheme.outline,
                 ),
                 SummaryMetric(
-                  label: 'Total size',
+                  label: context.strings('metric.totalSize'),
                   value: formatBytes(totalBytes),
                 ),
                 if (elapsed != null)
                   SummaryMetric(
-                    label: 'Elapsed',
+                    label: context.strings('metric.elapsed'),
                     value: '${elapsed.inMilliseconds} ms',
                   ),
               ],
@@ -353,10 +376,16 @@ class _HashPageState extends State<HashPage> {
             Row(
               children: <Widget>[
                 Expanded(
-                  child: Text('Results', style: theme.textTheme.titleMedium),
+                  child: Text(
+                    context.strings('hash.results'),
+                    style: theme.textTheme.titleMedium,
+                  ),
                 ),
                 Text(
-                  '${_entries.length} files',
+                  context.strings(
+                    'common.fileCount',
+                    args: <String, String>{'count': '${_entries.length}'},
+                  ),
                   style: theme.textTheme.bodySmall,
                 ),
               ],
@@ -365,12 +394,10 @@ class _HashPageState extends State<HashPage> {
             EntryList(entries: _entries),
           ] else if (!_scanning) ...<Widget>[
             const SizedBox(height: 48),
-            const EmptyState(
+            EmptyState(
               icon: Icons.fingerprint,
-              title: 'No files selected',
-              message:
-                  'Choose files or a folder to start hashing. '
-                  'Everything stays on this device.',
+              title: context.strings('hash.noFiles'),
+              message: context.strings('hash.noFilesHint'),
             ),
           ],
         ],
@@ -387,19 +414,19 @@ class _HashPageState extends State<HashPage> {
           key: const ValueKey<String>('hash-choose-files'),
           onPressed: _computing || _scanning ? null : _selectFiles,
           icon: const Icon(Icons.insert_drive_file_outlined),
-          label: const Text('Choose files'),
+          label: Text(context.strings('hash.chooseFiles')),
         ),
         OutlinedButton.icon(
           key: const ValueKey<String>('hash-choose-folder'),
           onPressed: _computing || _scanning ? null : _selectFolder,
           icon: const Icon(Icons.folder_open_outlined),
-          label: const Text('Choose folder'),
+          label: Text(context.strings('hash.chooseFolder')),
         ),
         if (_entries.isNotEmpty)
           TextButton.icon(
             onPressed: _computing || _scanning ? null : _clear,
             icon: const Icon(Icons.clear_all),
-            label: const Text('Clear'),
+            label: Text(context.strings('hash.clear')),
           ),
       ],
     );

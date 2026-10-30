@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 /// Centered placeholder for empty lists and pages without data yet.
+///
+/// [title] and [message] are rendered verbatim, so callers must resolve them
+/// through the active locale (`context.strings(...)`) before passing them in.
 class EmptyState extends StatelessWidget {
   const EmptyState({
     super.key,

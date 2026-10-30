@@ -18,9 +18,12 @@ String formatBytes(int bytes) {
 }
 
 /// Formats a timestamp as a compact local date and time.
-String formatTimestamp(DateTime? value) {
+///
+/// [fallback] is returned for a missing timestamp; callers pass the localized
+/// "unknown" copy so the UI never mixes languages.
+String formatTimestamp(DateTime? value, {String fallback = 'unknown'}) {
   if (value == null) {
-    return 'unknown';
+    return fallback;
   }
   final DateTime local = value.toLocal();
   final String month = local.month.toString().padLeft(2, '0');

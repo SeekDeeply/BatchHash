@@ -3,8 +3,8 @@
 跨平台批量文件哈希校验工具：**批量计算哈希 → 可选写入文件名后缀 → 反向提取校验 → 多格式统计报告 →
 双列报告对比（含报告 vs 实时目录）→ 一键撤销**。
 
-UI 采用 Flutter + Material Design 3（动态取色、自适应布局），核心引擎使用 Rust 并通过
-`flutter_rust_bridge` 2.x 桥接。支持 Windows / macOS / Linux / Android / iOS。
+UI 采用 Flutter + Material Design 3（动态取色、自适应布局、**简体中文优先并可切换英文**），核心引擎使用
+Rust 并通过 JSON C ABI + `dart:ffi` 桥接。支持 Windows / macOS / Linux / Android / iOS。
 
 > 规划版本：v1.5 Final。**P0 已完成**：Rust 引擎四件套 + 报告/对比/写名/撤销 + 开发者 CLI + Flutter UI 外壳，
 > 全部由 CI 验证（格式、clippy、工作区测试、Flutter analyze/test、五平台 debug 构建）。当前向 **P0.5（flutter_rust_bridge 桥接）** 推进。
@@ -21,6 +21,8 @@ UI 采用 Flutter + Material Design 3（动态取色、自适应布局），核�
 | Flutter UI 外壳（MD3、自适应、双列对比、硬件面板） | 已实现（假数据服务） | `flutter analyze` + widget 测试 |
 | 原生桥接（JSON C ABI + dart:ffi） | 已实现 | CI job `Bridge (Rust FFI + Dart)`：真跑 Rust 库 |
 | UI 接入真实桥接（RustBatchHashService，缺库回退 fake） | 已实现 | 桥接 job 里的服务级端到端测试 |
+| 中文优先界面 + 运行时切换英文（整壳重译） | 已实现 | `flutter analyze` + `l10n_test`（默认中文、双语完整、切换后重译） |
+| 导航不重复（每断点只保留一个导航控件） | 已实现 | `adaptive_test` 断言宽屏只有 rail、无 AppBar 与列表 |
 | Linux 包内嵌 Rust 库 / Android APK 内含 .so | 已实现 | CI 断言 bundle 与 APK 内的 .so |
 | macOS/Windows 打包与 iOS 静态库链接 | 待接入 | 见 docs/native-packaging.md |
 
@@ -80,6 +82,7 @@ scripts/              CI 构建辅助脚本（本地不执行构建）
 | [docs/android-saf.md](docs/android-saf.md) | Android SAF / fd / Kotlin 重命名职责边界 |
 | [docs/privacy-and-security.md](docs/privacy-and-security.md) | 隐私、截断哈希安全语义、导入校验 |
 | [docs/cli.md](docs/cli.md) | 开发者 CLI 命令、选项与退出码 |
+| [docs/localization.md](docs/localization.md) | 中文优先的文案表、`context.strings` 用法与测试约定 |
 | [docs/bridge.md](docs/bridge.md) | 原生桥接 ABI 契约、Dart 绑定与 CI 校验方式 |
 | [docs/native-packaging.md](docs/native-packaging.md) | 各平台原生库产物、已自动化的打包与剩余工作 |
 | [docs/ci.md](docs/ci.md) | CI 流水线结构与"禁止本地构建"的落地方式 |

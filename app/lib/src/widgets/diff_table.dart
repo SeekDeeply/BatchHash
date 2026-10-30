@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../theme.dart';
 import '../util/formatting.dart';
@@ -8,14 +9,17 @@ import 'status_chip.dart';
 
 /// Dual-column comparison table. Each row is a synchronized pair of columns
 /// with a 4px status bar on the leading edge; tapping a row expands details.
+///
+/// [leftLabel] and [rightLabel] override the column headers. When they are
+/// empty the localized `compare.baseline` and `compare.current` copy is used.
 class DiffTable extends StatelessWidget {
   const DiffTable({
     super.key,
     required this.rows,
     this.expandedPath,
     this.onRowTap,
-    this.leftLabel = 'Baseline',
-    this.rightLabel = 'Current',
+    this.leftLabel = '',
+    this.rightLabel = '',
   });
 
   final List<DiffRowModel> rows;
@@ -27,11 +31,17 @@ class DiffTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final String leftText = leftLabel.isEmpty
+        ? context.strings('compare.baseline')
+        : leftLabel;
+    final String rightText = rightLabel.isEmpty
+        ? context.strings('compare.current')
+        : rightLabel;
     if (rows.isEmpty) {
-      return const EmptyState(
+      return EmptyState(
         icon: Icons.compare_arrows,
-        title: 'No rows match',
-        message: 'Adjust the filters to see comparison rows.',
+        title: context.strings('compare.nothing'),
+        message: context.strings('compare.nothingHint'),
       );
     }
     final String? expanded = expandedPath;
@@ -46,7 +56,7 @@ class DiffTable extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  leftLabel,
+                  leftText,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -55,7 +65,7 @@ class DiffTable extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  rightLabel,
+                  rightText,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -128,7 +138,7 @@ class DiffRowTile extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   StatusChip(
-                    label: row.status.label,
+                    label: _diffStatusLabel(context, row.status),
                     color: barColor,
                     icon: diffStatusIcon(row.status),
                   ),
@@ -136,9 +146,9 @@ class DiffRowTile extends StatelessWidget {
                   Icon(
                     expanded ? Icons.expand_less : Icons.expand_more,
                     size: 18,
-                    semanticLabel: expanded
-                        ? 'Collapse row details'
-                        : 'Expand row details',
+                    semanticLabel: context.strings(
+                      expanded ? 'common.collapseDetails' : 'common.details',
+                    ),
                   ),
                   const SizedBox(width: 8),
                 ],
@@ -150,6 +160,25 @@ class DiffRowTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Localized label for one diff status.
+///
+/// The status text always comes from the string table, never from the raw enum
+/// label, so the Chinese UI never shows an English identifier.
+String _diffStatusLabel(BuildContext context, DiffStatus status) {
+  return switch (status) {
+    DiffStatus.unchanged => context.strings('compare.unchanged'),
+    DiffStatus.changed => context.strings('compare.changed'),
+    DiffStatus.added => context.strings('compare.added'),
+    DiffStatus.removed => context.strings('compare.removed'),
+    DiffStatus.ambiguous => context.strings('compare.ambiguous'),
+    DiffStatus.unknown => context.strings('common.unknown'),
+    DiffStatus.duplicateKey => context.strings('compare.duplicateKey'),
+    DiffStatus.outOfRoot => context.strings('compare.outOfRoot'),
+    DiffStatus.corrupt => context.strings('compare.corrupt'),
+    DiffStatus.unstable => context.strings('compare.unstable'),
+  };
 }
 
 class _DiffCell extends StatelessWidget {
@@ -164,15 +193,19 @@ class _DiffCell extends StatelessWidget {
     final BatchEntry? value = entry;
     if (value == null) {
       return Text(
-        'not present',
+        context.strings('common.notPresent'),
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.outline,
         ),
       );
     }
+    final String hashCountLabel = context.strings(
+      'diff.hashesCount',
+      args: <String, String>{'count': '${value.hashes.length}'},
+    );
     final String summary = value.hashes.isEmpty
         ? formatBytes(value.size)
-        : '${formatBytes(value.size)} · ${value.hashes.length} hashes';
+        : '${formatBytes(value.size)} · $hashCountLabel';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisAlignment: MainAxisAlignment.center,
@@ -216,8 +249,8 @@ class _DiffDetails extends StatelessWidget {
               note,
               style: theme.textTheme.bodySmall?.copyWith(color: foreground),
             ),
-          _detailLine(context, 'Baseline', row.left),
-          _detailLine(context, 'Current', row.right),
+          _detailLine(context, context.strings('compare.baseline'), row.left),
+          _detailLine(context, context.strings('compare.current'), row.right),
         ],
       ),
     );
@@ -228,18 +261,19 @@ class _DiffDetails extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Text(
-        '$label: ${_describe(entry)}',
+        '$label: ${_describe(context, entry)}',
         style: theme.textTheme.bodySmall?.copyWith(color: foreground),
       ),
     );
   }
 
-  String _describe(BatchEntry? entry) {
+  String _describe(BuildContext context, BatchEntry? entry) {
     if (entry == null) {
-      return 'not present';
+      return context.strings('common.notPresent');
     }
     if (entry.hashes.isEmpty) {
-      return '${formatBytes(entry.size)}, no hashes';
+      final String noHashes = context.strings('common.noHashes');
+      return '${formatBytes(entry.size)}, $noHashes';
     }
     final List<String> digests = <String>[];
     for (final MapEntry<String, String> digest in entry.hashes.entries) {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings_scope.dart';
 import '../services/batch_hash_service.dart';
 import '../widgets/hardware_panel.dart';
 
@@ -13,8 +14,9 @@ class AboutPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final String versionLabel = context.strings('about.version');
     return Scaffold(
-      appBar: AppBar(title: const Text('About BatchHash')),
+      appBar: AppBar(title: Text(context.strings('about.title'))),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -28,9 +30,12 @@ class AboutPage extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text('BatchHash', style: theme.textTheme.headlineSmall),
                       Text(
-                        'Version 0.1.0 (P0 preview)',
+                        context.strings('app.title'),
+                        style: theme.textTheme.headlineSmall,
+                      ),
+                      Text(
+                        '$versionLabel 0.1.0 (P0 preview)',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
@@ -42,38 +47,29 @@ class AboutPage extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'Cross-platform batch file hashing and verification. The Flutter '
-              'shell talks to a Rust core through a narrow service interface; '
-              'the P0 preview runs against a deterministic fake.',
+              context.strings('about.tagline'),
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 16),
-            const Card(
+            Card(
               child: Column(
                 children: <Widget>[
                   ListTile(
-                    leading: Icon(Icons.speed_outlined),
-                    title: Text('Single-pass multi-hash engine'),
-                    subtitle: Text(
-                      'One read per file feeds every selected algorithm.',
-                    ),
+                    leading: const Icon(Icons.speed_outlined),
+                    title: Text(context.strings('about.feature1')),
+                    subtitle: Text(context.strings('about.feature1Detail')),
                   ),
-                  Divider(height: 1),
+                  const Divider(height: 1),
                   ListTile(
-                    leading: Icon(Icons.compare_arrows),
-                    title: Text('Report comparison and diffing'),
-                    subtitle: Text(
-                      'Normalized paths, algorithm intersection and explicit '
-                      'unknowns.',
-                    ),
+                    leading: const Icon(Icons.compare_arrows),
+                    title: Text(context.strings('about.feature2')),
+                    subtitle: Text(context.strings('about.feature2Detail')),
                   ),
-                  Divider(height: 1),
+                  const Divider(height: 1),
                   ListTile(
-                    leading: Icon(Icons.drive_file_rename_outline),
-                    title: Text('Hash suffix renaming with undo'),
-                    subtitle: Text(
-                      'Dry run first, then an undoable rename log.',
-                    ),
+                    leading: const Icon(Icons.drive_file_rename_outline),
+                    title: Text(context.strings('about.feature3')),
+                    subtitle: Text(context.strings('about.feature3Detail')),
                   ),
                 ],
               ),
@@ -82,8 +78,7 @@ class AboutPage extends StatelessWidget {
             HardwarePanelLoader(service: service),
             const SizedBox(height: 16),
             Text(
-              'Hashing and renaming run locally. No file content leaves the '
-              'device.',
+              context.strings('about.privacy'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),

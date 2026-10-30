@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 ///
 /// Status is never conveyed by color alone: callers always pass a label and
 /// usually an icon. The icon is exposed to semantics with the given color.
+/// [label] is rendered verbatim, so callers must resolve it through the active
+/// locale (`context.strings(...)`) before passing it in.
 class StatusChip extends StatelessWidget {
   const StatusChip({
     super.key,

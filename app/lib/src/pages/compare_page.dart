@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../widgets/diff_table.dart';
 import '../widgets/empty_state.dart';
@@ -10,16 +11,21 @@ import '../widgets/entry_list.dart';
 import '../widgets/summary_card.dart';
 
 /// Filter applied to comparison rows.
+///
+/// [label] holds the translation key of the chip rather than display copy;
+/// resolve it with `context.strings(filter.label)` so the chips follow the
+/// active locale.
 enum CompareFilter {
-  all('All'),
-  differences('Differences'),
-  changed('Changed'),
-  added('Added'),
-  removed('Removed'),
-  ambiguous('Ambiguous');
+  all('common.all'),
+  differences('compare.differences'),
+  changed('compare.changed'),
+  added('compare.added'),
+  removed('compare.removed'),
+  ambiguous('compare.ambiguous');
 
   const CompareFilter(this.label);
 
+  /// Translation key for the filter chip label.
   final String label;
 
   bool matches(DiffStatus status) => switch (this) {
@@ -36,6 +42,9 @@ enum CompareFilter {
 enum ComparePane { left, right, differences }
 
 /// Compares the current report against the live contents of its root.
+///
+/// Every user-visible string, including the diff table headers, comes from the
+/// locale string table.
 class ComparePage extends StatefulWidget {
   const ComparePage({super.key, required this.state});
 
@@ -122,9 +131,13 @@ class _ComparePageState extends State<ComparePage> {
       if (!mounted) {
         return;
       }
+      final String failure = context.strings(
+        'compare.compareFailed',
+        args: <String, String>{'error': '$error'},
+      );
       setState(() {
         _loading = false;
-        _error = 'Comparison failed: $error';
+        _error = failure;
       });
     }
   }
@@ -162,11 +175,13 @@ class _ComparePageState extends State<ComparePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('Compare reports', style: theme.textTheme.headlineSmall),
+          Text(
+            context.strings('compare.title'),
+            style: theme.textTheme.headlineSmall,
+          ),
           const SizedBox(height: 4),
           Text(
-            'Match a baseline report against the current state of a folder and '
-            'review what changed.',
+            context.strings('compare.subtitle'),
             style: theme.textTheme.bodyMedium?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
@@ -175,26 +190,29 @@ class _ComparePageState extends State<ComparePage> {
           const _PolicyBanner(),
           const SizedBox(height: 12),
           SummaryCard(
-            title: 'Comparison summary',
+            title: context.strings('compare.summary'),
             metrics: <SummaryMetric>[
-              SummaryMetric(label: 'Rows', value: '${_rows.length}'),
               SummaryMetric(
-                label: 'Changed',
+                label: context.strings('compare.rows'),
+                value: '${_rows.length}',
+              ),
+              SummaryMetric(
+                label: context.strings('compare.changed'),
                 value: '$changedCount',
                 color: scheme.error,
               ),
               SummaryMetric(
-                label: 'Added',
+                label: context.strings('compare.added'),
                 value: '$addedCount',
                 color: scheme.tertiary,
               ),
               SummaryMetric(
-                label: 'Removed',
+                label: context.strings('compare.removed'),
                 value: '$removedCount',
                 color: scheme.secondary,
               ),
               SummaryMetric(
-                label: 'Ambiguous',
+                label: context.strings('compare.ambiguous'),
                 value: '$ambiguousCount',
                 color: scheme.tertiary,
               ),
@@ -208,7 +226,7 @@ class _ComparePageState extends State<ComparePage> {
               for (final CompareFilter filter in CompareFilter.values)
                 FilterChip(
                   key: ValueKey<String>('compare-filter-${filter.name}'),
-                  label: Text(filter.label),
+                  label: Text(context.strings(filter.label)),
                   selected: _filter == filter,
                   onSelected: (bool selected) {
                     setState(() {
@@ -228,12 +246,10 @@ class _ComparePageState extends State<ComparePage> {
           else if (error != null)
             _MessageCard(message: error, isError: true)
           else if (_rows.isEmpty)
-            const EmptyState(
+            EmptyState(
               icon: Icons.compare_arrows,
-              title: 'Nothing to compare',
-              message:
-                  'Hash a folder first, then compare the report against '
-                  'the current contents.',
+              title: context.strings('compare.nothing'),
+              message: context.strings('compare.nothingHint'),
             )
           else if (narrow)
             _buildNarrowContent(visibleRows)
@@ -242,6 +258,8 @@ class _ComparePageState extends State<ComparePage> {
               rows: visibleRows,
               expandedPath: _expandedPath,
               onRowTap: _toggleRow,
+              leftLabel: context.strings('compare.baseline'),
+              rightLabel: context.strings('compare.current'),
             ),
         ],
       ),
@@ -254,21 +272,21 @@ class _ComparePageState extends State<ComparePage> {
       child: SegmentedButton<ComparePane>(
         key: const ValueKey<String>('compare-pane-selector'),
         showSelectedIcon: false,
-        segments: const <ButtonSegment<ComparePane>>[
+        segments: <ButtonSegment<ComparePane>>[
           ButtonSegment<ComparePane>(
             value: ComparePane.left,
-            label: Text('Left'),
-            icon: Icon(Icons.view_sidebar_outlined),
+            label: Text(context.strings('compare.left')),
+            icon: const Icon(Icons.view_sidebar_outlined),
           ),
           ButtonSegment<ComparePane>(
             value: ComparePane.right,
-            label: Text('Right'),
-            icon: Icon(Icons.view_sidebar),
+            label: Text(context.strings('compare.right')),
+            icon: const Icon(Icons.view_sidebar),
           ),
           ButtonSegment<ComparePane>(
             value: ComparePane.differences,
-            label: Text('Differences'),
-            icon: Icon(Icons.compare_arrows),
+            label: Text(context.strings('compare.differences')),
+            icon: const Icon(Icons.compare_arrows),
           ),
         ],
         selected: <ComparePane>{_pane},
@@ -299,6 +317,8 @@ class _ComparePageState extends State<ComparePage> {
         rows: rows,
         expandedPath: _expandedPath,
         onRowTap: _toggleRow,
+        leftLabel: context.strings('compare.baseline'),
+        rightLabel: context.strings('compare.current'),
       ),
     };
   }
@@ -325,9 +345,7 @@ class _PolicyBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Comparison policy: only algorithms present in both reports are '
-              'compared. Files without a shared digest fall back to path and '
-              'size. Paths are normalized and compared case-sensitively.',
+              context.strings('compare.policy'),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSecondaryContainer,
               ),

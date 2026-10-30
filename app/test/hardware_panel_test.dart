@@ -1,5 +1,4 @@
 import 'package:batchhash/src/models/models.dart';
-import 'package:batchhash/src/theme.dart';
 import 'package:batchhash/src/widgets/hardware_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,14 +12,11 @@ Future<void> pumpPanel(
 }) async {
   setViewSize(tester, const Size(500, 900));
   await tester.pumpWidget(
-    MaterialApp(
-      theme: AppTheme.light(null),
-      home: Scaffold(
-        body: SingleChildScrollView(
-          child: HardwarePanel(
-            hashInfo: hashInfo,
-            renderingInfo: renderingInfo,
-          ),
+    wrapInApp(
+      SingleChildScrollView(
+        child: HardwarePanel(
+          hashInfo: hashInfo,
+          renderingInfo: renderingInfo,
         ),
       ),
     ),

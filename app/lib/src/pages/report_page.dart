@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
+import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../util/formatting.dart';
 import '../widgets/empty_state.dart';
@@ -8,6 +9,9 @@ import '../widgets/summary_card.dart';
 
 /// Report export page. Formats are chosen with checkboxes and exported on
 /// demand; the page stays read only until the user taps Export.
+///
+/// All copy, including the export result and error messages, is resolved from
+/// the active locale with `context.strings`.
 class ReportPage extends StatefulWidget {
   const ReportPage({super.key, required this.state});
 
@@ -42,18 +46,26 @@ class _ReportPageState extends State<ReportPage> {
       if (!mounted) {
         return;
       }
+      final String exportedMessage = context.strings(
+        'report.exportedCount',
+        args: <String, String>{'count': '${files.length}'},
+      );
       setState(() {
         _exporting = false;
         _exported = files;
-        _message = 'Exported ${files.length} file(s).';
+        _message = exportedMessage;
       });
     } catch (error) {
       if (!mounted) {
         return;
       }
+      final String failure = context.strings(
+        'report.exportFailed',
+        args: <String, String>{'error': '$error'},
+      );
       setState(() {
         _exporting = false;
-        _error = 'Export failed: $error';
+        _error = failure;
       });
     }
   }
@@ -82,52 +94,61 @@ class _ReportPageState extends State<ReportPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text('Report export', style: theme.textTheme.headlineSmall),
+              Text(
+                context.strings('report.title'),
+                style: theme.textTheme.headlineSmall,
+              ),
               const SizedBox(height: 4),
               Text(
-                'Write the current batch out in one or more formats. '
-                'JSON and CSV are lossless and can be imported again.',
+                context.strings('report.subtitle'),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
               ),
               if (report == null) ...<Widget>[
                 const SizedBox(height: 48),
-                const EmptyState(
+                EmptyState(
                   icon: Icons.description_outlined,
-                  title: 'No report yet',
-                  message:
-                      'Run a hash first to build a report, then choose the '
-                      'formats to export.',
+                  title: context.strings('report.noReport'),
+                  message: context.strings('report.noReportHint'),
                 ),
               ] else ...<Widget>[
                 const SizedBox(height: 16),
                 SummaryCard(
-                  title: 'Report',
+                  title: context.strings('report.section'),
                   metrics: <SummaryMetric>[
                     SummaryMetric(
-                      label: 'Schema version',
+                      label: context.strings('report.schemaVersion'),
                       value: '${report.schemaVersion}',
                     ),
                     SummaryMetric(
-                      label: 'Files',
+                      label: context.strings('metric.files'),
                       value: '${report.entries.length}',
                     ),
                     SummaryMetric(
-                      label: 'Algorithms',
+                      label: context.strings('hash.algorithms'),
                       value: report.algorithms.isEmpty
-                          ? 'none'
+                          ? context.strings('common.notAvailable')
                           : report.algorithms.join(', '),
                     ),
                     SummaryMetric(
-                      label: 'Generated',
-                      value: formatTimestamp(report.generatedAt),
+                      label: context.strings('report.generated'),
+                      value: formatTimestamp(
+                        report.generatedAt,
+                        fallback: context.strings('common.unknown'),
+                      ),
                     ),
-                    SummaryMetric(label: 'Root', value: report.root),
+                    SummaryMetric(
+                      label: context.strings('report.root'),
+                      value: report.root,
+                    ),
                   ],
                 ),
                 const SizedBox(height: 20),
-                Text('Formats', style: theme.textTheme.titleMedium),
+                Text(
+                  context.strings('report.formats'),
+                  style: theme.textTheme.titleMedium,
+                ),
                 const SizedBox(height: 8),
                 for (final ReportFormat format in ReportFormat.values)
                   CheckboxListTile(
@@ -138,7 +159,9 @@ class _ReportPageState extends State<ReportPage> {
                         : (bool? selected) =>
                               _toggleFormat(format, selected ?? false),
                     title: Text(format.label),
-                    subtitle: Text(format.description),
+                    subtitle: Text(
+                      context.strings('report.format.${format.name}'),
+                    ),
                     secondary: Icon(_iconFor(format)),
                     controlAffinity: ListTileControlAffinity.leading,
                     contentPadding: EdgeInsets.zero,
@@ -155,12 +178,19 @@ class _ReportPageState extends State<ReportPage> {
                           : () => _export(report),
                       icon: const Icon(Icons.download),
                       label: Text(
-                        _exporting ? 'Exporting...' : 'Export report',
+                        _exporting
+                            ? context.strings('report.exporting')
+                            : context.strings('report.export'),
                       ),
                     ),
                     if (_formats.isNotEmpty)
                       Text(
-                        '${_formats.length} format(s) selected',
+                        context.strings(
+                          'report.selectedFormats',
+                          args: <String, String>{
+                            'count': '${_formats.length}',
+                          },
+                        ),
                         style: theme.textTheme.bodySmall,
                       ),
                   ],

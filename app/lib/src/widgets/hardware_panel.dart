@@ -2,14 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../services/batch_hash_service.dart';
 
 /// Two independently labeled acceleration sections.
 ///
 /// The CPU section reflects the Rust hardware probe, the GPU section reflects
-/// the platform rendering probe. Both render a state icon, a neutral label and
-/// a state color so meaning is never carried by color alone.
+/// the platform rendering probe. Both render a state icon, a localized label
+/// and a state color so meaning is never carried by color alone.
 class HardwarePanel extends StatelessWidget {
   const HardwarePanel({
     super.key,
@@ -63,11 +64,16 @@ class HardwarePanel extends StatelessWidget {
     AccelerationState.unknown => Icons.help_outline,
   };
 
-  static String stateLabel(AccelerationState state) => switch (state) {
-    AccelerationState.detected => 'Acceleration detected',
-    AccelerationState.softwareFallback => 'Software fallback in use',
-    AccelerationState.unknown => 'Acceleration status unknown',
-  };
+  static String stateLabel(BuildContext context, AccelerationState state) =>
+      switch (state) {
+        AccelerationState.detected => context.strings(
+          'hardware.stateDetected',
+        ),
+        AccelerationState.softwareFallback => context.strings(
+          'hardware.stateSoftwareFallback',
+        ),
+        AccelerationState.unknown => context.strings('hardware.stateUnknown'),
+      };
 
   static Color stateAccentColor(AccelerationState state, ColorScheme scheme) =>
       switch (state) {
@@ -97,49 +103,66 @@ class HardwarePanel extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final HardwareInfoModel? hash = hashInfo;
     final RenderingHardwareModel? rendering = renderingInfo;
+    final String unknownLabel = context.strings('hardware.unknown');
     final List<Widget> cpuRows = hash == null
         ? const <Widget>[]
         : <Widget>[
-            _InfoRow(label: 'Architecture', value: hash.arch),
             _InfoRow(
-              label: 'Detected features',
+              label: context.strings('hardware.arch'),
+              value: _orUnknown(hash.arch, unknownLabel),
+            ),
+            _InfoRow(
+              label: context.strings('hardware.features'),
               value: hash.detectedFeatures.isEmpty
-                  ? 'none reported'
+                  ? context.strings('hardware.noFeatures')
                   : hash.detectedFeatures.join(', '),
             ),
             _InfoRow(
-              label: 'BLAKE3 backend',
-              value: hash.blake3BackendReported,
+              label: context.strings('hardware.blake3'),
+              value: _orUnknown(hash.blake3BackendReported, unknownLabel),
             ),
             _InfoRow(
-              label: 'SHA-256 backend',
-              value: hash.sha256BackendReported,
+              label: context.strings('hardware.sha256'),
+              value: _orUnknown(hash.sha256BackendReported, unknownLabel),
             ),
-            _InfoRow(label: 'Backend policy', value: hash.backendPolicy),
             _InfoRow(
-              label: 'Multithreading',
-              value: hash.multithread ? 'enabled' : 'disabled',
+              label: context.strings('hardware.policy'),
+              value: _orUnknown(hash.backendPolicy, unknownLabel),
+            ),
+            _InfoRow(
+              label: context.strings('hardware.multithread'),
+              value: hash.multithread
+                  ? context.strings('hardware.enabled')
+                  : context.strings('hardware.disabled'),
             ),
           ];
     final List<Widget> gpuRows = rendering == null
         ? const <Widget>[]
-        : <Widget>[_InfoRow(label: 'GPU backend', value: rendering.gpuBackend)];
+        : <Widget>[
+            _InfoRow(
+              label: context.strings('hardware.gpuBackend'),
+              value: _orUnknown(rendering.gpuBackend, unknownLabel),
+            ),
+          ];
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('Hardware', style: theme.textTheme.titleLarge),
+            Text(
+              context.strings('hardware.title'),
+              style: theme.textTheme.titleLarge,
+            ),
             const SizedBox(height: 4),
             Text(
-              'How BatchHash reports acceleration in this environment.',
+              context.strings('hardware.subtitle'),
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 16),
             _HardwareSection(
               key: const ValueKey<String>('hardware-cpu-section'),
-              title: 'Hash acceleration (CPU)',
+              title: context.strings('hardware.cpu'),
               state: hashState(hash),
               iconKey: const ValueKey<String>('hardware-cpu-icon'),
               labelKey: const ValueKey<String>('hardware-cpu-state-label'),
@@ -151,7 +174,7 @@ class HardwarePanel extends StatelessWidget {
             const SizedBox(height: 12),
             _HardwareSection(
               key: const ValueKey<String>('hardware-gpu-section'),
-              title: 'UI rendering acceleration (GPU)',
+              title: context.strings('hardware.gpu'),
               state: renderingState(rendering),
               iconKey: const ValueKey<String>('hardware-gpu-icon'),
               labelKey: const ValueKey<String>('hardware-gpu-state-label'),
@@ -165,6 +188,18 @@ class HardwarePanel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Returns [value] unless a probe reported nothing usable.
+///
+/// Empty values and the literal `unknown` the core uses for "not reported"
+/// are shown through the localized unknown copy instead of raw.
+String _orUnknown(String value, String unknownLabel) {
+  final String trimmed = value.trim();
+  if (trimmed.isEmpty || trimmed.toLowerCase() == 'unknown') {
+    return unknownLabel;
+  }
+  return value;
 }
 
 /// Loads both hardware probes and renders a [HardwarePanel].
@@ -208,7 +243,7 @@ class _HardwarePanelLoaderState extends State<HardwarePanelLoader> {
       }
       setState(() {
         _loading = false;
-        _error = 'Hardware probe failed: $error';
+        _error = '$error';
       });
     }
   }
@@ -216,17 +251,17 @@ class _HardwarePanelLoaderState extends State<HardwarePanelLoader> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
+      return Padding(
+        padding: const EdgeInsets.all(16),
         child: Row(
           children: <Widget>[
-            SizedBox(
+            const SizedBox(
               width: 20,
               height: 20,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            SizedBox(width: 12),
-            Text('Probing hardware...'),
+            const SizedBox(width: 12),
+            Text(context.strings('hardware.probing')),
           ],
         ),
       );
@@ -239,7 +274,13 @@ class _HardwarePanelLoaderState extends State<HardwarePanelLoader> {
         if (error != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(error, style: Theme.of(context).textTheme.bodySmall),
+            child: Text(
+              context.strings(
+                'hardware.probeFailed',
+                args: <String, String>{'error': '$error'},
+              ),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
       ],
     );
@@ -268,6 +309,7 @@ class _HardwareSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final String stateLabel = HardwarePanel.stateLabel(context, state);
     return Container(
       key: containerKey,
       decoration: BoxDecoration(
@@ -287,7 +329,7 @@ class _HardwareSection extends StatelessWidget {
                 HardwarePanel.stateIcon(state),
                 key: iconKey,
                 color: HardwarePanel.stateAccentColor(state, scheme),
-                semanticLabel: HardwarePanel.stateLabel(state),
+                semanticLabel: stateLabel,
               ),
               const SizedBox(width: 8),
               Expanded(child: Text(title, style: theme.textTheme.titleSmall)),
@@ -295,7 +337,7 @@ class _HardwareSection extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            HardwarePanel.stateLabel(state),
+            stateLabel,
             key: labelKey,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: HardwarePanel.stateAccentColor(state, scheme),

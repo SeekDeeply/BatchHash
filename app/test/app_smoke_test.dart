@@ -11,7 +11,11 @@ void main() {
   ) async {
     setViewSize(tester, const Size(500, 900));
     await tester.pumpWidget(
-      BatchHashApp(service: FakeBatchHashService(), enableDynamicColor: false),
+      BatchHashApp(
+        service: FakeBatchHashService(),
+        enableDynamicColor: false,
+        locale: 'en',
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -39,7 +43,11 @@ void main() {
   testWidgets('navigation bar switches pages', (WidgetTester tester) async {
     setViewSize(tester, const Size(500, 900));
     await tester.pumpWidget(
-      BatchHashApp(service: FakeBatchHashService(), enableDynamicColor: false),
+      BatchHashApp(
+        service: FakeBatchHashService(),
+        enableDynamicColor: false,
+        locale: 'en',
+      ),
     );
     await tester.pumpAndSettle();
 
@@ -58,7 +66,9 @@ void main() {
     WidgetTester tester,
   ) async {
     setViewSize(tester, const Size(500, 900));
-    await tester.pumpWidget(BatchHashApp(service: FakeBatchHashService()));
+    await tester.pumpWidget(
+      BatchHashApp(service: FakeBatchHashService(), locale: 'en'),
+    );
     await tester.pumpAndSettle();
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('Batch hashing'), findsOneWidget);

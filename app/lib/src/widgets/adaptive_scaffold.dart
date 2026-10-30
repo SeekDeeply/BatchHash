@@ -17,16 +17,26 @@ class AppDestination {
 
 /// Three-breakpoint navigation shell.
 ///
-/// Narrow (<720) shows a single page with a bottom NavigationBar. Medium
-/// (720-1100) shows a destination list and a detail pane. Wide (>=1100) adds
-/// a NavigationRail next to the list and detail panes.
+/// Exactly one navigation control is visible per breakpoint, and the page name
+/// is shown once:
+///
+/// * narrow (<720): a bottom [NavigationBar] plus the app bar title;
+/// * medium (720-1100): a destination list next to the detail pane, no app bar;
+/// * wide (>=1100): a labelled [NavigationRail] replaces the list, no app bar.
+///
+/// Previously the wide layout rendered a rail, a list and the page title at
+/// once, which showed the same destinations two or three times.
 class AdaptiveScaffold extends StatelessWidget {
   const AdaptiveScaffold({
     super.key,
     required this.destinations,
     required this.selectedIndex,
     required this.onDestinationSelected,
+    this.banner,
   });
+
+  /// Optional persistent banner shown above the page content.
+  final Widget? banner;
 
   static const double narrowBreakpoint = 720;
   static const double wideBreakpoint = 1100;
@@ -43,10 +53,21 @@ class AdaptiveScaffold extends StatelessWidget {
     final bool wide = width >= wideBreakpoint;
     final AppDestination selected = destinations[selectedIndex];
     return Scaffold(
-      appBar: AppBar(title: Text(selected.label)),
-      body: narrow
-          ? SafeArea(top: false, child: selected.page)
-          : _buildSplitBody(selected.page, wide: wide),
+      // The app bar only exists on the narrow layout. Wider layouts already show
+      // the selected destination in the rail or the list, and every page repeats
+      // its own heading, so a third copy of the same name would be noise.
+      appBar: narrow ? AppBar(title: Text(selected.label)) : null,
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (banner != null) banner!,
+          Expanded(
+            child: narrow
+                ? SafeArea(top: false, child: selected.page)
+                : _buildSplitBody(selected.page, wide: wide),
+          ),
+        ],
+      ),
       bottomNavigationBar: narrow
           ? NavigationBar(
               key: const ValueKey<String>('adaptive-navigation-bar'),
@@ -65,16 +86,22 @@ class AdaptiveScaffold extends StatelessWidget {
     );
   }
 
+  /// Medium and wide layouts: one navigation control, one content pane.
+  ///
+  /// * wide (>=1100): an extended rail with labels (labels are honest there,
+  ///   unlike the standard rail which hides them and overlaps if forced);
+  /// * medium (720-1100): a destination list.
   Widget _buildSplitBody(Widget page, {required bool wide}) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (wide) ...<Widget>[
+        if (wide)
           NavigationRail(
             key: const ValueKey<String>('adaptive-navigation-rail'),
             selectedIndex: selectedIndex,
             onDestinationSelected: onDestinationSelected,
-            labelType: NavigationRailLabelType.none,
+            labelType: NavigationRailLabelType.all,
+            extended: false,
             destinations: <NavigationRailDestination>[
               for (final AppDestination destination in destinations)
                 NavigationRailDestination(
@@ -83,17 +110,16 @@ class AdaptiveScaffold extends StatelessWidget {
                   label: Text(destination.label),
                 ),
             ],
+          )
+        else
+          SizedBox(
+            width: destinationListWidth,
+            child: _DestinationList(
+              destinations: destinations,
+              selectedIndex: selectedIndex,
+              onDestinationSelected: onDestinationSelected,
+            ),
           ),
-          const VerticalDivider(width: 1),
-        ],
-        SizedBox(
-          width: destinationListWidth,
-          child: _DestinationList(
-            destinations: destinations,
-            selectedIndex: selectedIndex,
-            onDestinationSelected: onDestinationSelected,
-          ),
-        ),
         const VerticalDivider(width: 1),
         Expanded(
           child: SafeArea(

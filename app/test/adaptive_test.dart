@@ -8,7 +8,11 @@ import 'support/test_helpers.dart';
 Future<void> pumpAppAt(WidgetTester tester, Size size) async {
   setViewSize(tester, size);
   await tester.pumpWidget(
-    BatchHashApp(service: FakeBatchHashService(), enableDynamicColor: false),
+    BatchHashApp(
+      service: FakeBatchHashService(),
+      enableDynamicColor: false,
+      locale: 'en',
+    ),
   );
   await tester.pumpAndSettle();
 }
@@ -53,10 +57,13 @@ void main() {
       find.byKey(const ValueKey<String>('adaptive-detail-pane')),
       findsOneWidget,
     );
+    // The list is the only navigation control here, so the page name still
+    // appears once, as the page heading.
     expect(find.text('Batch hashing'), findsOneWidget);
+    expect(find.text('Hash'), findsOneWidget);
   });
 
-  testWidgets('wide width shows a rail plus list and detail panes', (
+  testWidgets('wide width replaces the list with a single labelled rail', (
     WidgetTester tester,
   ) async {
     await pumpAppAt(tester, const Size(1400, 900));
@@ -66,7 +73,7 @@ void main() {
     );
     expect(
       find.byKey(const ValueKey<String>('adaptive-destination-list')),
-      findsOneWidget,
+      findsNothing,
     );
     expect(
       find.byKey(const ValueKey<String>('adaptive-detail-pane')),
@@ -76,5 +83,16 @@ void main() {
       find.byKey(const ValueKey<String>('adaptive-navigation-bar')),
       findsNothing,
     );
+
+    // Regression guard for the duplicated navigation the user reported: the
+    // rail replaces the destination list and the app bar is gone, so each
+    // destination label appears exactly once.
+    final NavigationRail rail = tester.widget<NavigationRail>(
+      find.byType(NavigationRail),
+    );
+    expect(rail.destinations.length, 6);
+    expect(find.text('Hash'), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
+    expect(find.byType(AppBar), findsNothing);
   });
 }

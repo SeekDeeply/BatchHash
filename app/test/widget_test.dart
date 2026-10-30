@@ -11,7 +11,11 @@ void main() {
   ) async {
     setViewSize(tester, const Size(500, 900));
     await tester.pumpWidget(
-      BatchHashApp(service: FakeBatchHashService(), enableDynamicColor: false),
+      BatchHashApp(
+        service: FakeBatchHashService(),
+        enableDynamicColor: false,
+        locale: 'en',
+      ),
     );
     await tester.pumpAndSettle();
 

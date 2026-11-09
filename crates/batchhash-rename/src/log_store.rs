@@ -6,11 +6,21 @@
 //! [`LogStore`] call returning [`LogError`] and schema changes are versioned in
 //! the `schema_migration` table.
 //!
+//! A row is written as `pending` before the file is touched and as `applied`
+//! after the backend confirms the rename. If the process dies in between, the
+//! log alone cannot say whether the file moved, so
+//! [`reconcile_pending_operations`] re-inspects every pending row against the
+//! filesystem and records the verdict (`applied`, or `conflict` with a
+//! `not_applied`/`ambiguous` reason). It only touches rows that are still
+//! pending, so it is safe to run on every store open.
+//!
 //! Undo is planned, not assumed: [`LogStore::plan_undo`] walks the batch
 //! newest-first and marks each operation [`UndoStatus::Ready`],
 //! [`UndoStatus::Conflict`] or [`UndoStatus::AlreadyUndone`] by checking that the
 //! renamed file still exists and the original name is free. [`apply_undo`]
-//! renames only ready rows and never overwrites an existing original path.
+//! re-checks the filesystem again immediately before each reverse rename, uses
+//! [`RenameBackend::rename_no_replace`] so a name that was claimed in the
+//! meantime is never overwritten, and renames only ready rows.
 
 use std::fmt;
 use std::path::Path;
@@ -20,7 +30,7 @@ use chrono::{SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::planner::{RenameBackend, RenameFs};
+use crate::planner::{RenameBackend, RenameFs, StdRenameFs};
 use crate::suffix::SuffixFormat;
 
 const SCHEMA_VERSION: u32 = 1;
@@ -553,8 +563,15 @@ impl LogStore {
     /// when the renamed file still exists and the original name is free;
     /// otherwise it is [`UndoStatus::Conflict`] and must not be executed.
     /// Already-undone operations are reported as [`UndoStatus::AlreadyUndone`]
-    /// so a repeated undo is visibly a no-op. Pending and conflicted
-    /// operations are skipped.
+    /// so a repeated undo is visibly a no-op.
+    ///
+    /// Pending operations are **not** dropped silently: the log cannot say on
+    /// its own whether their rename happened, so they surface as
+    /// [`UndoStatus::Conflict`] with an explicit reason.
+    /// [`reconcile_pending_operations`] resolves them against the filesystem
+    /// first (to `applied` or `conflict`), so run it before planning. Operations
+    /// recorded as conflicted are not listed: their failure is already recorded
+    /// on the row itself.
     pub fn plan_undo(&self, batch_id: &str, fs: &dyn RenameFs) -> Result<UndoPlan, LogError> {
         if !self.batch_exists(batch_id)? {
             return Err(LogError::BatchNotFound(batch_id.to_string()));
@@ -595,13 +612,62 @@ impl LogStore {
                     status: UndoStatus::AlreadyUndone,
                     reason: Some("operation was already undone".to_string()),
                 }),
-                OperationState::Pending | OperationState::Conflict => {}
+                OperationState::Conflict => {}
+                // A pending row means the log never recorded whether the rename
+                // happened. It is not dropped: it is reported as a conflict
+                // because it cannot be proven safe to reverse.
+                OperationState::Pending => rows.push(UndoRow {
+                    operation_id: operation.id,
+                    from: operation.new_path,
+                    to: operation.original_path,
+                    status: UndoStatus::Conflict,
+                    reason: Some(
+                        "operation is still pending; its rename was never confirmed"
+                            .to_string(),
+                    ),
+                }),
             }
         }
         Ok(UndoPlan {
             batch_id: batch_id.to_string(),
             rows,
         })
+    }
+
+    /// Every operation whose state is still `pending`.
+    ///
+    /// A pending row means the pipeline died (or failed to write) between the
+    /// filesystem rename and `record_result`, so the log alone cannot say
+    /// whether the file was renamed. [`reconcile_pending_operations`] resolves
+    /// those rows against the filesystem.
+    pub fn pending_operations(
+        &self,
+        batch_id: Option<&str>,
+    ) -> Result<Vec<RenameOperation>, LogError> {
+        let mut pending: Vec<RenameOperation> = self
+            .load_operations(batch_id)?
+            .into_iter()
+            .filter(|operation| operation.state == OperationState::Pending)
+            .collect();
+        pending.reverse();
+        Ok(pending)
+    }
+
+    /// Record a reconciled outcome for a pending operation.
+    ///
+    /// [`reconcile_pending_operations`] calls this after inspecting the
+    /// filesystem; it is exposed so a backend that reconciles on its own (the
+    /// Android SAF bridge) can persist the same verdict. The transition is the
+    /// ordinary `pending -> applied | conflict` edge of the state machine, so
+    /// recording it twice fails with [`LogError::InvalidStateTransition`].
+    pub fn record_reconciled_state(
+        &mut self,
+        operation_id: i64,
+        state: OperationState,
+        result: &str,
+        error_kind: Option<&str>,
+    ) -> Result<(), LogError> {
+        self.record_result(operation_id, result, error_kind, state)
     }
 
     fn batch_exists(&self, batch_id: &str) -> Result<bool, LogError> {
@@ -649,19 +715,58 @@ impl LogStore {
 
 /// Execute a previously planned undo.
 ///
-/// Only [`UndoStatus::Ready`] rows are attempted, and an operation is re-checked
-/// against the store immediately before its rename so a stale plan (or a double
-/// apply of the same plan) can never rename twice. Successful rows are marked
-/// undone in one transaction. A backend failure leaves the operation applied so
-/// the undo can be retried.
+/// This is [`apply_undo_with_cancel`] against the standard filesystem and
+/// with nothing cancelled.
 pub fn apply_undo(
     plan: &UndoPlan,
     backend: &mut dyn RenameBackend,
     store: &mut LogStore,
 ) -> Result<Vec<UndoResult>, LogError> {
+    apply_undo_with_cancel(plan, backend, store, &StdRenameFs, &|| false)
+}
+
+/// Execute a previously planned undo, stopping when [`should_stop`] reports
+/// cancellation.
+///
+/// Only [`UndoStatus::Ready`] rows are attempted. Three checks guard every row,
+/// because a plan is a snapshot and the filesystem keeps moving:
+///
+/// 1. the operation must still be `applied` in the store, so a stale plan (or a
+///    double apply of the same plan) can never rename twice;
+/// 2. the renamed file must still exist and the original path must still be
+///    free, re-read from the backend's filesystem rather than trusted from the
+///    plan; an occupied original path or a vanished rename source yields
+///    [`UndoResultStatus::Skipped`] with a conflict reason and **no** rename;
+/// 3. the reverse rename goes through [`RenameBackend::rename_no_replace`], so
+///    even a target created between check 2 and the rename cannot be destroyed.
+///
+/// The checks read the filesystem through [`fs`], so a backend with its own path
+/// model (Android SAF) can pass its document probe instead of the standard one.
+///
+/// Successful rows are marked undone in one transaction. A backend failure
+/// leaves the operation applied so the undo can be retried, and a cancellation
+/// leaves later rows untouched and reported as [`UndoResultStatus::Skipped`] with
+/// a cancellation reason.
+pub fn apply_undo_with_cancel(
+    plan: &UndoPlan,
+    backend: &mut dyn RenameBackend,
+    store: &mut LogStore,
+    fs: &dyn RenameFs,
+    should_stop: &(dyn Fn() -> bool + Sync),
+) -> Result<Vec<UndoResult>, LogError> {
     let mut results = Vec::with_capacity(plan.rows.len());
     let mut undone = Vec::new();
     for row in &plan.rows {
+        if should_stop() {
+            results.push(UndoResult {
+                operation_id: row.operation_id,
+                from: row.from.clone(),
+                to: row.to.clone(),
+                status: UndoResultStatus::Skipped,
+                error: Some("undo cancelled before this row".to_string()),
+            });
+            continue;
+        }
         match row.status {
             UndoStatus::Ready => {
                 let current = store.operation_state(row.operation_id)?;
@@ -675,7 +780,17 @@ pub fn apply_undo(
                     });
                     continue;
                 }
-                match backend.rename(Path::new(&row.from), Path::new(&row.to)) {
+                if let Some(reason) = undo_filesystem_conflict(row, fs) {
+                    results.push(UndoResult {
+                        operation_id: row.operation_id,
+                        from: row.from.clone(),
+                        to: row.to.clone(),
+                        status: UndoResultStatus::Skipped,
+                        error: Some(reason),
+                    });
+                    continue;
+                }
+                match backend.rename_no_replace(Path::new(&row.from), Path::new(&row.to)) {
                     Ok(()) => {
                         undone.push(row.operation_id);
                         results.push(UndoResult {
@@ -734,6 +849,170 @@ pub fn apply_undo(
         transaction.commit()?;
     }
     Ok(results)
+}
+
+/// Re-check a ready undo row against the filesystem immediately before the
+/// reverse rename.
+///
+/// Returns the conflict reason when the undo must not be attempted. The checks
+/// mirror [`LogStore::plan_undo`] but are evaluated fresh: the plan may be stale,
+/// and a file may have appeared at the original path since it was built.
+fn undo_filesystem_conflict(row: &UndoRow, fs: &dyn RenameFs) -> Option<String> {
+    if !fs.exists(Path::new(&row.from)) {
+        return Some(format!("renamed file no longer exists: {}", row.from));
+    }
+    if fs.exists(Path::new(&row.to)) {
+        return Some(format!("original name is already occupied: {}", row.to));
+    }
+    None
+}
+
+/// Filesystem verdict for one pending operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconcileOutcome {
+    /// The rename happened: the new path exists and the original path is gone.
+    /// The operation is recorded `applied`.
+    Applied,
+    /// The rename never happened: the original path still exists and the new
+    /// path does not. The operation is recorded `conflict` so it is never
+    /// reported as undoable.
+    NotApplied,
+    /// Both paths exist, or neither does. The filesystem cannot tell which side
+    /// the file is on, so the operation is recorded `conflict` and left for a
+    /// human.
+    Ambiguous,
+}
+
+impl ReconcileOutcome {
+    /// Stable machine-readable identifier.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReconcileOutcome::Applied => "applied",
+            ReconcileOutcome::NotApplied => "not_applied",
+            ReconcileOutcome::Ambiguous => "ambiguous",
+        }
+    }
+}
+
+/// One resolved pending operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReconciledOperation {
+    /// Operation id in the rename log.
+    pub operation_id: i64,
+    /// Batch the operation belongs to.
+    pub batch_id: String,
+    /// Original path recorded by the rename.
+    pub original_path: String,
+    /// Renamed path recorded by the rename.
+    pub new_path: String,
+    /// What the filesystem said.
+    pub outcome: ReconcileOutcome,
+    /// The state written back to the log.
+    pub state: OperationState,
+    /// Human-readable reason stored in `error_kind`.
+    pub reason: String,
+}
+
+/// Summary of one reconciliation pass.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ReconcileReport {
+    /// Operations resolved because the rename did happen.
+    pub applied: u64,
+    /// Operations resolved because the rename did not happen.
+    pub not_applied: u64,
+    /// Operations that could not be resolved and were marked conflicted.
+    pub ambiguous: u64,
+    /// Per-operation detail, newest operation first (the undo order).
+    pub operations: Vec<ReconciledOperation>,
+}
+
+impl ReconcileReport {
+    /// How many pending operations this pass resolved into a terminal state.
+    pub fn resolved(&self) -> u64 {
+        self.applied + self.not_applied + self.ambiguous
+    }
+}
+
+/// Resolve every `pending` operation against the filesystem.
+///
+/// The pipeline records a rename as `pending` before touching the file and as
+/// `applied` after the backend confirms it. A crash or a log write failure
+/// between those two steps leaves a row that looks unapplied even though the
+/// file may already be renamed. This pass inspects each pending row and writes
+/// the verdict back:
+///
+/// * new path exists and original path does not -> `applied` (undoable),
+/// * original path exists and new path does not -> `conflict` +
+///   `not_applied` (the batch simply never renamed it),
+/// * both or neither exist -> `conflict` + `ambiguous` (never guessed).
+///
+/// Only pending rows are touched, so the pass is safe to run on every store
+/// open: a row that already records applied, undone or conflict is never
+/// reclassified and history is never rewritten. Use
+/// [`reconcile_pending_operations_with_cancel`] when the caller is cancelable.
+pub fn reconcile_pending_operations(
+    store: &mut LogStore,
+    fs: &dyn RenameFs,
+) -> Result<ReconcileReport, LogError> {
+    reconcile_pending_operations_with_cancel(store, fs, &|| false)
+}
+
+/// [`reconcile_pending_operations`] with a cancellation check before every row.
+///
+/// A cancelled pass commits the rows it already resolved and returns; the
+/// remaining rows stay pending and the next open finishes the job, because
+/// reconciliation is idempotent.
+pub fn reconcile_pending_operations_with_cancel(
+    store: &mut LogStore,
+    fs: &dyn RenameFs,
+    should_stop: &(dyn Fn() -> bool + Sync),
+) -> Result<ReconcileReport, LogError> {
+    let pending = store.pending_operations(None)?;
+    let mut report = ReconcileReport::default();
+    for operation in pending {
+        if should_stop() {
+            break;
+        }
+        let (outcome, state, reason) = if fs.exists(Path::new(&operation.new_path))
+            && !fs.exists(Path::new(&operation.original_path))
+        {
+            (
+                ReconcileOutcome::Applied,
+                OperationState::Applied,
+                "renamed file exists and the original path is free",
+            )
+        } else if fs.exists(Path::new(&operation.original_path))
+            && !fs.exists(Path::new(&operation.new_path))
+        {
+            (
+                ReconcileOutcome::NotApplied,
+                OperationState::Conflict,
+                "rename never reached the filesystem; the original file is still in place",
+            )
+        } else {
+            (
+                ReconcileOutcome::Ambiguous,
+                OperationState::Conflict,
+                "both the original and the renamed path exist, or neither does",
+            )
+        };
+        store.record_reconciled_state(operation.id, state, outcome.as_str(), Some(reason))?;
+        match outcome {
+            ReconcileOutcome::Applied => report.applied += 1,
+            ReconcileOutcome::NotApplied => report.not_applied += 1,
+            ReconcileOutcome::Ambiguous => report.ambiguous += 1,
+        }
+        report.operations.push(ReconciledOperation {
+            operation_id: operation.id,
+            batch_id: operation.batch_id,
+            original_path: operation.original_path,
+            new_path: operation.new_path,
+            outcome,
+            state,
+            reason: reason.to_string(),
+        });
+    }
+    Ok(report)
 }
 
 struct RawBatch {
@@ -909,6 +1188,14 @@ mod tests {
             .record_result(id, "renamed", None, OperationState::Applied)
             .expect("record applied");
         id
+    }
+
+    /// Insert an operation and leave it `pending`, like a crashed run would.
+    fn insert_pending(store: &mut LogStore, batch_id: &str, original: &str, new: &str) -> i64 {
+        let operation = test_operation(batch_id, original, new);
+        store
+            .insert_operation(&operation)
+            .expect("insert operation")
     }
 
     #[test]
@@ -1258,5 +1545,81 @@ mod tests {
         assert_eq!(stale_results[0].status, UndoResultStatus::Skipped);
         assert!(original.exists());
         assert!(!Path::new(&renamed).exists());
+    }
+
+    #[test]
+    fn plan_undo_reports_pending_operations_instead_of_dropping_them() {
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let batch = test_batch();
+        store.create_batch(&batch).expect("create batch");
+        // Never recorded as applied: the crash window left it pending.
+        let id = store
+            .insert_operation(&test_operation(
+                &batch.id,
+                "/tmp/a.txt",
+                "/tmp/a[ABCDE].txt",
+            ))
+            .expect("insert operation");
+
+        let plan = store.plan_undo(&batch.id, &StdRenameFs).expect("plan undo");
+        assert_eq!(plan.rows.len(), 1, "a pending row must not vanish");
+        assert_eq!(plan.rows[0].operation_id, id);
+        assert_eq!(plan.rows[0].status, UndoStatus::Conflict);
+        assert!(
+            plan.rows[0]
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("pending")),
+            "reason: {:?}",
+            plan.rows[0].reason
+        );
+
+        // Executing that row must not rename anything.
+        let results = apply_undo(&plan, &mut StdFsBackend::new(), &mut store).expect("apply undo");
+        assert_eq!(results[0].status, UndoResultStatus::Skipped);
+    }
+
+    #[test]
+    fn reconcile_marks_an_ambiguous_pending_operation_as_conflict() {
+        let temp = tempdir().expect("tempdir");
+        let original = temp.path().join("a.txt");
+        let renamed = temp.path().join("a[ABCDE].txt");
+        fs::write(&original, b"original").expect("original file");
+        fs::write(&renamed, b"renamed").expect("renamed file");
+
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let batch = test_batch();
+        store.create_batch(&batch).expect("create batch");
+        let id = insert_pending(
+            &mut store,
+            &batch.id,
+            &original.to_string_lossy(),
+            &renamed.to_string_lossy(),
+        );
+
+        let report = reconcile_pending_operations(&mut store, &StdRenameFs).expect("reconcile");
+        assert_eq!(report.ambiguous, 1, "report: {report:?}");
+        assert_eq!(report.operations[0].operation_id, id);
+        assert_eq!(
+            report.operations[0].outcome,
+            ReconcileOutcome::Ambiguous,
+            "both paths present must never be guessed"
+        );
+        assert_eq!(
+            store.operation_state(id).expect("state"),
+            Some(OperationState::Conflict)
+        );
+        let stored = store
+            .operations_for_batch(&batch.id)
+            .expect("operations")
+            .into_iter()
+            .next()
+            .expect("operation");
+        assert_eq!(stored.result.as_deref(), Some("ambiguous"));
+        assert!(stored.error_kind.is_some(), "the reason must be stored");
+
+        // Both files survive: reconciliation never moves anything.
+        assert!(original.exists());
+        assert!(renamed.exists());
     }
 }

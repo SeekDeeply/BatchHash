@@ -10,6 +10,9 @@
 //! * directory entries are visited in sorted order so the entry list is deterministic,
 //! * symlinks are skipped unless ScanOptions::follow_links is set; directory loops
 //!   are detected with a visited set,
+//! * subdirectories are walked only when ScanOptions::recursive is set (the
+//!   default); a non-recursive scan reports the root's direct children and
+//!   silently leaves deeper subtrees alone,
 //! * an unreadable child becomes a failed entry instead of aborting the batch,
 //! * paths that cannot be represented as report-relative paths are reported in
 //!   ScanOutcome::skipped instead of being silently dropped or mangled.
@@ -29,6 +32,10 @@ pub const DEFAULT_MAX_DEPTH: usize = 64;
 pub struct ScanOptions {
     /// Follow symbolic links (files and directories). Loops are still detected.
     pub follow_links: bool,
+    /// Whether subdirectories are descended into. When false only the direct
+    /// children of the root are listed, so a caller that means "this folder,
+    /// not its tree" gets exactly that.
+    pub recursive: bool,
     /// Maximum directory depth; deeper subtrees produce an error entry.
     pub max_depth: usize,
     /// Root identifier copied into every entry (reports only use one root).
@@ -39,6 +46,7 @@ impl Default for ScanOptions {
     fn default() -> Self {
         Self {
             follow_links: false,
+            recursive: true,
             max_depth: DEFAULT_MAX_DEPTH,
             root_id: "root".to_string(),
         }
@@ -54,6 +62,12 @@ impl ScanOptions {
     /// Enable or disable symlink following.
     pub fn with_follow_links(mut self, follow_links: bool) -> Self {
         self.follow_links = follow_links;
+        self
+    }
+
+    /// Enable or disable descending into subdirectories.
+    pub fn with_recursive(mut self, recursive: bool) -> Self {
+        self.recursive = recursive;
         self
     }
 }
@@ -298,6 +312,11 @@ fn walk(
             }
         };
         if metadata.is_dir() {
+            if !options.recursive {
+                // A non-recursive scan lists the root's direct children only;
+                // subdirectories are neither walked nor reported as failures.
+                continue;
+            }
             let key = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
             if !visited.insert(key) {
                 // Symlink loop or an already visited subtree.

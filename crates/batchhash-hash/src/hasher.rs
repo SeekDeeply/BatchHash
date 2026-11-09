@@ -4,14 +4,18 @@
 //! hasher from the same chunk. Digests are returned in canonical registry
 //! order (AlgorithmId::ALL) as lowercase hex strings.
 //!
-//! BLAKE3 has an optional parallel path: for a single-algorithm BLAKE3 run on a
-//! large file, the engine may memory-map the file and call update_rayon. That
-//! path is enabled only when Blake3Policy::Auto is selected and the file is at
-//! least HashOptions::mmap_threshold bytes long; multi-algorithm runs always use
-//! single-pass streaming so the input is read exactly once.
+//! File input always streams. An earlier revision memory-mapped large files for
+//! a single-algorithm BLAKE3 run and called update_rayon; that shortcut was
+//! removed because the documented "files must not change during a batch"
+//! precondition cannot be enforced by a safe API that maps the file. Every input
+//! is now read in chunks, so the bytes are read exactly once and the engine never
+//! aliases memory that another process could mutate.
 //!
-//! No unsafe code lives here except the single documented memory-map call; every
-//! other operation is safe Rust and returns HashError instead of panicking.
+//! Blake3Policy::Auto and Blake3Policy::Disabled therefore select the same code
+//! path today; the policy is kept for API and contract compatibility.
+//!
+//! This module contains no unsafe code; every operation is safe Rust and returns
+//! HashError instead of panicking.
 
 use std::fs::File;
 use std::io::{self, Read};
@@ -30,9 +34,13 @@ pub const MIN_BUFFER_SIZE: usize = 64 * 1024;
 pub const MAX_BUFFER_SIZE: usize = 64 * 1024 * 1024;
 
 /// BLAKE3 internal parallelism policy for one hashing pass.
+///
+/// Both variants currently select single-pass streaming: the memory-mapped
+/// parallel path was removed (see the module documentation). The policy is kept
+/// so the public options contract and the bridge hardware report stay stable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Blake3Policy {
-    /// Allow the parallel BLAKE3 path when it is safe (single algorithm, large file).
+    /// Permit library-level parallelism. Equivalent to Disabled for file input.
     #[default]
     Auto,
     /// Never use the parallel or multithreaded BLAKE3 path.
@@ -50,8 +58,6 @@ pub struct HashOptions {
     pub blake3: Blake3Policy,
     /// When true, optional parallel/multithreaded hash paths are disabled.
     pub forced_soft: bool,
-    /// File size threshold for the parallel BLAKE3 memory-map path. None disables it.
-    pub mmap_threshold: Option<u64>,
 }
 
 impl Default for HashOptions {
@@ -61,7 +67,6 @@ impl Default for HashOptions {
             buffer_size: DEFAULT_BUFFER_SIZE,
             blake3: Blake3Policy::Auto,
             forced_soft: false,
-            mmap_threshold: None,
         }
     }
 }
@@ -93,12 +98,6 @@ impl HashOptions {
         self
     }
 
-    /// Set the file size threshold for the parallel BLAKE3 memory-map path.
-    pub fn with_mmap_threshold(mut self, mmap_threshold: Option<u64>) -> Self {
-        self.mmap_threshold = mmap_threshold;
-        self
-    }
-
     /// Buffer size actually used, clamped to the supported range.
     pub fn effective_buffer_size(&self) -> usize {
         self.buffer_size.clamp(MIN_BUFFER_SIZE, MAX_BUFFER_SIZE)
@@ -112,23 +111,6 @@ impl HashOptions {
             .filter(|algorithm| self.algorithms.contains(algorithm))
             .collect()
     }
-}
-
-fn is_blake3_only(options: &HashOptions) -> bool {
-    !options.algorithms.is_empty()
-        && options
-            .algorithms
-            .iter()
-            .all(|algorithm| *algorithm == AlgorithmId::Blake3)
-}
-
-fn blake3_parallel_eligible(options: &HashOptions, file_len: u64) -> bool {
-    !options.forced_soft
-        && options.blake3 == Blake3Policy::Auto
-        && is_blake3_only(options)
-        && options
-            .mmap_threshold
-            .is_some_and(|threshold| file_len >= threshold)
 }
 
 /// Hook invoked once for every non-empty chunk read from an input stream.
@@ -339,10 +321,10 @@ pub fn hash_reader(
 
 /// Compute hashes for a file path.
 ///
-/// Uses the parallel BLAKE3 memory-map path only when all of these hold: BLAKE3
-/// is the only selected algorithm, Blake3Policy::Auto is selected, mmap_threshold is set
-/// and the file is at least that large, and forced_soft is false. Otherwise the
-/// file is streamed in one pass.
+/// The file is always streamed in one pass: the parallel BLAKE3 memory-map path
+/// was removed because a safe API cannot enforce the stability precondition that
+/// keeping a mapping assumes. BLAKE3 output is identical to the streaming
+/// implementation, because both feed the same byte stream to the same hasher.
 pub fn compute_hashes_file(
     path: &Path,
     options: &HashOptions,
@@ -390,37 +372,7 @@ pub(crate) fn compute_hashes_path(
     cancel: Option<&AtomicBool>,
 ) -> Result<IndexMap<AlgorithmId, String>, HashError> {
     let mut file = File::open(path)?;
-    let file_len = file.metadata()?.len();
-    if file_len > 0 && blake3_parallel_eligible(options, file_len) {
-        return compute_hashes_mmap_blake3(&file, sink, cancel);
-    }
     compute_hashes_streaming(&mut file, options, sink, cancel)
-}
-
-fn compute_hashes_mmap_blake3(
-    file: &File,
-    sink: Option<&mut dyn HashSink>,
-    cancel: Option<&AtomicBool>,
-) -> Result<IndexMap<AlgorithmId, String>, HashError> {
-    if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-        return Err(HashError::Cancelled);
-    }
-    // SAFETY: Mmap::map is unsafe because mutating or truncating the mapped file
-    // while the mapping is alive is undefined behavior. Batch hashing requires
-    // stable inputs and documents that files must not change during a batch; the
-    // mapping is read-only, private to this call and dropped before returning.
-    let mapped = unsafe { memmap2::Mmap::map(file)? };
-    if let Some(hook) = sink {
-        hook.on_chunk(&mapped);
-    }
-    let mut hasher = blake3::Hasher::new();
-    hasher.update_rayon(&mapped);
-    if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
-        return Err(HashError::Cancelled);
-    }
-    let mut hashes = IndexMap::new();
-    hashes.insert(AlgorithmId::Blake3, hasher.finalize().to_hex().to_string());
-    Ok(hashes)
 }
 
 #[cfg(test)]
@@ -465,28 +417,57 @@ mod tests {
     }
 
     #[test]
-    fn blake3_parallel_policy_is_restrictive() {
-        let blake3_only = HashOptions::new(vec![AlgorithmId::Blake3]);
-        assert!(!blake3_parallel_eligible(&blake3_only, 1 << 20));
-
-        let with_threshold =
-            HashOptions::new(vec![AlgorithmId::Blake3]).with_mmap_threshold(Some(1024));
-        assert!(blake3_parallel_eligible(&with_threshold, 1024));
-        assert!(!blake3_parallel_eligible(&with_threshold, 1023));
-
-        let multi = HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Sha256])
-            .with_mmap_threshold(Some(1024));
-        assert!(!blake3_parallel_eligible(&multi, 2048));
-
+    fn blake3_policy_variants_produce_identical_digests() {
+        let data = vec![9u8; 4096];
+        let auto = HashOptions::new(vec![AlgorithmId::Blake3]);
         let disabled = HashOptions::new(vec![AlgorithmId::Blake3])
-            .with_mmap_threshold(Some(1024))
             .with_blake3(Blake3Policy::Disabled);
-        assert!(!blake3_parallel_eligible(&disabled, 2048));
+        let forced = HashOptions::new(vec![AlgorithmId::Blake3]).with_forced_soft(true);
+        let mut auto_reader = Cursor::new(data.clone());
+        let mut disabled_reader = Cursor::new(data.clone());
+        let mut forced_reader = Cursor::new(data);
+        let auto_hashes =
+            compute_hashes(&mut auto_reader, &auto).expect("auto hashing must succeed");
+        let disabled_hashes = compute_hashes(&mut disabled_reader, &disabled)
+            .expect("disabled hashing must succeed");
+        let forced_hashes =
+            compute_hashes(&mut forced_reader, &forced).expect("forced soft hashing must succeed");
+        assert_eq!(auto_hashes, disabled_hashes);
+        assert_eq!(auto_hashes, forced_hashes);
+    }
 
-        let forced = HashOptions::new(vec![AlgorithmId::Blake3])
-            .with_mmap_threshold(Some(1024))
-            .with_forced_soft(true);
-        assert!(!blake3_parallel_eligible(&forced, 2048));
+    #[test]
+    fn file_hashing_streams_in_chunks_through_the_sink() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("input.bin");
+        let data = vec![5u8; MIN_BUFFER_SIZE * 2 + 7];
+        std::fs::write(&path, &data).expect("fixture");
+        let options = HashOptions::new(vec![AlgorithmId::Blake3]).with_buffer_size(MIN_BUFFER_SIZE);
+        let mut chunk_lengths = Vec::new();
+        let mut sink = |chunk: &[u8]| chunk_lengths.push(chunk.len());
+        let hashes = compute_hashes_path(&path, &options, Some(&mut sink), None)
+            .expect("file hashing must succeed");
+        // The file is read in buffer-sized chunks, never as one mapping.
+        assert_eq!(chunk_lengths, vec![MIN_BUFFER_SIZE, MIN_BUFFER_SIZE, 7]);
+        let mut reference_reader = Cursor::new(data);
+        let reference = compute_hashes_streaming(&mut reference_reader, &options, None, None)
+            .expect("streaming reference");
+        assert_eq!(hashes, reference);
+    }
+
+    #[test]
+    fn file_hashing_observes_cancellation_before_any_digest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("input.bin");
+        std::fs::write(&path, vec![1u8; 32]).expect("fixture");
+        let cancel = AtomicBool::new(true);
+        let result = compute_hashes_path(
+            &path,
+            &HashOptions::new(vec![AlgorithmId::Blake3]),
+            None,
+            Some(&cancel),
+        );
+        assert!(matches!(result, Err(HashError::Cancelled)));
     }
 
     #[test]

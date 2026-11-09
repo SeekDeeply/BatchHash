@@ -5,9 +5,16 @@
 use std::fs;
 use std::path::Path;
 
-use batchhash_core::pipeline::{run_batch, BatchPhase, BatchRequest, PipelineError, PipelineEvent};
+use batchhash_core::pipeline::{
+    reconcile_log, run_batch, BatchPhase, BatchRequest, PipelineError, PipelineEvent,
+};
 use batchhash_core::scan::{scan, ScanOptions};
 use batchhash_hash::CancelToken;
+use batchhash_rename::log_store::{
+    apply_undo, reconcile_pending_operations, BatchRecord, LogStore, OperationState,
+    RenameOperation, UndoResultStatus, UndoStatus,
+};
+use batchhash_rename::planner::{StdFsBackend, StdRenameFs};
 use batchhash_rename::suffix::{SuffixFormat, SuffixParseResult};
 use batchhash_types::{AlgorithmId, EntryStatus, ErrorKind, HexCase, RootKind};
 
@@ -263,4 +270,217 @@ fn invalid_suffix_format_is_rejected_before_scanning() {
         BatchRequest::new(temp.path(), vec![AlgorithmId::Md5]).with_suffix_dry_run(format);
     let error = run_batch(&request, &CancelToken::new(), &no_events).expect_err("must fail");
     assert!(matches!(error, PipelineError::Suffix(_)));
+}
+
+/// Insert one pending operation for a rename that has *not* happened yet.
+fn insert_pending(store: &mut LogStore, batch: &BatchRecord, from: &Path, to: &Path) -> i64 {
+    let operation = RenameOperation::new(
+        batch.id.clone(),
+        from.to_string_lossy().into_owned(),
+        to.to_string_lossy().into_owned(),
+        AlgorithmId::Md5,
+        "0123456789abcdef0123456789abcdef".to_string(),
+        "ABCDEF12".to_string(),
+    );
+    store.insert_operation(&operation).expect("insert operation")
+}
+
+fn new_batch(root: &Path) -> BatchRecord {
+    BatchRecord::new(
+        root.to_string_lossy().into_owned(),
+        RootKind::Fs,
+        vec![AlgorithmId::Md5],
+        md5_format(),
+    )
+}
+
+#[test]
+fn undo_never_restores_over_an_occupied_original_path() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let db = temp.path().join("rename.db");
+    let original = temp.path().join("movie.mkv");
+    write(&original, b"movie");
+
+    // A real batch: plan the rename, then perform it so the log records applied.
+    let request =
+        BatchRequest::new(temp.path(), vec![AlgorithmId::Md5]).with_suffix(md5_format(), &db);
+    let run = run_batch(&request, &CancelToken::new(), &no_events).expect("run");
+    let batch_id = run.batch_id.clone().expect("batch id");
+    assert!(!original.exists(), "the rename happened");
+
+    let mut store = LogStore::open(&db).expect("open log");
+    let plan = store.plan_undo(&batch_id, &StdRenameFs).expect("plan undo");
+    assert_eq!(plan.rows.len(), 1);
+    assert_eq!(plan.rows[0].status, UndoStatus::Ready);
+    let undo_from = plan.rows[0].from.clone();
+
+    // The original name is claimed again after the plan was built: a recreated
+    // file there must survive the stale undo untouched.
+    write(&original, b"squatter");
+    assert!(
+        Path::new(&undo_from).exists(),
+        "the renamed file still exists"
+    );
+
+    let results = apply_undo(&plan, &mut StdFsBackend, &mut store).expect("apply undo");
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].status,
+        UndoResultStatus::Skipped,
+        "an occupied original path must skip the row: {:?}",
+        results[0]
+    );
+    assert!(results[0]
+        .error
+        .as_deref()
+        .is_some_and(|error| error.contains("already occupied")));
+    // Both files are intact: nothing was overwritten and nothing was moved.
+    assert_eq!(fs::read(&original).expect("read squatter"), b"squatter".to_vec());
+    assert!(Path::new(&undo_from).exists(), "the renamed file must stay");
+    assert_eq!(
+        store.operation_state(results[0].operation_id).expect("state"),
+        Some(OperationState::Applied),
+        "a skipped undo must stay applied"
+    );
+}
+
+#[test]
+fn a_pending_operation_whose_rename_happened_is_recovered_as_applied() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let db = temp.path().join("rename.db");
+    let original = temp.path().join("movie.mkv");
+    let renamed = temp.path().join("movie[ABCDEF12].mkv");
+
+    let mut store = LogStore::open(&db).expect("open log");
+    let batch = new_batch(temp.path());
+    store.create_batch(&batch).expect("create batch");
+    let id = insert_pending(&mut store, &batch, &original, &renamed);
+    assert_eq!(
+        store.operation_state(id).expect("state"),
+        Some(OperationState::Pending)
+    );
+
+    // The crash window: the file was renamed but the result was never recorded.
+    write(&renamed, b"movie");
+
+    let report = reconcile_pending_operations(&mut store, &StdRenameFs).expect("reconcile");
+    assert_eq!(report.applied, 1, "report: {report:?}");
+    assert_eq!(report.resolved(), 1);
+    assert_eq!(
+        store.operation_state(id).expect("state"),
+        Some(OperationState::Applied),
+        "a rename that happened must become undoable"
+    );
+
+    // The recovered operation is undoable again, which the old code silently dropped.
+    let plan = store.plan_undo(&batch.id, &StdRenameFs).expect("plan undo");
+    assert_eq!(plan.rows.len(), 1);
+    assert_eq!(plan.rows[0].status, UndoStatus::Ready);
+    let results = apply_undo(&plan, &mut StdFsBackend, &mut store).expect("apply undo");
+    assert_eq!(results[0].status, UndoResultStatus::Undone);
+    assert!(original.exists(), "undo restores the recovered rename");
+
+    // Reconciliation is idempotent: nothing is pending any more.
+    let report = reconcile_pending_operations(&mut store, &StdRenameFs).expect("reconcile");
+    assert_eq!(report.resolved(), 0);
+}
+
+#[test]
+fn a_pending_operation_whose_rename_never_happened_is_recorded_as_conflict() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let db = temp.path().join("rename.db");
+    let original = temp.path().join("movie.mkv");
+    let renamed = temp.path().join("movie[ABCDEF12].mkv");
+
+    let mut store = LogStore::open(&db).expect("open log");
+    let batch = new_batch(temp.path());
+    store.create_batch(&batch).expect("create batch");
+    let id = insert_pending(&mut store, &batch, &original, &renamed);
+
+    // The other crash window: the log wrote the row but the rename never ran.
+    write(&original, b"movie");
+
+    let report = reconcile_pending_operations(&mut store, &StdRenameFs).expect("reconcile");
+    assert_eq!(report.not_applied, 1, "report: {report:?}");
+    assert_eq!(
+        store.operation_state(id).expect("state"),
+        Some(OperationState::Conflict),
+        "an unrenamed file must not be reported as undoable"
+    );
+    let plan = store.plan_undo(&batch.id, &StdRenameFs).expect("plan undo");
+    assert!(plan.rows.is_empty(), "conflicted rows are not undoable");
+    assert!(original.exists());
+    assert!(!renamed.exists());
+}
+
+#[test]
+fn reconcile_log_resolves_pending_rows_before_an_apply() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let db = temp.path().join("rename.db");
+    let original = temp.path().join("movie.mkv");
+    let renamed = temp.path().join("movie[ABCDEF12].mkv");
+
+    let mut store = LogStore::open(&db).expect("open log");
+    let batch = new_batch(temp.path());
+    store.create_batch(&batch).expect("create batch");
+    let id = insert_pending(&mut store, &batch, &original, &renamed);
+    write(&renamed, b"movie");
+    drop(store);
+
+    // Opening the log for a later run resolves the stale row before it plans.
+    let mut store = LogStore::open(&db).expect("reopen log");
+    let report = reconcile_log(&mut store, &CancelToken::new()).expect("reconcile");
+    assert_eq!(report.applied, 1);
+    assert_eq!(
+        store.operation_state(id).expect("state"),
+        Some(OperationState::Applied)
+    );
+}
+
+#[test]
+fn cancellation_raised_on_the_apply_event_renames_nothing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let file = temp.path().join("movie.mkv");
+    write(&file, b"movie");
+    let db = temp.path().join("rename.db");
+
+    let cancel = CancelToken::new();
+    let request =
+        BatchRequest::new(temp.path(), vec![AlgorithmId::Md5]).with_suffix(md5_format(), &db);
+    // The UI cancels exactly when it is told renames are about to start: the
+    // write must not happen after that event, and no row may stay unrecorded.
+    let token = cancel.clone();
+    let events = move |event: PipelineEvent| {
+        if let PipelineEvent::Phase(BatchPhase::ApplyingSuffix) = event {
+            token.cancel();
+        }
+    };
+
+    let run = run_batch(&request, &cancel, &events).expect("run");
+    assert!(run.cancelled, "the cancellation must be reported");
+    assert!(file.exists(), "cancelling on the apply event must not rename");
+    assert!(
+        run.rename_results.is_empty(),
+        "no rename may be executed after cancellation: {:?}",
+        run.rename_results
+    );
+    assert!(db.exists(), "the log batch was already written");
+
+    // Every inserted row is resolved: nothing stays pending for the next open.
+    let mut store = LogStore::open(&db).expect("open log");
+    let batch_id = run.batch_id.clone().expect("batch id");
+    let operations = store.operations_for_batch(&batch_id).expect("operations");
+    assert_eq!(operations.len(), 1, "the ready row was logged before the check");
+    assert_eq!(
+        operations[0].state,
+        OperationState::Conflict,
+        "an unattempted row must be recorded as a conflict, not left pending"
+    );
+    let report = reconcile_pending_operations(&mut store, &StdRenameFs).expect("reconcile");
+    assert_eq!(report.resolved(), 0, "no pending row may survive the run");
+
+    // The report must not advertise a rename that never happened.
+    let entry = &run.report.entries[0];
+    assert_eq!(entry.renamed_to, None, "no rename was performed");
+    assert_eq!(entry.suffix_applied, None);
 }

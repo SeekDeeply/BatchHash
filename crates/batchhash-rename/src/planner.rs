@@ -10,6 +10,13 @@
 //! existing target, two planned targets that collapse to the same name
 //! (optionally case-insensitively) and a read-only directory all surface as
 //! non-[`RenameRowStatus::Ready`] rows.
+//!
+//! Planning-time conflict detection is not a guarantee, because a target can be
+//! created after the plan is built. The no-overwrite guarantee is therefore also
+//! enforced at execution time: [`execute_plan`] (and
+//! [`execute_plan_with_policy`] with `overwrite = false`) renames through
+//! [`RenameBackend::rename_no_replace`], which is atomic on Linux
+//! (`renameat2` + `RENAME_NOREPLACE`) and best-effort elsewhere.
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -301,11 +308,29 @@ pub enum RenameResultStatus {
 /// The desktop implementation is [`StdFsBackend`]; Android supplies a backend
 /// that calls the Kotlin/SAF rename API.
 pub trait RenameBackend {
-    /// Rename or move [`from`] to [`to`].
+    /// Rename or move [`from`] to [`to`], replacing an existing target.
     ///
     /// Implementations must not fall back to copy-and-delete; a single atomic
-    /// rename (or the platform equivalent) is required.
+    /// rename (or the platform equivalent) is required. Callers that must not
+    /// destroy an existing target use [`RenameBackend::rename_no_replace`]
+    /// instead.
     fn rename(&mut self, from: &Path, to: &Path) -> Result<(), RenameError>;
+
+    /// Rename [`from`] to [`to`] without ever replacing an existing target.
+    ///
+    /// Returns [`RenameError::AlreadyExists`] when [`to`] exists. The default
+    /// implementation checks the target first and then delegates to
+    /// [`RenameBackend::rename`], so a target created between the check and the
+    /// rename can still be replaced; backends with an atomic no-replace
+    /// primitive ([`StdFsBackend`] on Linux) override this method. Backends with
+    /// their own path model (Android SAF documents) must override it, because
+    /// the default check only understands standard library paths.
+    fn rename_no_replace(&mut self, from: &Path, to: &Path) -> Result<(), RenameError> {
+        if target_exists(to) {
+            return Err(RenameError::AlreadyExists(to.display().to_string()));
+        }
+        self.rename(from, to)
+    }
 }
 
 /// Standard-library [`RenameBackend`] using [`std::fs::rename`].
@@ -317,11 +342,108 @@ impl StdFsBackend {
     pub fn new() -> Self {
         Self
     }
+
+    /// Rename without replacing an existing target using the strongest
+    /// primitive this platform offers.
+    ///
+    /// * Linux: `renameat2(2)` with `RENAME_NOREPLACE`, which is atomic. A kernel
+    ///   or filesystem that rejects the flag (older kernels, some network and
+    ///   FUSE filesystems) falls back to the best-effort path below.
+    /// * Other Unix: a target check followed by `std::fs::rename`. This is
+    ///   best-effort, not atomic.
+    /// * Windows: `std::fs::rename` already fails when the target exists.
+    fn rename_no_replace_impl(from: &Path, to: &Path) -> Result<(), RenameError> {
+        #[cfg(target_os = "linux")]
+        if let Some(outcome) = linux_rename_noreplace(from, to)? {
+            return outcome;
+        }
+        #[cfg(unix)]
+        if target_exists(to) {
+            return Err(RenameError::AlreadyExists(to.display().to_string()));
+        }
+        std::fs::rename(from, to).map_err(|error| RenameError::from_io(to, &error))
+    }
 }
 
 impl RenameBackend for StdFsBackend {
     fn rename(&mut self, from: &Path, to: &Path) -> Result<(), RenameError> {
         std::fs::rename(from, to).map_err(|error| RenameError::from_io(from, &error))
+    }
+
+    fn rename_no_replace(&mut self, from: &Path, to: &Path) -> Result<(), RenameError> {
+        StdFsBackend::rename_no_replace_impl(from, to)
+    }
+}
+
+/// `renameat2(2)` with `RENAME_NOREPLACE`.
+///
+/// Returns [`None`] when the filesystem does not implement the flag, so the
+/// caller can fall back to a check-then-rename; returns `Some(result)` when the
+/// kernel answered either way. Every other error is reported as a rename error
+/// on [`to`], because a failed rename leaves the source untouched.
+#[cfg(target_os = "linux")]
+fn linux_rename_noreplace(
+    from: &Path,
+    to: &Path,
+) -> Result<Option<Result<(), RenameError>>, RenameError> {
+    use std::os::raw::c_char;
+    use std::os::unix::ffi::OsStrExt;
+
+    let from_c = path_to_cstring(from)?;
+    let to_c = path_to_cstring(to)?;
+    // SAFETY: both pointers are NUL-terminated strings that live for the whole
+    // call, AT_FDCWD is the documented "resolve relative to the working
+    // directory" handle, and the only flag is RENAME_NOREPLACE.
+    let status = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from_c.as_ptr() as *const c_char,
+            libc::AT_FDCWD,
+            to_c.as_ptr() as *const c_char,
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if status == 0 {
+        return Ok(Some(Ok(())));
+    }
+    let error = std::io::Error::last_os_error();
+    if is_rename_noreplace_unsupported(&error) {
+        return Ok(None);
+    }
+    Ok(Some(Err(RenameError::from_io(to, &error))))
+}
+
+/// Whether a failed `renameat2(RENAME_NOREPLACE)` means the primitive itself is
+/// unavailable rather than the rename being rejected.
+#[cfg(target_os = "linux")]
+fn is_rename_noreplace_unsupported(error: &std::io::Error) -> bool {
+    match error.raw_os_error() {
+        // The filesystem does not implement RENAME_NOREPLACE.
+        Some(code) if code == libc::EINVAL => true,
+        // The kernel predates renameat2(2).
+        Some(code) if code == libc::ENOSYS => true,
+        // Neither path can be encoded as a C string.
+        _ => error.kind() == std::io::ErrorKind::InvalidInput,
+    }
+}
+
+/// Convert a path for a C API call, rejecting interior NUL bytes and paths that
+/// cannot be represented as bytes.
+#[cfg(target_os = "linux")]
+fn path_to_cstring(path: &Path) -> Result<std::ffi::CString, RenameError> {
+    std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| RenameError::InvalidPath(path.display().to_string()))
+}
+
+/// Whether `path` currently exists, including a dangling symlink.
+///
+/// A probe that fails for another reason (a permission error, for example)
+/// reports `true` so the caller never treats "cannot tell" as "free" and
+/// destroys a file it could not see.
+fn target_exists(path: &Path) -> bool {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
     }
 }
 
@@ -340,6 +462,9 @@ pub enum RenameError {
     /// The platform cannot rename this kind of path.
     #[error("rename not supported: {0}")]
     Unsupported(String),
+    /// The path cannot be expressed as a platform path (an interior NUL byte).
+    #[error("invalid path: {0}")]
+    InvalidPath(String),
     /// Any other I/O failure.
     #[error("rename failed: {0}")]
     Io(String),
@@ -365,25 +490,78 @@ impl RenameError {
             RenameError::PermissionDenied(_) => "permission_denied",
             RenameError::AlreadyExists(_) => "already_exists",
             RenameError::Unsupported(_) => "unsupported",
+            RenameError::InvalidPath(_) => "invalid_path",
             RenameError::Io(_) => "io_error",
         }
     }
 }
 
-/// Execute every [`RenameRowStatus::Ready`] row of a plan through [`backend`].
+/// Execute every [`RenameRowStatus::Ready`] row of a plan without ever
+/// replacing an existing target.
+///
+/// This is [`execute_plan_with_policy`] with `overwrite = false`: it is the safe
+/// default, and the entry point the CLI and the bridge call.
 ///
 /// Non-ready rows are not attempted and produce no result, so the returned
 /// vector contains at most one result per ready row, in plan order. The plan
 /// itself is never modified.
 pub fn execute_plan(plan: &RenamePlan, backend: &mut dyn RenameBackend) -> Vec<RenameResult> {
+    execute_plan_with_policy(plan, backend, false)
+}
+
+/// Execute every [`RenameRowStatus::Ready`] row of a plan through [`backend`],
+/// honouring the overwrite policy.
+///
+/// The policy is enforced at execution time, not only at planning time: with
+/// `overwrite = false` every rename goes through
+/// [`RenameBackend::rename_no_replace`], so a target created *after* the plan
+/// was built cannot be silently destroyed. With `overwrite = true` the backend's
+/// plain rename is used, which replaces an existing target.
+///
+/// Non-ready rows are not attempted and produce no result, so the returned
+/// vector contains at most one result per ready row, in plan order. The plan
+/// itself is never modified.
+pub fn execute_plan_with_policy(
+    plan: &RenamePlan,
+    backend: &mut dyn RenameBackend,
+    overwrite: bool,
+) -> Vec<RenameResult> {
+    execute_plan_with_policy_and_cancel(plan, backend, overwrite, &|| false)
+}
+
+/// Execute a plan through [`backend`], stopping before the next row when
+/// [`should_stop`] reports cancellation.
+///
+/// The stop check happens immediately before **every** destructive rename, so
+/// cancellation that lands between two rows leaves exactly the rows that were
+/// renamed in the returned results and none after the stop point. The check is
+/// also made once before the loop, so a plan whose cancellation arrives before
+/// the first write renames nothing at all.
+///
+/// [`should_stop`] must return `false` when nothing is cancelled; the policy
+/// argument behaves exactly as in [`execute_plan_with_policy`].
+pub fn execute_plan_with_policy_and_cancel(
+    plan: &RenamePlan,
+    backend: &mut dyn RenameBackend,
+    overwrite: bool,
+    should_stop: &(dyn Fn() -> bool + Sync),
+) -> Vec<RenameResult> {
     let mut results = Vec::new();
     for row in &plan.rows {
         if row.status != RenameRowStatus::Ready {
             continue;
         }
+        if should_stop() {
+            break;
+        }
         let from = Path::new(&row.original_path);
         let to = target_path(&row.original_path, &row.proposed_name);
-        match backend.rename(from, &to) {
+        let outcome = if overwrite {
+            backend.rename(from, &to)
+        } else {
+            backend.rename_no_replace(from, &to)
+        };
+        match outcome {
             Ok(()) => results.push(RenameResult {
                 entry_index: row.entry_index,
                 original_path: row.original_path.clone(),
@@ -832,5 +1010,100 @@ mod tests {
         assert_eq!(results[0].status, RenameResultStatus::Failed);
         assert!(results[0].error.is_some());
         assert!(!temp.path().join("a[ABCDE].txt").exists());
+    }
+
+    #[test]
+    fn execute_plan_never_replaces_a_target_created_after_planning() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("a.txt");
+        let target = temp.path().join("a[ABCDE].txt");
+        fs::write(&source, b"hello").expect("source file");
+
+        let plan = plan_renames(
+            &[make_entry(&source, true)],
+            &RenamePlanOptions::default(),
+            &StdRenameFs,
+        );
+        assert_eq!(plan.rows[0].status, RenameRowStatus::Ready);
+
+        // The target appears after the plan was built: the planning-time check
+        // cannot see it, so execution itself must refuse to replace it.
+        fs::write(&target, b"other").expect("late target file");
+
+        let results = execute_plan(&plan, &mut StdFsBackend::new());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, RenameResultStatus::Failed);
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("already exists")),
+            "error: {:?}",
+            results[0].error
+        );
+        assert_eq!(fs::read(&target).expect("late target"), b"other");
+        assert!(source.exists(), "a refused rename leaves the source alone");
+    }
+
+    // `std::fs::rename` replaces a target on Unix; on Windows it refuses, so the
+    // overwrite policy only replaces there through a platform backend.
+    #[cfg(unix)]
+    #[test]
+    fn execute_plan_with_policy_overwrites_only_when_asked() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("a.txt");
+        let target = temp.path().join("a[ABCDE].txt");
+        fs::write(&source, b"hello").expect("source file");
+
+        let plan = plan_renames(
+            &[make_entry(&source, true)],
+            &RenamePlanOptions::default(),
+            &StdRenameFs,
+        );
+        assert_eq!(plan.rows[0].status, RenameRowStatus::Ready);
+
+        // Created after planning, so only the execution-time policy can decide.
+        fs::write(&target, b"other").expect("late target file");
+
+        let results = execute_plan_with_policy(&plan, &mut StdFsBackend::new(), true);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, RenameResultStatus::Renamed);
+        assert_eq!(fs::read(&target).expect("overwritten target"), b"hello");
+        assert!(!source.exists());
+    }
+
+    #[test]
+    fn execute_plan_with_policy_and_cancel_stops_between_rows() {
+        let temp = tempdir().expect("tempdir");
+        let first = temp.path().join("first.txt");
+        let second = temp.path().join("second.txt");
+        fs::write(&first, b"first").expect("first file");
+        fs::write(&second, b"second").expect("second file");
+
+        let plan = plan_renames(
+            &[make_entry(&first, true), make_entry(&second, true)],
+            &RenamePlanOptions::default(),
+            &StdRenameFs,
+        );
+        assert_eq!(plan.summary.ready, 2);
+
+        // The cancellation lands after the first rename has been attempted.
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let should_stop = || {
+            let seen = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            seen >= 1
+        };
+
+        let mut backend = StdFsBackend::new();
+        let results = execute_plan_with_policy_and_cancel(&plan, &mut backend, false, &should_stop);
+        assert_eq!(results.len(), 1, "only the first row may be attempted");
+        assert_eq!(results[0].status, RenameResultStatus::Renamed);
+        assert!(temp.path().join("first[ABCDE].txt").exists());
+        assert!(!first.exists());
+        assert!(
+            second.exists(),
+            "cancellation must stop the loop before the next rename"
+        );
+        assert!(!temp.path().join("second[ABCDE].txt").exists());
     }
 }

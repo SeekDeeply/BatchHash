@@ -128,11 +128,20 @@ class BatchHashNative {
   }
 
   /// Run the full pipeline: scan, hash, optional suffix write, report, log.
+  ///
+  /// [recursive] controls whether subdirectories are scanned; a folder the user
+  /// picked as "only this folder" must pass false, or the batch silently grows
+  /// to the whole tree. [restrictPaths] narrows an already running batch to the
+  /// root-relative paths the user previewed, so executing a rename plan cannot
+  /// touch files the plan never showed. Both are omitted from the request when
+  /// they keep their default, so an older native library still answers.
   Map<String, Object?> runBatch({
     required String root,
     required List<String> algorithms,
     String? rootLabel,
     bool followLinks = false,
+    bool recursive = true,
+    List<String>? restrictPaths,
     bool? caseSensitive,
     Map<String, Object?>? suffix,
     bool applyRenames = false,
@@ -144,6 +153,9 @@ class BatchHashNative {
       'algorithms': algorithms,
       if (rootLabel != null) 'root_label': rootLabel,
       'follow_links': followLinks,
+      'recursive': recursive,
+      if (restrictPaths != null && restrictPaths.isNotEmpty)
+        'restrict_paths': restrictPaths,
       if (caseSensitive != null) 'case_sensitive': caseSensitive,
       if (suffix != null) 'suffix': suffix,
       'apply_renames': applyRenames,

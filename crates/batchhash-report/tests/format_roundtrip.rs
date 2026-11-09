@@ -12,8 +12,8 @@ use batchhash_report::format::{
     ReportFormat,
 };
 use batchhash_types::{
-    AlgorithmId, BackendPolicy, EntryStatus, ErrorKind, HardwareReport, Report, ReportEntry,
-    RootKind, SuffixConfig,
+    AlgorithmId, BackendPolicy, DiffStatus, EntryStatus, ErrorKind, HardwareReport, Report,
+    ReportEntry, ReportValidationError, RootKind, SuffixConfig,
 };
 use indexmap::IndexMap;
 
@@ -425,3 +425,132 @@ fn format_detection_prefers_content_then_extension() {
     );
     assert_eq!(detect_report_format("mystery.bin", b""), None);
 }
+
+#[test]
+fn csv_import_rejects_unknown_columns() {
+    // A header that is neither metadata nor a registered algorithm would be
+    // dropped silently, so the import must fail instead of losing data.
+    let unknown = "path,size,status,note,crc32\nx.mkv,10,ok,hello,00000000\n";
+    let error = import_report(unknown.as_bytes(), ReportFormat::Csv).unwrap_err();
+    assert!(matches!(
+        error,
+        ImportError::UnknownColumn { ref column } if column == "note"
+    ));
+
+    // Metadata columns are matched case-insensitively; algorithm columns must
+    // use the registered stable id, which is lowercase by contract.
+    let known = "SIZE,Path,crc32,Generated_At\n10,x.mkv,00000000,2026-10-20T00:00:00Z\n";
+    let report = import_report(known.as_bytes(), ReportFormat::Csv).expect("known columns only");
+    assert_eq!(report.algorithms, vec![AlgorithmId::Crc32]);
+    assert_eq!(report.entries.len(), 1);
+}
+
+#[test]
+fn imports_reject_rows_a_later_export_would_refuse() {
+    // Ok entries must carry a digest: an export of such a report would be
+    // rejected by validate(), so the importer rejects it first.
+    let no_digest = "path,size,status,crc32\nx.mkv,10,ok,\n";
+    let error = import_report(no_digest.as_bytes(), ReportFormat::Csv).unwrap_err();
+    assert!(matches!(
+        error,
+        ImportError::InvalidReport(ReportValidationError::OkEntryWithoutHashes(_))
+    ));
+
+    // Duplicate paths cannot round-trip through the canonical sorted export.
+    let duplicate = "path,size,status,crc32\nx.mkv,10,ok,00000000\nx.mkv,10,ok,11111111\n";
+    let error = import_report(duplicate.as_bytes(), ReportFormat::Csv).unwrap_err();
+    assert!(matches!(
+        error,
+        ImportError::InvalidReport(ReportValidationError::DuplicatePath(_))
+    ));
+
+    // Checksum imports go through the same final validation step. 40 hex chars
+    // maps to sha1 unambiguously, so only the duplicate path can fail here.
+    let checksum_duplicate = format!("{}  x.mkv\n{}  x.mkv\n", "a".repeat(40), "b".repeat(40));
+    let error = import_report(checksum_duplicate.as_bytes(), ReportFormat::Md5sum).unwrap_err();
+    assert!(matches!(
+        error,
+        ImportError::InvalidReport(ReportValidationError::DuplicatePath(_))
+    ));
+}
+
+#[test]
+fn json_import_rejects_a_forged_summary() {
+    let report = sample_report();
+    let json = export_report(&report, ReportFormat::Json).expect("JSON export");
+    let mut value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    value["summary"]["total"] = serde_json::json!(99);
+    let forged = serde_json::to_string(&value).expect("serialize");
+    let error = import_report(forged.as_bytes(), ReportFormat::Json).unwrap_err();
+    assert!(matches!(
+        error,
+        ImportError::InvalidReport(ReportValidationError::SummaryMismatch {
+            field: "total",
+            actual: 99,
+            ..
+        })
+    ));
+}
+
+fn partial_hash_report(missing_blake3: bool) -> Report {
+    let mut report = Report::new(
+        "/data/media",
+        RootKind::Fs,
+        false,
+        vec![AlgorithmId::Sha256, AlgorithmId::Blake3],
+        HardwareReport::default(),
+    );
+    report.generated_at = "2026-10-20T00:00:00Z".to_string();
+    report.entries = vec![record(
+        "a.mkv",
+        10,
+        vec![(AlgorithmId::Sha256, digest(AlgorithmId::Sha256, 'a'))],
+    )];
+    if !missing_blake3 {
+        report.entries[0]
+            .hashes
+            .insert(AlgorithmId::Blake3, digest(AlgorithmId::Blake3, 'b'));
+    }
+    report.recompute_summary();
+    report
+}
+
+#[test]
+fn diff_reports_incomplete_hashes_as_unknown() {
+    let options = DiffOptions::default().with_generated_at("2026-10-20T00:00:00Z");
+
+    // Only one side carries blake3: the blake3 comparison never happened, so
+    // the row must not claim to be unchanged.
+    let left = partial_hash_report(false);
+    let right = partial_hash_report(true);
+    let diff = diff_reports(&left, &right, &options).expect("valid reports");
+    assert_eq!(diff.rows.len(), 1);
+    assert_eq!(diff.rows[0].status, DiffStatus::Unknown);
+    assert!(
+        diff.rows[0].reason.contains("blake3"),
+        "reason names the missing algorithm: {}",
+        diff.rows[0].reason
+    );
+    assert_eq!(diff.rows[0].algorithms_compared, vec![AlgorithmId::Sha256]);
+    assert_eq!(diff.summary.unknown, 1);
+    assert_eq!(diff.summary.unchanged, 0);
+
+    // Both sides declare sha256 + blake3 but only carry sha256: same verdict.
+    let left = partial_hash_report(true);
+    let right = partial_hash_report(true);
+    let diff = diff_reports(&left, &right, &options).expect("valid reports");
+    assert_eq!(diff.rows[0].status, DiffStatus::Unknown);
+    assert_eq!(diff.summary.unchanged, 0);
+
+    // With both digests present and matching, the row is genuinely unchanged.
+    let left = partial_hash_report(false);
+    let right = partial_hash_report(false);
+    let diff = diff_reports(&left, &right, &options).expect("valid reports");
+    assert_eq!(diff.rows[0].status, DiffStatus::Unchanged);
+    assert_eq!(
+        diff.rows[0].algorithms_compared,
+        vec![AlgorithmId::Sha256, AlgorithmId::Blake3]
+    );
+    assert_eq!(diff.summary.unchanged, 1);
+}
+

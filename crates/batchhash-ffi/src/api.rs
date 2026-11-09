@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use batchhash_core::pipeline::{run_batch, BatchRequest};
 use batchhash_core::scan::{scan, ScanOptions};
 use batchhash_hash::{FileIo, HashEntryOptions, HashOptions};
-use batchhash_rename::log_store::{apply_undo, LogStore, OperationState};
+use batchhash_rename::log_store::{apply_undo, LogStore, OperationState, UndoResultStatus};
 use batchhash_rename::planner::{RenameRowStatus, StdFsBackend, StdRenameFs};
 use batchhash_rename::suffix::{SuffixFormat, SuffixParseResult};
 use batchhash_report::format::{detect_report_format, export_report, import_report, ReportFormat};
@@ -187,6 +187,10 @@ fn default_suffix_length() -> u8 {
     5
 }
 
+fn default_recursive() -> bool {
+    true
+}
+
 /// Request for [run_batch_request].
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BatchRequestDto {
@@ -200,6 +204,16 @@ pub struct BatchRequestDto {
     /// Follow symbolic links.
     #[serde(default)]
     pub follow_links: bool,
+    /// Descend into subdirectories (defaults to true, matching a folder scan).
+    #[serde(default = "default_recursive")]
+    pub recursive: bool,
+    /// Root-relative paths to restrict the batch to (empty means no restriction).
+    ///
+    /// The UI previews a rename plan for a specific set of files, then executes
+    /// exactly that set; without this the run would rescan the whole tree and
+    /// could rename files the plan never showed.
+    #[serde(default)]
+    pub restrict_paths: Vec<String>,
     /// Case sensitivity recorded in the report (defaults per platform).
     #[serde(default)]
     pub case_sensitive: Option<bool>,
@@ -327,8 +341,15 @@ pub struct UndoResultDto {
     pub batch_id: String,
     /// Rows of the undo plan.
     pub rows: Vec<UndoRowDto>,
-    /// Rows that were actually undone (zero for a dry run).
+    /// Rows that were actually undone (zero for a dry run). Only rows whose
+    /// rename succeeded are counted; skipped and failed rows are not.
     pub undone: u64,
+    /// Rows whose reverse rename failed (zero for a dry run).
+    #[serde(default)]
+    pub failed: u64,
+    /// Rows skipped without touching the filesystem (zero for a dry run).
+    #[serde(default)]
+    pub skipped: u64,
     /// Whether the undo was executed.
     pub applied: bool,
 }
@@ -426,8 +447,10 @@ pub fn run_batch_request(request: &BatchRequestDto) -> Result<BatchResultDto, Ap
     }
     pipeline_request.scan = ScanOptions {
         follow_links: request.follow_links,
+        recursive: request.recursive,
         ..ScanOptions::default()
     };
+    pipeline_request.restrict_paths = request.restrict_paths.clone();
     pipeline_request.suffix = suffix;
     pipeline_request.apply_renames = request.apply_renames && suffix.is_some();
     pipeline_request.log_db = request.log_db.as_ref().map(std::path::PathBuf::from);
@@ -435,8 +458,7 @@ pub fn run_batch_request(request: &BatchRequestDto) -> Result<BatchResultDto, Ap
 
     let cancel = batchhash_hash::CancelToken::new();
     let noop = |_event: batchhash_core::pipeline::PipelineEvent| {};
-    let run = run_batch(&pipeline_request, &cancel, &noop)
-        .map_err(|error| ApiError::new("pipeline", error.to_string()))?;
+    let run = run_batch(&pipeline_request, &cancel, &noop).map_err(pipeline_api_error)?;
 
     let report_json = export_report(&run.report, ReportFormat::Json)
         .map_err(|error| ApiError::new("export", error.to_string()))?;
@@ -543,15 +565,29 @@ pub fn undo(request: &UndoRequestDto) -> Result<UndoResultDto, ApiError> {
             batch_id,
             rows,
             undone: 0,
+            failed: 0,
+            skipped: 0,
             applied: false,
         });
     }
     let results = apply_undo(&plan, &mut StdFsBackend, &mut store)
         .map_err(|error| ApiError::new("log", error.to_string()))?;
+    let mut undone = 0u64;
+    let mut failed = 0u64;
+    let mut skipped = 0u64;
+    for result in &results {
+        match result.status {
+            UndoResultStatus::Undone => undone += 1,
+            UndoResultStatus::Failed => failed += 1,
+            UndoResultStatus::Skipped => skipped += 1,
+        }
+    }
     Ok(UndoResultDto {
         batch_id,
         rows,
-        undone: u64::try_from(results.len()).unwrap_or(u64::MAX),
+        undone,
+        failed,
+        skipped,
         applied: true,
     })
 }
@@ -578,6 +614,24 @@ fn proposed_path_for(original_path: &str, proposed_name: &str) -> String {
         Some((parent, _)) => format!("{parent}/{proposed_name}"),
         None => proposed_name.to_string(),
     }
+}
+
+/// Map a pipeline failure onto a bridge error kind.
+///
+/// Each error family keeps its own kind so the UI can tell a malformed request
+/// (retry is pointless) from a scan, log, suffix or report failure. "pipeline"
+/// stays as the fallback for families without a dedicated kind.
+fn pipeline_api_error(error: batchhash_core::pipeline::PipelineError) -> ApiError {
+    use batchhash_core::pipeline::PipelineError;
+
+    let kind = match &error {
+        PipelineError::InvalidRequest(_) => "invalid_request",
+        PipelineError::Scan(_) => "scan",
+        PipelineError::Suffix(_) => "suffix",
+        PipelineError::Log(_) | PipelineError::LogIo { .. } => "log",
+        PipelineError::Report(_) => "report",
+    };
+    ApiError::new(kind, error.to_string())
 }
 
 fn parse_algorithms(ids: &[String]) -> Result<Vec<AlgorithmId>, ApiError> {
@@ -1049,9 +1103,21 @@ pub fn plan_renames_request(request: &PlanRenamesRequest) -> Result<RenamePlanDt
 }
 
 /// Import a report file and return its canonical JSON.
+///
+/// The size limit is enforced twice: from the file metadata before anything is
+/// read (so an oversized report never gets buffered into memory), and again on
+/// the bytes actually read, because the file can grow between the stat and the
+/// read.
 pub fn import_report_request(request: &ImportReportRequest) -> Result<String, ApiError> {
+    let maximum = batchhash_types::MAX_IMPORT_BYTES;
+    let reported = std::fs::metadata(&request.path)
+        .map_err(|error| ApiError::new("io", format!("cannot read the report: {error}")))?
+        .len();
+    check_import_size(reported, maximum)?;
     let bytes = std::fs::read(&request.path)
         .map_err(|error| ApiError::new("io", format!("cannot read the report: {error}")))?;
+    let actual = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    check_import_size(actual, maximum)?;
     let name = std::path::Path::new(&request.path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -1062,6 +1128,17 @@ pub fn import_report_request(request: &ImportReportRequest) -> Result<String, Ap
         .map_err(|error| ApiError::new("invalid_report", error.to_string()))?;
     export_report(&report, ReportFormat::Json)
         .map_err(|error| ApiError::new("export", error.to_string()))
+}
+
+/// Reject a report payload that exceeds the import byte cap.
+fn check_import_size(size: u64, maximum: u64) -> Result<(), ApiError> {
+    if size > maximum {
+        return Err(ApiError::new(
+            "too_large",
+            format!("the report is {size} bytes, over the {maximum} byte import limit"),
+        ));
+    }
+    Ok(())
 }
 
 fn diff_dto(diff: &batchhash_types::DiffReport) -> DiffResultDto {
@@ -1268,3 +1345,182 @@ pub fn build_report_request(request: &BuildReportRequest) -> Result<String, ApiE
     export_report(&report, ReportFormat::Json)
         .map_err(|error| ApiError::new("export", error.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn write(path: &std::path::Path, contents: &[u8]) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent");
+        }
+        fs::write(path, contents).expect("write fixture");
+    }
+
+    fn batch_request(root: &std::path::Path, algorithms: Vec<&str>) -> BatchRequestDto {
+        BatchRequestDto {
+            root: root.to_string_lossy().into_owned(),
+            root_label: None,
+            algorithms: algorithms.into_iter().map(str::to_string).collect(),
+            follow_links: false,
+            case_sensitive: None,
+            suffix: None,
+            apply_renames: false,
+            log_db: None,
+            overwrite: false,
+        }
+    }
+
+    fn suffix_request(
+        root: &std::path::Path,
+        log_db: Option<&std::path::Path>,
+    ) -> BatchRequestDto {
+        let mut request = batch_request(root, vec!["md5"]);
+        request.suffix = Some(SuffixDto {
+            algorithm: "md5".to_string(),
+            length: 8,
+            case: None,
+            prefix: false,
+        });
+        request.apply_renames = true;
+        request.log_db = log_db.map(|path| path.to_string_lossy().into_owned());
+        request
+    }
+
+    #[test]
+    fn pipeline_error_kinds_are_distinct() {
+        assert_eq!(
+            pipeline_api_error(batchhash_core::pipeline::PipelineError::InvalidRequest(
+                "bad request".to_string()
+            ))
+            .kind,
+            "invalid_request"
+        );
+        assert_eq!(
+            pipeline_api_error(batchhash_core::pipeline::PipelineError::LogIo {
+                path: "dir".to_string(),
+                message: "denied".to_string(),
+            })
+            .kind,
+            "log"
+        );
+    }
+
+    #[test]
+    fn missing_log_db_is_an_invalid_request_not_a_pipeline_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        write(&temp.path().join("movie.mkv"), b"movie");
+
+        // Applying suffixes without a log path is an internally inconsistent
+        // request, so the UI must be able to tell it apart from a pipeline bug.
+        let error =
+            run_batch_request(&suffix_request(temp.path(), None)).expect_err("must fail");
+        assert_eq!(error.kind, "invalid_request");
+        assert!(error.message.contains("rename log path"), "{}", error.message);
+
+        // The same request without apply_renames is a valid dry run.
+        let mut dry_run = suffix_request(temp.path(), None);
+        dry_run.apply_renames = false;
+        let run = run_batch_request(&dry_run).expect("dry run");
+        assert_eq!(run.renamed, 0);
+    }
+
+    #[test]
+    fn missing_root_keeps_the_scan_kind() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let missing = temp.path().join("does-not-exist");
+        let error =
+            run_batch_request(&batch_request(&missing, vec!["md5"])).expect_err("must fail");
+        assert_eq!(error.kind, "scan");
+    }
+
+    #[test]
+    fn undo_counts_only_undone_rows() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let file = temp.path().join("movie.mkv");
+        write(&file, b"movie");
+        let db = temp.path().join("log/rename.db");
+
+        let run = run_batch_request(&suffix_request(temp.path(), Some(&db))).expect("run");
+        assert_eq!(run.renamed, 1);
+        let batch_id = run.batch_id.clone().expect("batch id");
+
+        let planned = undo(&UndoRequestDto {
+            db: db.to_string_lossy().into_owned(),
+            batch_id: Some(batch_id.clone()),
+            apply: false,
+        })
+        .expect("undo plan");
+        assert_eq!(planned.undone, 0);
+        assert_eq!(planned.failed, 0);
+        assert_eq!(planned.skipped, 0);
+        assert!(!planned.applied);
+
+        let applied = undo(&UndoRequestDto {
+            db: db.to_string_lossy().into_owned(),
+            batch_id: Some(batch_id.clone()),
+            apply: true,
+        })
+        .expect("undo apply");
+        assert_eq!(applied.undone, 1);
+        assert_eq!(applied.failed, 0);
+        assert_eq!(applied.skipped, 0);
+        assert!(file.exists(), "undo restores the original name");
+
+        // Repeating the undo skips the row instead of counting it as undone.
+        let repeated = undo(&UndoRequestDto {
+            db: db.to_string_lossy().into_owned(),
+            batch_id: Some(batch_id),
+            apply: true,
+        })
+        .expect("second undo");
+        assert_eq!(repeated.undone, 0);
+        assert_eq!(repeated.failed, 0);
+        assert_eq!(repeated.skipped, 1);
+    }
+
+    #[test]
+    fn import_rejects_an_oversized_report_before_reading_it() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("huge.json");
+        // Only the length matters: the guard fires on metadata, before any byte
+        // of the file is read into memory.
+        let file = fs::File::create(&path).expect("create fixture");
+        file.set_len(batchhash_types::MAX_IMPORT_BYTES + 1)
+            .expect("size the fixture");
+        drop(file);
+
+        let error = import_report_request(&ImportReportRequest {
+            path: path.to_string_lossy().into_owned(),
+        })
+        .expect_err("oversized report must be rejected");
+        assert_eq!(error.kind, "too_large");
+        assert!(error.message.contains("import limit"), "{}", error.message);
+    }
+
+    #[test]
+    fn import_byte_cap_is_inclusive() {
+        let maximum = batchhash_types::MAX_IMPORT_BYTES;
+        assert!(check_import_size(0, maximum).is_ok());
+        assert!(check_import_size(maximum, maximum).is_ok());
+        let error = check_import_size(maximum + 1, maximum).expect_err("one byte over");
+        assert_eq!(error.kind, "too_large");
+    }
+
+    #[test]
+    fn import_accepts_a_small_report_and_returns_canonical_json() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        write(&temp.path().join("a.txt"), b"alpha");
+        let run = run_batch_request(&batch_request(temp.path(), vec!["md5"])).expect("run");
+        let report_path = temp.path().join("report.json");
+        write(&report_path, run.report_json.as_bytes());
+
+        let imported = import_report_request(&ImportReportRequest {
+            path: report_path.to_string_lossy().into_owned(),
+        })
+        .expect("import");
+        assert!(imported.contains("schema_version"), "{imported}");
+    }
+}
+

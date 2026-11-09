@@ -1,17 +1,23 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_state.dart';
 import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../util/formatting.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/path_input_dialog.dart';
 import '../widgets/summary_card.dart';
 
 /// Report export page. Formats are chosen with checkboxes and exported on
 /// demand; the page stays read only until the user taps Export.
 ///
 /// All copy, including the export result and error messages, is resolved from
-/// the active locale with `context.strings`.
+/// the active locale with `context.strings`. The destination comes from the
+/// in-app path chooser, and every exported file can be copied to the clipboard
+/// or revealed in the desktop file manager.
 class ReportPage extends StatefulWidget {
   const ReportPage({super.key, required this.state});
 
@@ -31,17 +37,48 @@ class _ReportPageState extends State<ReportPage> {
   String? _message;
   List<ExportedReport> _exported = const <ExportedReport>[];
 
+  /// True on desktop platforms where a file manager can be launched.
+  static bool get _canOpenFolder =>
+      Platform.isLinux || Platform.isMacOS || Platform.isWindows;
+
+  Future<void> _chooseDirectory() async {
+    final BatchHashAppState app = widget.state;
+    final String? value = await PathInputDialog.show(
+      context,
+      title: context.strings('report.destination'),
+      hintText: context.strings('path.hint.destination'),
+      helperText: context.strings('path.destinationHelper'),
+      initialValue: app.exportDirectory.value,
+      allowEmpty: true,
+      suggestions: app.recentPaths.value,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (value == null) {
+      return;
+    }
+    final String trimmed = value.trim();
+    app.exportDirectory.value = trimmed;
+    if (trimmed.isNotEmpty) {
+      app.rememberPath(trimmed);
+    }
+    setState(() {});
+  }
+
   Future<void> _export(ReportModel report) async {
     setState(() {
       _exporting = true;
       _error = null;
       _message = null;
     });
+    final String directory = widget.state.exportDirectory.value.trim();
     try {
       final List<ExportedReport> files = await widget.state.service
           .exportReport(
             report: report,
             formats: Set<ReportFormat>.of(_formats),
+            directory: directory.isEmpty ? null : directory,
           );
       if (!mounted) {
         return;
@@ -68,6 +105,48 @@ class _ReportPageState extends State<ReportPage> {
         _error = failure;
       });
     }
+  }
+
+  Future<void> _copyPath(String path) async {
+    await Clipboard.setData(ClipboardData(text: path));
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.strings('report.pathCopied'))),
+    );
+  }
+
+  Future<void> _openContainingFolder(String path) async {
+    final String directory = _parentDirectory(path);
+    try {
+      if (Platform.isMacOS) {
+        await Process.run('open', <String>[directory]);
+      } else if (Platform.isWindows) {
+        await Process.run('explorer', <String>[directory]);
+      } else {
+        await Process.run('xdg-open', <String>[directory]);
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final String failure = context.strings(
+        'report.openFolderFailed',
+        args: <String, String>{'error': '$error'},
+      );
+      setState(() {
+        _error = failure;
+      });
+    }
+  }
+
+  String _parentDirectory(String path) {
+    final int separator = path.lastIndexOf(RegExp(r'[/\\]'));
+    if (separator <= 0) {
+      return path;
+    }
+    return path.substring(0, separator);
   }
 
   void _toggleFormat(ReportFormat format, bool selected) {
@@ -167,6 +246,8 @@ class _ReportPageState extends State<ReportPage> {
                     contentPadding: EdgeInsets.zero,
                   ),
                 const SizedBox(height: 16),
+                _buildDestination(theme),
+                const SizedBox(height: 16),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -210,10 +291,31 @@ class _ReportPageState extends State<ReportPage> {
                       children: <Widget>[
                         for (final ExportedReport exported in _exported)
                           ListTile(
+                            key: ValueKey<String>(
+                              'report-exported-${exported.path}',
+                            ),
                             dense: true,
                             leading: Icon(_iconFor(exported.format)),
-                            title: Text(exported.path),
+                            title: Text(
+                              exported.path,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                             subtitle: Text(exported.format.label),
+                            onTap: () => _copyPath(exported.path),
+                            trailing: _canOpenFolder
+                                ? IconButton(
+                                    key: ValueKey<String>(
+                                      'report-open-folder-${exported.path}',
+                                    ),
+                                    tooltip: context.strings(
+                                      'report.openFolder',
+                                    ),
+                                    icon: const Icon(Icons.folder_open),
+                                    onPressed: () =>
+                                        _openContainingFolder(exported.path),
+                                  )
+                                : null,
                           ),
                       ],
                     ),
@@ -224,6 +326,40 @@ class _ReportPageState extends State<ReportPage> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildDestination(ThemeData theme) {
+    final String directory = widget.state.exportDirectory.value.trim();
+    final String value = directory.isEmpty
+        ? context.strings('report.destinationDefault')
+        : directory;
+    return Card(
+      key: const ValueKey<String>('report-destination'),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              context.strings('report.destination'),
+              style: theme.textTheme.labelLarge,
+            ),
+            const SizedBox(height: 4),
+            Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: const ValueKey<String>('report-choose-destination'),
+                onPressed: _exporting ? null : _chooseDirectory,
+                icon: const Icon(Icons.folder_open_outlined),
+                label: Text(context.strings('report.chooseDestination')),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

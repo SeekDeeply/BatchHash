@@ -53,6 +53,19 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 扫描跳过的路径、写名计划行与汇总、`batch_id`、重命名成功/失败数、是否取消、耗时，
 以及 **canonical report JSON**（`report_json`），UI 可以直接拿去做导出或对比。
 
+`BatchRequestDto` 的两个可选字段决定「这次到底处理哪些文件」，UI 必须显式传：
+
+- `recursive`（默认 `true`）：是否进入子目录。用户选「只此文件夹」时传 `false`，
+  否则批次会静默扩大到整棵树。
+- `restrict_paths`（默认空数组 = 不限制）：根相对路径列表。UI 预览了写名计划后
+  执行时传入计划里 `ready` 行的原路径，Rust 只处理这些条目，因此执行阶段不可能碰到
+  预览里没出现的文件。路径必须是正斜杠根相对形式（绝对路径、`..` 逃逸、含 NUL 都会
+  以 `invalid_request` 拒绝）；执行前已消失的路径只是不出现在结果里，不会被当成失败。
+
+错误的 `kind` 与 Rust 错误族一一对应：`invalid_request`（请求自相矛盾，重试无意义）、
+`scan`、`suffix`、`log`、`report`、`io`、`too_large`、`invalid_report`、`export`、`unsupported`。
+旧版本里的通用 `pipeline` 已不再出现，Dart 侧不要再按它分支。
+
 ## Dart 侧
 
 `BatchHashNative.tryOpen()` 的查找顺序：
@@ -66,32 +79,33 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 
 ## UI 服务层
 
-%BT%app/lib/src/services/rust_batch_hash_service.dart%BT% 实现 %BT%BatchHashService%BT%，
-把桥接 DTO 映射到 UI 模型（%BT%BatchEntry%BT% / %BT%ReportModel%BT% / %BT%RenamePlanModel%BT% /
-%BT%DiffRowModel%BT% / %BT%HistoryBatchModel%BT%）：
+`app/lib/src/services/rust_batch_hash_service.dart` 实现 `BatchHashService`，
+把桥接 DTO 映射到 UI 模型（`BatchEntry` / `ReportModel` / `RenamePlanModel` /
+`DiffRowModel` / `HistoryBatchModel`）：
 
 | 服务方法 | Rust 侧 |
 |---|---|
-| %BT%probeHardware%BT% | %BT%bh_probe%BT% |
-| %BT%scanDirectory%BT% | %BT%bh_scan%BT% |
-| %BT%computeHashes%BT% | %BT%bh_run_batch%BT%（单次阻塞调用，完成后发一个 100% 进度事件） |
-| %BT%planRenames%BT% | %BT%bh_plan_renames%BT%（纯计划，不落盘，复用已算好的哈希） |
-| %BT%executeRenames%BT% | %BT%bh_run_batch%BT% + %BT%apply_renames%BT%（写 SQLite 日志） |
-| %BT%exportReport%BT% | %BT%bh_build_report%BT% + %BT%bh_export_report%BT%，Dart 负责落盘 |
-| %BT%importReport%BT% | %BT%bh_import_report%BT% |
-| %BT%diffReports%BT% / %BT%diffReportAgainstDirectory%BT% | %BT%bh_diff_reports%BT% / %BT%bh_diff_directory%BT% |
-| %BT%loadHistory%BT% / %BT%undoBatch%BT% | %BT%bh_list_batches%BT% / %BT%bh_undo%BT% |
+| `probeHardware` | `bh_probe` |
+| `scanDirectory` | `bh_scan` |
+| `computeHashes` | `bh_run_batch`（单次阻塞调用，完成后发一个 100% 进度事件） |
+| `planRenames` | `bh_plan_renames`（纯计划，不落盘，复用已算好的哈希） |
+| `executeRenames` | `bh_run_batch` + `apply_renames`（写 SQLite 日志） |
+| `exportReport` | `bh_build_report` + `bh_export_report`，Dart 负责落盘 |
+| `importReport` | `bh_import_report` |
+| `diffReports` / `diffReportAgainstDirectory` | `bh_diff_reports` / `bh_diff_directory` |
+| `loadHistory` / `undoBatch` | `bh_list_batches` / `bh_undo` |
 
-%BT%BatchHashApp%BT% 的注入顺序是：显式传入的 service → %BT%RustBatchHashService.tryCreate()%BT% →
-%BT%FakeBatchHashService%BT%。因此 widget 测试（没有原生库）仍然跑 fake，而打包后的应用自动走 Rust。
+`BatchHashApp` 的注入顺序是：显式传入的 service → `RustBatchHashService.tryCreate()` →
+`FakeBatchHashService`。因此 widget 测试（没有原生库）仍然跑 fake，而打包后的应用自动走 Rust。
 
 已知限制（诚实记录）：
 
-- %BT%computeHashes%BT% 的进度是「一次性完成事件」而非逐文件流；真正的流式进度需要给 C ABI 增加
+- `computeHashes` 的进度是「一次性完成事件」而非逐文件流；真正的流式进度需要给 C ABI 增加
   句柄/回调模型，属于后续迭代。
-- %BT%executeRenames%BT% 复用 %BT%run_batch%BT% 的「扫描 → 计划 → 执行」路径，因此会重新读一遍文件；
-  语义与 UI 上展示的 dry-run 计划一致（同样的规则、同样的跳过条件）。
-- %BT%probeRenderingHardware%BT% 仍走平台层（Flutter 侧），不是 Rust；这是设计边界，不是遗漏。
+- `executeRenames` 复用 `run_batch` 的「扫描 → 计划 → 执行」路径，因此会重新读一遍文件；
+  它通过 `restrict_paths` 把范围锁在预览计划里 `ready` 的行，所以「重新读」不会扩大范围，
+  但执行与预览之间新增或消失的文件仍会体现为结果差异（消失的只是不出现，不会报错）。
+- `probeRenderingHardware` 仍走平台层（Flutter 侧），不是 Rust；这是设计边界，不是遗漏。
 
 ## 校验方式
 

@@ -2,6 +2,23 @@ import '../models/models.dart';
 import '../platform/rendering_hardware.dart';
 import 'batch_hash_service.dart';
 
+/// Raised when the fake is asked to scan a path it does not model.
+///
+/// The fake only knows the demo root. Failing loudly (instead of returning demo
+/// entries for any path) keeps a widget test from passing on data that no real
+/// scan ever produced, which used to hide real service failures.
+class DemoScanUnavailable implements Exception {
+  const DemoScanUnavailable(this.path);
+
+  /// The path the caller asked for.
+  final String path;
+
+  @override
+  String toString() =>
+      'DemoScanUnavailable: the demo service only knows '
+      '${FakeBatchHashService.rootPath}, not $path';
+}
+
 /// Deterministic in-memory implementation of [BatchHashService].
 ///
 /// Every value is derived from fixed paths so widget tests are stable across
@@ -44,6 +61,13 @@ class FakeBatchHashService implements BatchHashService {
   ];
 
   final RenderingHardwareProvider _renderingProvider;
+
+  /// Root of the most recent scan, or null before the demo root was scanned.
+  String? _lastRoot;
+
+  /// Restriction paths forwarded by the most recent rename execution.
+  List<String> _lastRestrictPaths = const <String>[];
+
   final List<HistoryBatchModel> _history = <HistoryBatchModel>[
     HistoryBatchModel(
       id: 'batch-0003',
@@ -67,12 +91,10 @@ class FakeBatchHashService implements BatchHashService {
   ];
 
   /// Entries exactly as a fresh scan would return them (no hashes yet).
-  List<BatchEntry> get sampleEntries =>
-      _buildEntries(root: rootPath, hashed: false);
+  List<BatchEntry> get sampleEntries => _buildEntries(hashed: false);
 
   /// Entries with hashes filled in, useful for rename and compare previews.
-  List<BatchEntry> get sampleHashedEntries =>
-      _buildEntries(root: rootPath, hashed: true);
+  List<BatchEntry> get sampleHashedEntries => _buildEntries(hashed: true);
 
   /// Fixed report used by the compare and report pages.
   ReportModel get sampleReport => ReportModel(
@@ -84,6 +106,13 @@ class FakeBatchHashService implements BatchHashService {
 
   /// Fixed comparison rows covering every status the UI renders.
   List<DiffRowModel> get sampleDiffRows => _buildDiffRows();
+
+  /// Root of the most recent successful scan, or null before the first one.
+  String? get lastRoot => _lastRoot;
+
+  /// Root-relative paths the most recent rename execution was narrowed to.
+  List<String> get lastRestrictPaths =>
+      List<String>.unmodifiable(_lastRestrictPaths);
 
   @override
   Future<HardwareInfoModel> probeHardware() async {
@@ -106,7 +135,14 @@ class FakeBatchHashService implements BatchHashService {
     String path, {
     bool recursive = false,
   }) async {
-    return _buildEntries(root: path, hashed: false);
+    if (!_isSampleRoot(path)) {
+      // Only the demo root can be "scanned" by the fake. Returning demo entries
+      // for any other path used to make every scan look successful, which hid
+      // real service failures behind plausible-looking demo data.
+      throw DemoScanUnavailable(path);
+    }
+    _lastRoot = path;
+    return _buildEntries(hashed: false, recursive: recursive);
   }
 
   @override
@@ -191,11 +227,23 @@ class FakeBatchHashService implements BatchHashService {
   }
 
   @override
-  Future<RenameExecuteResult> executeRenames(RenamePlanModel plan) async {
+  Future<RenameExecuteResult> executeRenames(
+    RenamePlanModel plan, {
+    bool? recursive,
+    List<String>? restrictPaths,
+  }) async {
     await Future<void>.delayed(const Duration(milliseconds: 5));
+    final List<String> paths = restrictPaths ?? _readyPaths(plan);
+    if (paths.isEmpty) {
+      // The real service refuses to apply a plan with nothing ready, because an
+      // unrestricted run would rename files the preview never showed; the fake
+      // refuses for the same reason so tests cannot mask the bug.
+      throw StateError('executeRenames requires at least one ready plan row');
+    }
+    _lastRestrictPaths = paths;
     return RenameExecuteResult(
-      applied: plan.readyCount,
-      skipped: plan.rows.length - plan.readyCount,
+      applied: paths.length,
+      skipped: plan.rows.length - paths.length,
       failed: 0,
       batchId: 'batch-0004',
     );
@@ -207,7 +255,11 @@ class FakeBatchHashService implements BatchHashService {
     required Set<ReportFormat> formats,
     String? directory,
   }) async {
-    final String targetDirectory = directory ?? rootPath;
+    // Without an explicit directory the real service writes into the user's
+    // exports folder rather than the repo or the system temp dir; the fake
+    // reports an equivalent placeholder path so the UI sees the same shape.
+    final String targetDirectory =
+        directory ?? '$rootPath/exports/${_exportStamp()}';
     final List<ReportFormat> ordered = formats.toList()
       ..sort(
         (ReportFormat left, ReportFormat right) =>
@@ -258,13 +310,26 @@ class FakeBatchHashService implements BatchHashService {
       return false;
     }
     _history[index] = _history[index].copyWith(undone: true);
+    // The tree changed, so the restriction set of the last run no longer
+    // describes anything the UI may still be showing.
+    _lastRestrictPaths = const <String>[];
     return true;
   }
 
-  List<BatchEntry> _buildEntries({required String root, required bool hashed}) {
+  /// Demo entries under [rootPath].
+  ///
+  /// [recursive] is honoured here rather than at the call site so a non
+  /// recursive scan cannot accidentally return the whole demo tree.
+  List<BatchEntry> _buildEntries({
+    required bool hashed,
+    bool recursive = true,
+  }) {
     final List<BatchEntry> entries = <BatchEntry>[];
     for (var index = 0; index < _relativePaths.length; index += 1) {
       final String relativePath = _relativePaths[index];
+      if (!recursive && relativePath.contains('/')) {
+        continue;
+      }
       final bool failed = index % 7 == 3;
       final bool skipped = !failed && index % 9 == 4;
       final EntryStatus status = failed
@@ -273,7 +338,7 @@ class FakeBatchHashService implements BatchHashService {
       final String? errorKind = failed
           ? 'permission_denied'
           : (skipped ? 'cancelled' : null);
-      final String path = '$root/$relativePath';
+      final String path = '$rootPath/$relativePath';
       final Map<String, String> hashes = hashed && status == EntryStatus.ok
           ? _hashesFor(path, kAvailableAlgorithms)
           : const <String, String>{};
@@ -428,6 +493,44 @@ class FakeBatchHashService implements BatchHashService {
             },
     );
   }
+
+  /// Whether [path] is the demo root this fake models.
+  bool _isSampleRoot(String path) {
+    final String normalized = path.replaceAll('\\', '/');
+    final String trimmed = normalized.endsWith('/') && normalized.length > 1
+        ? normalized.substring(0, normalized.length - 1)
+        : normalized;
+    return trimmed == rootPath;
+  }
+
+  /// Ready rows of [plan] in the root-relative form the pipeline expects.
+  ///
+  /// The real service derives the same list from the plan; sharing the rule
+  /// keeps the fake from accepting a plan the native layer would refuse.
+  List<String> _readyPaths(RenamePlanModel plan) {
+    final String prefix = '$rootPath/';
+    final List<String> paths = <String>[];
+    for (final RenamePlanRowModel row in plan.rows) {
+      if (row.status != RenameRowStatus.ready) {
+        continue;
+      }
+      final String normalized = row.path.replaceAll('\\', '/');
+      final String relative = normalized.startsWith(prefix)
+          ? normalized.substring(prefix.length)
+          : normalized;
+      if (relative.isEmpty || paths.contains(relative)) {
+        continue;
+      }
+      paths.add(relative);
+    }
+    return paths;
+  }
+
+  /// Fixed timestamp fragment for the fake's default export directory.
+  ///
+  /// A real export gets a fresh timestamp; the fake stays deterministic so a
+  /// widget test can assert on the path.
+  String _exportStamp() => '20240601-120000';
 
   String _suffixPath(String path, String suffix) {
     final int slash = path.lastIndexOf('/');

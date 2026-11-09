@@ -233,6 +233,15 @@ pub enum ImportError {
     /// A CSV file has no algorithm columns at all.
     #[error("report lists no algorithms")]
     NoAlgorithms,
+    /// A CSV header column is neither known metadata nor a registered algorithm.
+    ///
+    /// Silently ignoring such a column would drop data the importer did not
+    /// understand, so the import is rejected instead.
+    #[error("unknown CSV column: {column}")]
+    UnknownColumn {
+        /// Header that matched neither metadata nor a registered algorithm.
+        column: String,
+    },
     /// Imported report data failed schema validation.
     #[error("report is invalid: {0}")]
     InvalidReport(#[from] ReportValidationError),
@@ -744,8 +753,7 @@ fn import_json(bytes: &[u8]) -> Result<Report, ImportError> {
             source,
         })?;
     }
-    report.validate().map_err(ImportError::InvalidReport)?;
-    Ok(report)
+    finish_import(report)
 }
 
 fn import_csv(bytes: &[u8]) -> Result<Report, ImportError> {
@@ -779,6 +787,21 @@ fn import_csv(bytes: &[u8]) -> Result<Report, ImportError> {
     let suffix_algorithm_index = lookup("suffix_algorithm");
     let renamed_to_index = lookup("renamed_to");
     let generated_at_index = lookup("generated_at");
+
+    // Reject columns the importer does not understand: a header that is
+    // neither report metadata nor a registered algorithm id would otherwise be
+    // dropped silently, so the caller would lose data without any diagnostic.
+    for header in &headers {
+        let is_metadata = CSV_FIXED_HEADER
+            .iter()
+            .any(|column| header.eq_ignore_ascii_case(column))
+            || header.eq_ignore_ascii_case("generated_at");
+        if !is_metadata && AlgorithmId::from_stable_id(header).is_none() {
+            return Err(ImportError::UnknownColumn {
+                column: header.clone(),
+            });
+        }
+    }
 
     let mut algorithm_columns: Vec<(usize, AlgorithmId)> = headers
         .iter()
@@ -867,7 +890,16 @@ fn import_csv(bytes: &[u8]) -> Result<Report, ImportError> {
         });
     }
 
-    Ok(base_report(algorithms, entries, generated_at))
+    finish_import(base_report(algorithms, entries, generated_at))
+}
+
+/// Validate an imported report before it leaves the importer.
+///
+/// An importer must never hand back a [`Report`] that a later export or diff
+/// would reject, so JSON, CSV and checksum imports all share this final step.
+fn finish_import(report: Report) -> Result<Report, ImportError> {
+    report.validate().map_err(ImportError::InvalidReport)?;
+    Ok(report)
 }
 
 fn import_checksum(bytes: &[u8], format: ReportFormat) -> Result<Report, ImportError> {
@@ -933,7 +965,7 @@ fn import_checksum(bytes: &[u8], format: ReportFormat) -> Result<Report, ImportE
     }
 
     let algorithm = algorithm.ok_or(ImportError::NoAlgorithms)?;
-    Ok(base_report(vec![algorithm], entries, String::new()))
+    finish_import(base_report(vec![algorithm], entries, String::new()))
 }
 
 struct ChecksumLine {

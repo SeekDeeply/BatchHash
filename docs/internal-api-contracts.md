@@ -130,46 +130,53 @@ pub use log_store::{LogStore, BatchRecord, RenameOperation, OperationState, Undo
 
 ## batchhash-core
 
-%BT%%BT%%BT%rust
+```rust
 pub mod scan;      // deterministic directory scanning into FileEntry
 pub mod pipeline;  // scan -> hash -> optional suffix write -> report -> rename log
-%BT%%BT%%BT%
+```
 
 The facade crate is the only entry point the Flutter bridge and the CLI use. It
 re-exports the four engine crates and owns the two orchestration pieces:
 
-* %BT%scan(root, &ScanOptions) -> Result<ScanOutcome, ScanError>%BT% - forward-slash
+* `scan(root, &ScanOptions) -> Result<ScanOutcome, ScanError>` - forward-slash
   relative paths, sorted entry order, symlink loop detection, unreadable children
-  become failed entries, unrepresentable paths go to %BT%ScanOutcome::skipped%BT%.
-* %BT%run_batch(&BatchRequest, &CancelToken, &(dyn Fn(PipelineEvent) + Sync)) ->
-  Result<BatchRun, PipelineError>%BT% - emits %BT%Phase%BT% / %BT%Progress%BT% /
-  %BT%EntryDone%BT% events, refuses to touch the filesystem after cancellation,
+  become failed entries, unrepresentable paths go to `ScanOutcome::skipped`.
+  `ScanOptions::recursive` (default `true`) decides whether subdirectories are
+  descended into at all; a non-recursive scan reports the root's direct children
+  and never marks deeper subtrees as failures.
+* `run_batch(&BatchRequest, &CancelToken, &(dyn Fn(PipelineEvent) + Sync)) ->
+  Result<BatchRun, PipelineError>` - emits `Phase` / `Progress` /
+  `EntryDone` events, refuses to touch the filesystem after cancellation,
   writes the SQLite rename log, annotates the report with
-  %BT%suffix_applied%BT%/%BT%suffix_algorithm%BT%/%BT%renamed_to%BT%, excludes the log database
+  `suffix_applied`/`suffix_algorithm`/`renamed_to`, excludes the log database
   from the scan and validates the report before returning.
-* %BT%BatchRun%BT% carries the final %BT%Report%BT%, the hashed %BT%entries%BT% (used by
-  realtime-directory diff), the dry-run %BT%plan%BT%, per-row %BT%rename_results%BT% and the
-  %BT%batch_id%BT% for undo.
+  `BatchRequest::restrict_paths` (empty by default) narrows the batch to those
+  root-relative entries after the scan, so a caller that previewed a specific file
+  set executes exactly that set; an invalid or escaping path is rejected as
+  `PipelineError::InvalidRequest` before any file is touched.
+* `BatchRun` carries the final `Report`, the hashed `entries` (used by
+  realtime-directory diff), the dry-run `plan`, per-row `rename_results` and the
+  `batch_id` for undo.
 
 ## batchhash-ffi
 
-%BT%%BT%%BT%rust
+```rust
 pub mod api;    // serialisable request/response structs (no raw pointers)
 pub mod c_api;  // JSON C ABI consumed by Dart through dart:ffi
-%BT%%BT%%BT%
+```
 
-* %BT%api::algorithms/probe/scan_request/run_batch_request/undo/export%BT% are plain
+* `api::algorithms/probe/scan_request/run_batch_request/undo/export` are plain
   Rust functions returning serialisable DTOs; they are unit tested and are the
   intended input surface if a code generator (for example flutter_rust_bridge) is
   added later. No business logic lives in the binding layer: everything calls
   batchhash-core.
-* %BT%c_api%BT% exposes %BT%bh_api_version%BT%, %BT%bh_algorithms%BT%, %BT%bh_probe%BT%, %BT%bh_scan%BT%,
-  %BT%bh_run_batch%BT%, %BT%bh_undo%BT%, %BT%bh_export_report%BT% and %BT%bh_free%BT%. Requests and
+* `c_api` exposes `bh_api_version`, `bh_algorithms`, `bh_probe`, `bh_scan`,
+  `bh_run_batch`, `bh_undo`, `bh_export_report` and `bh_free`. Requests and
   responses are UTF-8 JSON; the envelope is
-  %BT%{"ok": true, "api_version": 1, "data": ...}%BT% or
-  %BT%{"ok": false, "api_version": 1, "kind": "...", "error": "..."}%BT%.
-* Panics never cross the boundary (%BT%catch_unwind%BT%); returned pointers must be
-  released with %BT%bh_free%BT%; a null request is only tolerated by %BT%bh_probe%BT%.
+  `{"ok": true, "api_version": 1, "data": ...}` or
+  `{"ok": false, "api_version": 1, "kind": "...", "error": "..."}`.
+* Panics never cross the boundary (`catch_unwind`); returned pointers must be
+  released with `bh_free`; a null request is only tolerated by `bh_probe`.
 * See docs/bridge.md for the full contract, the Dart loader order and the CI job
   that exercises Rust and Dart together.
 

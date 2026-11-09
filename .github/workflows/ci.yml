@@ -16,8 +16,24 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  FLUTTER_VERSION: "3.24.5"
 
 jobs:
+  # Keep the three version sources and the CHANGELOG heading in agreement. The
+  # script is dependency-free so this job needs nothing but Node.
+  verify-versions:
+    name: Version / changelog gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Verify version consistency
+        run: node scripts/verify-versions.mjs
+
   detect:
     name: Detect components
     runs-on: ubuntu-latest
@@ -25,6 +41,8 @@ jobs:
       flutter: ${{ steps.check.outputs.flutter }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - id: check
         shell: bash
         run: |
@@ -39,8 +57,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.82.0
         with:
           components: rustfmt
       - name: cargo fmt --check
@@ -51,18 +71,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.82.0
         with:
           components: rustfmt, clippy
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+      # --locked also proves Cargo.lock is in sync with the manifests: a stale
+      # lock (for example after adding or removing a dependency) fails here
+      # instead of silently resolving to something the release did not test.
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test
-        run: cargo test --workspace --verbose
+        run: cargo test --workspace --locked --verbose
 
   flutter:
     name: Flutter analyze / test
@@ -71,9 +96,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Generate platform scaffolding
         working-directory: app
@@ -94,15 +121,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.82.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Build native library
-        run: cargo build -p batchhash-ffi --release
+        run: cargo build -p batchhash-ffi --release --locked
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Generate platform scaffolding
         working-directory: app
@@ -122,12 +151,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust (Android targets)
+        uses: dtolnay/rust-toolchain@1.82.0
         with:
           targets: aarch64-linux-android,x86_64-linux-android
       - name: Cache cargo
@@ -146,7 +177,7 @@ jobs:
         run: |
           set -e
           cargo ndk -t arm64-v8a -t x86_64 -o app/android/app/src/main/jniLibs \
-            build -p batchhash-ffi --release
+            build -p batchhash-ffi --release --locked
           find app/android/app/src/main/jniLibs -type f -name '*.so' -print
           test -f app/android/app/src/main/jniLibs/arm64-v8a/libbatchhash_ffi.so
           test -f app/android/app/src/main/jniLibs/x86_64/libbatchhash_ffi.so
@@ -157,7 +188,7 @@ jobs:
       - name: Build Linux bundle with the native library
         run: |
           set -e
-          cargo build -p batchhash-ffi --release
+          cargo build -p batchhash-ffi --release --locked
           cd app
           flutter build linux --debug
           bundle="build/linux/x64/debug/bundle/lib"
@@ -189,9 +220,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Install GTK toolchain
         run: |
@@ -218,9 +251,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Generate platform scaffolding
         working-directory: app
@@ -243,9 +278,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Generate platform scaffolding
         working-directory: app
@@ -268,9 +305,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Generate platform scaffolding
         working-directory: app
@@ -293,13 +332,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Generate platform scaffolding
         working-directory: app

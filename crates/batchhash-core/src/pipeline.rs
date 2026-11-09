@@ -11,11 +11,14 @@
 //! 2. Hash every entry with independent per-file progress (single I/O pass).
 //! 3. Build the report from the hashed entries.
 //! 4. When suffix writing is requested, build a pure dry-run plan.
-//! 5. When applying, refuse to touch the filesystem after cancellation, insert
-//!    pending operations, execute renames and record the outcome per row.
+//! 5. When applying, reconcile any operation a previous crash left pending,
+//!    refuse to touch the filesystem after cancellation (re-checked after the
+//!    `applying_suffix` event and before every individual rename), insert pending
+//!    operations, execute renames and record the outcome of every inserted row.
 //! 6. Annotate the report with suffix/rename fields, recompute the summary and
 //!    sort entries so export is byte-reproducible.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,15 +26,17 @@ use batchhash_hash::{
     hash_entries, BatchEvent, CancelToken, FileIo, HashEntryOptions, HashOptions, ProgressSnapshot,
 };
 use batchhash_rename::log_store::{
-    BatchRecord, LogError, LogStore, OperationState, RenameOperation,
+    reconcile_pending_operations_with_cancel, BatchRecord, LogError, LogStore, OperationState,
+    ReconcileReport, RenameOperation,
 };
 use batchhash_rename::planner::{
-    execute_plan, plan_renames, RenamePlan, RenamePlanOptions, RenameResult, RenameResultStatus,
-    RenameRowStatus, StdFsBackend, StdRenameFs,
+    execute_plan_with_policy_and_cancel, plan_renames, RenamePlan, RenamePlanOptions,
+    RenameResult, RenameResultStatus, RenameRowStatus, StdFsBackend, StdRenameFs,
 };
 use batchhash_rename::suffix::{parse_filename, SuffixError, SuffixFormat, SuffixParseResult};
 use batchhash_types::{
-    AlgorithmId, FileEntry, HardwareReport, Report, ReportEntry, ReportValidationError, RootKind,
+    validate_relative_path, AlgorithmId, FileEntry, HardwareReport, Report, ReportEntry,
+    ReportValidationError, RootKind,
 };
 
 use crate::scan::{scan, ScanError, ScanOptions, ScanSkip};
@@ -111,6 +116,12 @@ pub struct BatchRequest {
     pub algorithms: Vec<AlgorithmId>,
     /// Scanner behaviour.
     pub scan: ScanOptions,
+    /// Root-relative paths to restrict the batch to; empty means no restriction.
+    ///
+    /// A UI that previewed a rename plan for specific files executes exactly
+    /// that set instead of rescanning the tree, so a run can never touch a file
+    /// the plan did not show.
+    pub restrict_paths: Vec<String>,
     /// Suffix format to plan when Some.
     pub suffix: Option<SuffixFormat>,
     /// Whether the planned renames are executed (requires log_db).
@@ -135,6 +146,7 @@ impl BatchRequest {
             case_sensitive: default_case_sensitive(),
             algorithms,
             scan: ScanOptions::default(),
+            restrict_paths: Vec::new(),
             suffix: None,
             apply_renames: false,
             log_db: None,
@@ -283,9 +295,12 @@ pub fn run_batch(
         }
     }
 
+    let restricted = validate_restrict_paths(&request.restrict_paths)?;
+
     events(PipelineEvent::Phase(BatchPhase::Scanning));
     let scanned = scan(&request.root_path, &request.scan)?;
     let (entries, skipped_paths) = exclude_log_artifacts(scanned.entries, scanned.skipped, request);
+    let entries = restrict_entries(entries, restricted.as_deref());
 
     let hashing_total = entries.len() as u64;
     let bytes_total: u64 = entries.iter().map(|entry| entry.size).sum();
@@ -376,6 +391,11 @@ pub fn run_batch(
                     })?
                     .clone();
                 let mut store = open_log_store(&log_db)?;
+                // Recover operations a previous run left pending before this run
+                // can add more of its own: applying a resolved row twice or
+                // undoing a rename the log never confirmed would both corrupt the
+                // batch, and plan_undo refuses to touch unresolved rows anyway.
+                reconcile_log(&mut store, cancel)?;
                 let batch = BatchRecord::new(
                     request.root.clone(),
                     scanned.root_kind,
@@ -385,9 +405,30 @@ pub fn run_batch(
                 store.create_batch(&batch)?;
                 let operation_ids =
                     insert_pending_operations(&mut store, &batch, &hashed, &plan, format)?;
-                let results = execute_plan(&plan, &mut StdFsBackend);
+                // Cancellation can have landed while the `applying_suffix` event
+                // was being delivered, so re-check before the first destructive
+                // rename. The log batch and its pending rows are already written
+                // and stay pending; the next open reconciles them.
+                let results = if cancel.is_cancelled() {
+                    run.cancelled = true;
+                    Vec::new()
+                } else {
+                    // The cancellation check runs again before every single
+                    // rename, so a cancellation that lands mid-batch stops the
+                    // loop and leaves exactly the renamed rows in `results`.
+                    let should_stop = || cancel.is_cancelled();
+                    execute_plan_with_policy_and_cancel(
+                        &plan,
+                        &mut StdFsBackend,
+                        request.overwrite,
+                        &should_stop,
+                    )
+                };
                 record_rename_results(&mut store, &operation_ids, &results)?;
-                apply_rename_annotations(&mut run.report, &results);
+                if cancel.is_cancelled() {
+                    run.cancelled = true;
+                }
+                apply_rename_annotations(&mut run.report, &plan, &results);
                 run.batch_id = Some(batch.id);
                 run.rename_results = results;
             }
@@ -403,6 +444,65 @@ pub fn run_batch(
     run.elapsed_ms = elapsed_millis(started);
     events(PipelineEvent::Phase(BatchPhase::Completed));
     Ok(run)
+}
+
+/// Validate a caller-supplied restriction list and normalize it.
+///
+/// Each path must be the forward-slash root-relative form used by reports, so a
+/// caller cannot smuggle an absolute path or a parent traversal into the batch.
+/// An empty list means "no restriction" and is returned as [`None`].
+fn validate_restrict_paths(paths: &[String]) -> Result<Option<BTreeSet<String>>, PipelineError> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut normalized = BTreeSet::new();
+    for path in paths {
+        validate_relative_path(path).map_err(|error| {
+            PipelineError::InvalidRequest(format!("restricted path {path}: {error}"))
+        })?;
+        let canonical = normalize_relative(path);
+        if canonical.is_empty() {
+            return Err(PipelineError::InvalidRequest(format!(
+                "restricted path {path} does not name a file"
+            )));
+        }
+        normalized.insert(canonical);
+    }
+    Ok(Some(normalized))
+}
+
+/// Collapse `.`, `..`, empty and repeated separators into the scanner's form.
+///
+/// The scanner always emits a normalized path, so a caller that passes
+/// `./a.mkv` or `sub//a.mkv` must still match. [`validate_relative_path`] has
+/// already rejected anything that escapes the root or is absolute.
+fn normalize_relative(path: &str) -> String {
+    let mut segments: Vec<&str> = Vec::new();
+    for segment in path.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            other => segments.push(other),
+        }
+    }
+    segments.join("/")
+}
+
+/// Keep only the entries a restricted run is allowed to touch.
+///
+/// A restricted path that no longer exists simply has no entry, so it is dropped
+/// instead of hashed or renamed; the caller sees the smaller result and knows the
+/// previewed file vanished between preview and execution.
+fn restrict_entries(entries: Vec<FileEntry>, allowed: Option<&BTreeSet<String>>) -> Vec<FileEntry> {
+    let Some(allowed) = allowed else {
+        return entries;
+    };
+    entries
+        .into_iter()
+        .filter(|entry| allowed.contains(&entry.relative_path))
+        .collect()
 }
 
 /// Remove the rename log (and its SQLite side files) from the entry list.
@@ -511,12 +611,36 @@ fn proposed_relative_path(
     }
 }
 
-fn apply_rename_annotations(report: &mut Report, results: &[RenameResult]) {
+fn apply_rename_annotations(
+    report: &mut Report,
+    plan: &RenamePlan,
+    results: &[RenameResult],
+) {
     for result in results {
         if let Some(report_entry) = report.entries.get_mut(result.entry_index) {
             if result.status != RenameResultStatus::Renamed {
                 report_entry.renamed_to = None;
             }
+        }
+    }
+    // Rows the run never reached (cancellation) were already annotated while
+    // planning. The file was not renamed, so the report must not claim it was:
+    // a report that advertises a rename which never happened is exactly the kind
+    // of silent inconsistency the log reconciliation exists to prevent.
+    for row in &plan.rows {
+        if row.status != RenameRowStatus::Ready {
+            continue;
+        }
+        if results
+            .iter()
+            .any(|result| result.entry_index == row.entry_index)
+        {
+            continue;
+        }
+        if let Some(report_entry) = report.entries.get_mut(row.entry_index) {
+            report_entry.suffix_applied = None;
+            report_entry.suffix_algorithm = None;
+            report_entry.renamed_to = None;
         }
     }
 }
@@ -597,5 +721,38 @@ fn record_rename_results(
             }
         }
     }
+    // Rows that were never reached (cancellation, or a backend that stopped early)
+    // must not be left pending: a pending row cannot be told apart from a
+    // crashed rename afterwards, so record the truth — the file was not renamed.
+    for (entry_index, id) in ids {
+        if results.iter().any(|result| result.entry_index == *entry_index) {
+            continue;
+        }
+        store.record_result(
+            *id,
+            "not_attempted",
+            Some("rename_not_attempted"),
+            OperationState::Conflict,
+        )?;
+    }
     Ok(())
+}
+
+/// Reconcile every operation a previous run left `pending` against the
+/// filesystem.
+///
+/// Reconciliation is idempotent and only touches pending rows, so it runs on
+/// every store open before planning an apply or an undo. Rows it cannot resolve
+/// (both paths present, or neither) become conflicts with a reason instead of an
+/// unconfirmed rename, which is what `plan_undo` reports for them.
+///
+/// Public so the CLI and the bridge can call it after opening a log they intend
+/// to undo, not only on the apply path.
+pub fn reconcile_log(
+    store: &mut LogStore,
+    cancel: &CancelToken,
+) -> Result<ReconcileReport, PipelineError> {
+    let should_stop = || cancel.is_cancelled();
+    reconcile_pending_operations_with_cancel(store, &StdRenameFs, &should_stop)
+        .map_err(PipelineError::from)
 }

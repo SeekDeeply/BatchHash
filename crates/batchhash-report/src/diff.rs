@@ -724,14 +724,20 @@ fn compare_pair(
 
     let mut algorithms_compared: Vec<AlgorithmId> = Vec::new();
     let mut changed_algorithms: Vec<AlgorithmId> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
     for algorithm in compared {
-        if let (Some(left_digest), Some(right_digest)) =
-            (left.hashes.get(algorithm), right.hashes.get(algorithm))
-        {
-            algorithms_compared.push(*algorithm);
-            if !left_digest.eq_ignore_ascii_case(right_digest) {
-                changed_algorithms.push(*algorithm);
+        let left_digest = left.hashes.get(algorithm);
+        let right_digest = right.hashes.get(algorithm);
+        match (left_digest, right_digest) {
+            (Some(left_value), Some(right_value)) => {
+                algorithms_compared.push(*algorithm);
+                if !left_value.eq_ignore_ascii_case(right_value) {
+                    changed_algorithms.push(*algorithm);
+                }
             }
+            (Some(_), None) => missing.push(format!("{algorithm} on the right")),
+            (None, Some(_)) => missing.push(format!("{algorithm} on the left")),
+            (None, None) => missing.push(format!("{algorithm} on both sides")),
         }
     }
 
@@ -754,6 +760,18 @@ fn compare_pair(
             format!("hash mismatch: {joined}"),
             algorithms_compared,
             changed_algorithms,
+        );
+    }
+    // Every declared algorithm must actually have been compared before a row
+    // may claim anything beyond "changed" (which the digests already prove).
+    // A digest missing on either side means that algorithm could still differ,
+    // so the honest verdict is Unknown; name what is missing and where.
+    if !missing.is_empty() {
+        return (
+            DiffStatus::Unknown,
+            format!("incomplete hashes: missing {}", missing.join(", ")),
+            algorithms_compared,
+            Vec::new(),
         );
     }
     if left.size != right.size {
@@ -974,6 +992,77 @@ mod tests {
         assert_eq!(diff.rows[0].reason, NO_COMMON_ALGORITHMS_REASON);
         assert!(diff.rows[0].algorithms_compared.is_empty());
         assert!(diff.strategy.algorithms_compared.is_empty());
+    }
+
+    #[test]
+    fn missing_declared_hash_is_unknown_not_unchanged() {
+        // Both reports declare md5 + crc32 but the entries only carry crc32, so
+        // md5 was never compared: the row cannot claim to be unchanged.
+        let left = make_report(
+            "2026-01-01T00:00:00Z",
+            vec![AlgorithmId::Md5, AlgorithmId::Crc32],
+            vec![make_entry("a.mkv", 10, &[(AlgorithmId::Crc32, crc32('0'))])],
+        );
+        let right = make_report(
+            "2026-01-02T00:00:00Z",
+            vec![AlgorithmId::Md5, AlgorithmId::Crc32],
+            vec![make_entry("a.mkv", 10, &[(AlgorithmId::Crc32, crc32('0'))])],
+        );
+        let diff = diff_reports(&left, &right, &options()).expect("valid reports");
+        assert_eq!(diff.rows[0].status, DiffStatus::Unknown);
+        assert!(diff.rows[0].reason.starts_with("incomplete hashes"));
+        assert!(diff.rows[0].reason.contains("md5"));
+        assert_eq!(diff.rows[0].algorithms_compared, vec![AlgorithmId::Crc32]);
+        assert_eq!(diff.summary.unknown, 1);
+        assert_eq!(diff.summary.unchanged, 0);
+
+        // Only the right entry is missing md5: name the side.
+        let left = make_report(
+            "2026-01-01T00:00:00Z",
+            vec![AlgorithmId::Md5, AlgorithmId::Crc32],
+            vec![make_entry(
+                "a.mkv",
+                10,
+                &[(AlgorithmId::Md5, md5('a')), (AlgorithmId::Crc32, crc32('0'))],
+            )],
+        );
+        let right = make_report(
+            "2026-01-02T00:00:00Z",
+            vec![AlgorithmId::Md5, AlgorithmId::Crc32],
+            vec![make_entry("a.mkv", 10, &[(AlgorithmId::Crc32, crc32('0'))])],
+        );
+        let diff = diff_reports(&left, &right, &options()).expect("valid reports");
+        assert_eq!(diff.rows[0].status, DiffStatus::Unknown);
+        assert_eq!(
+            diff.rows[0].reason,
+            "incomplete hashes: missing md5 on the right"
+        );
+
+        // With every declared digest present and matching, the row is unchanged.
+        let left = make_report(
+            "2026-01-01T00:00:00Z",
+            vec![AlgorithmId::Md5, AlgorithmId::Crc32],
+            vec![make_entry(
+                "a.mkv",
+                10,
+                &[(AlgorithmId::Md5, md5('a')), (AlgorithmId::Crc32, crc32('0'))],
+            )],
+        );
+        let right = make_report(
+            "2026-01-02T00:00:00Z",
+            vec![AlgorithmId::Md5, AlgorithmId::Crc32],
+            vec![make_entry(
+                "a.mkv",
+                10,
+                &[(AlgorithmId::Md5, md5('a')), (AlgorithmId::Crc32, crc32('0'))],
+            )],
+        );
+        let diff = diff_reports(&left, &right, &options()).expect("valid reports");
+        assert_eq!(diff.rows[0].status, DiffStatus::Unchanged);
+        assert_eq!(
+            diff.rows[0].algorithms_compared,
+            vec![AlgorithmId::Md5, AlgorithmId::Crc32]
+        );
     }
 
     #[test]

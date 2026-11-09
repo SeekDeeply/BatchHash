@@ -120,7 +120,14 @@ path,size,mtime,status,error_kind,suffix_applied,suffix_algorithm,renamed_to,<�
 2. 拒绝路径逃逸、绝对路径、反斜杠、NUL。
 3. 限制条目数（2,000,000）与字节数（512 MiB）。
 4. 拒绝未声明的算法键 / 列、长度不匹配的哈希。
-5. 拒绝无哈希的 ok 条目。
+5. 拒绝无哈希的 ok 条目、重复路径，以及 summary 与 entries 不一致（total / ok / failed / skipped / total_bytes 必须等于由 entries 推出的值，truncated 除外）。
+6. CSV 表头只接受固定元数据列（path / size / mtime / status / error_kind / suffix_applied / suffix_algorithm / renamed_to / generated_at）与已注册算法稳定 ID；其他列一律报错，不静默丢弃。
+7. 导入结束时统一执行一次完整校验：导入器不会返回一个后续导出或对比会拒绝的 report。
+
+## 对比：哈希不完整
+
+- 只比较两侧共同声明的算法。若某条目缺少任一「共同声明」算法的摘要，该行结果不能是 unchanged（未比较的算法仍可能不同），必须判为 unknown，并在 reason 中列出缺失的算法与缺失侧。
+- 两侧没有任何共同算法时保留降级策略：仅按存在性与大小比较，reason 固定为「no common algorithms; presence/size comparison only」。
 
 ## Round-trip 契约
 

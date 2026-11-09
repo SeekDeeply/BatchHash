@@ -211,19 +211,34 @@ impl Report {
     }
 
     /// Recompute the summary from `entries`.
+    ///
+    /// Byte totals saturate instead of overflowing, so a hostile or corrupt report
+    /// can never panic the importer or wrap to a misleadingly small total.
     pub fn recompute_summary(&mut self) {
-        let mut summary = ReportSummary::default();
+        let summary = self.summary_from_entries();
+        self.summary = summary;
+    }
+
+    /// Summary implied by `entries` alone.
+    ///
+    /// `truncated` is carried over from the stored summary because truncation is
+    /// an export decision (Markdown/TXT cap the table), not a property of the
+    /// entry list.
+    fn summary_from_entries(&self) -> ReportSummary {
+        let mut summary = ReportSummary {
+            truncated: self.summary.truncated,
+            ..ReportSummary::default()
+        };
         for entry in &self.entries {
-            summary.total += 1;
-            summary.total_bytes += entry.size;
+            summary.total = summary.total.saturating_add(1);
+            summary.total_bytes = summary.total_bytes.saturating_add(entry.size);
             match entry.status {
-                EntryStatus::Ok => summary.ok += 1,
-                EntryStatus::Failed => summary.failed += 1,
-                EntryStatus::Skipped => summary.skipped += 1,
+                EntryStatus::Ok => summary.ok = summary.ok.saturating_add(1),
+                EntryStatus::Failed => summary.failed = summary.failed.saturating_add(1),
+                EntryStatus::Skipped => summary.skipped = summary.skipped.saturating_add(1),
             }
         }
-        summary.truncated = self.summary.truncated;
-        self.summary = summary;
+        summary
     }
 
     /// Sort entries by their stored (relative) path using Unicode code point
@@ -288,6 +303,12 @@ impl Report {
                         actual: digest.len(),
                     });
                 }
+                if !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    return Err(ReportValidationError::HashNotHex {
+                        path: entry.path.clone(),
+                        algorithm: *algorithm,
+                    });
+                }
             }
             if entry.status.is_ok() && entry.hashes.is_empty() {
                 return Err(ReportValidationError::OkEntryWithoutHashes(
@@ -301,6 +322,34 @@ impl Report {
                         algorithm: suffix_algorithm,
                     });
                 }
+            }
+        }
+        self.validate_summary()?;
+        Ok(())
+    }
+
+    /// Require the stored summary to agree with the entry list.
+    ///
+    /// Summaries travel independently of entries in JSON and CSV, so a forged or
+    /// stale summary would otherwise let a report claim totals its entries do not
+    /// support. `truncated` is exempt: it records an export decision, not a
+    /// property derived from `entries`.
+    fn validate_summary(&self) -> Result<(), ReportValidationError> {
+        let implied = self.summary_from_entries();
+        let counted = [
+            ("total", self.summary.total, implied.total),
+            ("ok", self.summary.ok, implied.ok),
+            ("failed", self.summary.failed, implied.failed),
+            ("skipped", self.summary.skipped, implied.skipped),
+            ("total_bytes", self.summary.total_bytes, implied.total_bytes),
+        ];
+        for (field, actual, expected) in counted {
+            if actual != expected {
+                return Err(ReportValidationError::SummaryMismatch {
+                    field,
+                    actual,
+                    expected,
+                });
             }
         }
         Ok(())
@@ -334,8 +383,19 @@ pub enum ReportValidationError {
         expected: usize,
         actual: usize,
     },
+    #[error("hash for {path} ({algorithm}) is not a hexadecimal digest")]
+    HashNotHex {
+        path: String,
+        algorithm: AlgorithmId,
+    },
     #[error("ok entry {0} has no hashes")]
     OkEntryWithoutHashes(String),
+    #[error("summary {field} is {actual}, but entries imply {expected}")]
+    SummaryMismatch {
+        field: &'static str,
+        actual: u64,
+        expected: u64,
+    },
     #[error("invalid suffix config: {0}")]
     InvalidSuffixConfig(&'static str),
     #[error("report has {count} entries, maximum is {max}")]
@@ -358,3 +418,132 @@ pub fn canonical_algorithm_order(algorithms: &[AlgorithmId]) -> Vec<AlgorithmId>
 pub fn algorithm_spec(id: AlgorithmId) -> &'static AlgorithmSpec {
     id.spec()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(path: &str, size: u64, status: EntryStatus, fill: char) -> ReportEntry {
+        let mut hashes = IndexMap::new();
+        if status.is_ok() {
+            hashes.insert(
+                AlgorithmId::Sha256,
+                fill.to_string().repeat(AlgorithmId::Sha256.hex_len()),
+            );
+        }
+        ReportEntry {
+            path: path.to_string(),
+            size,
+            mtime: None,
+            hashes,
+            status,
+            error_kind: if status.is_ok() {
+                None
+            } else {
+                Some(ErrorKind::PermissionDenied)
+            },
+            error_message: None,
+            suffix_applied: None,
+            suffix_algorithm: None,
+            renamed_to: None,
+        }
+    }
+
+    fn make_report(entries: Vec<ReportEntry>) -> Report {
+        let mut report = Report::new(
+            "/data/media",
+            RootKind::Fs,
+            false,
+            vec![AlgorithmId::Sha256],
+            HardwareReport::default(),
+        );
+        report.entries = entries;
+        report.recompute_summary();
+        report
+    }
+
+    #[test]
+    fn recomputed_report_is_valid() {
+        let report = make_report(vec![
+            entry("a.mkv", 10, EntryStatus::Ok, 'a'),
+            entry("b.mkv", 0, EntryStatus::Failed, 'b'),
+        ]);
+        assert_eq!(
+            report.summary,
+            ReportSummary {
+                total: 2,
+                ok: 1,
+                failed: 1,
+                skipped: 0,
+                total_bytes: 10,
+                truncated: false,
+            }
+        );
+        assert!(report.validate().is_ok());
+    }
+
+    #[test]
+    fn forged_summary_is_rejected() {
+        let mut report = make_report(vec![entry("a.mkv", 10, EntryStatus::Ok, 'a')]);
+        report.summary.total = 99;
+        assert!(matches!(
+            report.validate(),
+            Err(ReportValidationError::SummaryMismatch {
+                field: "total",
+                actual: 99,
+                expected: 1,
+            })
+        ));
+
+        let mut report = make_report(vec![entry("a.mkv", 10, EntryStatus::Ok, 'a')]);
+        report.summary.total_bytes = 1 << 40;
+        assert!(matches!(
+            report.validate(),
+            Err(ReportValidationError::SummaryMismatch {
+                field: "total_bytes",
+                actual,
+                ..
+            }) if actual == 1 << 40
+        ));
+
+        let mut report = make_report(vec![entry("a.mkv", 10, EntryStatus::Ok, 'a')]);
+        report.summary.ok = 0;
+        assert!(matches!(
+            report.validate(),
+            Err(ReportValidationError::SummaryMismatch { field: "ok", .. })
+        ));
+    }
+
+    #[test]
+    fn truncated_flag_is_not_part_of_the_summary_invariant() {
+        let mut report = make_report(vec![entry("a.mkv", 10, EntryStatus::Ok, 'a')]);
+        report.summary.truncated = true;
+        assert!(report.validate().is_ok());
+
+        report.recompute_summary();
+        assert!(report.summary.truncated, "recompute keeps the export decision");
+        assert!(report.validate().is_ok());
+    }
+
+    #[test]
+    fn non_hex_digest_is_rejected() {
+        let mut report = make_report(vec![entry("a.mkv", 10, EntryStatus::Ok, 'a')]);
+        report.entries[0]
+            .hashes
+            .insert(AlgorithmId::Sha256, "z".repeat(64));
+        assert!(matches!(
+            report.validate(),
+            Err(ReportValidationError::HashNotHex { .. })
+        ));
+    }
+
+    #[test]
+    fn summary_counters_saturate_instead_of_panicking() {
+        let mut report = make_report(vec![entry("a.mkv", u64::MAX, EntryStatus::Ok, 'a')]);
+        report.entries.push(entry("b.mkv", u64::MAX, EntryStatus::Ok, 'b'));
+        report.recompute_summary();
+        assert_eq!(report.summary.total, 2);
+        assert_eq!(report.summary.total_bytes, u64::MAX);
+    }
+}
+

@@ -8,6 +8,7 @@ import '../models/models.dart';
 import '../widgets/diff_table.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/entry_list.dart';
+import '../widgets/path_input_dialog.dart';
 import '../widgets/summary_card.dart';
 
 /// Filter applied to comparison rows.
@@ -41,7 +42,19 @@ enum CompareFilter {
 /// Pane shown on narrow screens.
 enum ComparePane { left, right, differences }
 
-/// Compares the current report against the live contents of its root.
+/// Where the two sides of the comparison come from.
+enum CompareMode {
+  directory('compare.mode.directory'),
+  reports('compare.mode.reports');
+
+  const CompareMode(this.label);
+
+  /// Translation key for the mode selector.
+  final String label;
+}
+
+/// Compares two reports: the current report against a live folder, or two
+/// report files imported through the in-app path chooser.
 ///
 /// Every user-visible string, including the diff table headers, comes from the
 /// locale string table.
@@ -59,10 +72,16 @@ class _ComparePageState extends State<ComparePage> {
 
   List<DiffRowModel> _rows = const <DiffRowModel>[];
   bool _loading = false;
+  bool _importing = false;
   String? _error;
   String? _loadedReportKey;
   CompareFilter _filter = CompareFilter.all;
   ComparePane _pane = ComparePane.differences;
+  CompareMode _mode = CompareMode.directory;
+  ReportModel? _leftReport;
+  ReportModel? _rightReport;
+  String _leftPath = '';
+  String _rightPath = '';
   String? _expandedPath;
 
   @override
@@ -84,6 +103,9 @@ class _ComparePageState extends State<ComparePage> {
   }
 
   void _handleReportChanged() {
+    if (_mode != CompareMode.directory) {
+      return;
+    }
     final ReportModel? report = widget.state.report.value;
     if (report == null) {
       if (_loadedReportKey != null) {
@@ -120,6 +142,115 @@ class _ComparePageState extends State<ComparePage> {
             directory: report.root,
             recursive: true,
           );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _rows = rows;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final String failure = context.strings(
+        'compare.compareFailed',
+        args: <String, String>{'error': '$error'},
+      );
+      setState(() {
+        _loading = false;
+        _error = failure;
+      });
+    }
+  }
+
+  void _changeMode(CompareMode mode) {
+    if (mode == _mode) {
+      return;
+    }
+    setState(() {
+      _mode = mode;
+      _rows = const <DiffRowModel>[];
+      _error = null;
+      _loading = false;
+      _loadedReportKey = null;
+    });
+    if (mode == CompareMode.directory) {
+      _handleReportChanged();
+    } else if (_leftReport != null && _rightReport != null) {
+      unawaited(_diffImported());
+    }
+  }
+
+  Future<void> _importReport({required bool left}) async {
+    final BatchHashAppState app = widget.state;
+    final String titleKey = left
+        ? 'compare.importLeft'
+        : 'compare.importRight';
+    final String? input = await PathInputDialog.show(
+      context,
+      title: context.strings(titleKey),
+      hintText: context.strings('path.hint.report'),
+      suggestions: app.recentPaths.value,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (input == null || input.trim().isEmpty) {
+      return;
+    }
+    final String path = input.trim();
+    setState(() {
+      _importing = true;
+      _error = null;
+    });
+    try {
+      final ReportModel report = await widget.state.service.importReport(path);
+      if (!mounted) {
+        return;
+      }
+      app.rememberPath(path);
+      setState(() {
+        _importing = false;
+        if (left) {
+          _leftReport = report;
+          _leftPath = path;
+        } else {
+          _rightReport = report;
+          _rightPath = path;
+        }
+      });
+      await _diffImported();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final String failure = context.strings(
+        'compare.importFailed',
+        args: <String, String>{'error': '$error'},
+      );
+      setState(() {
+        _importing = false;
+        _error = failure;
+      });
+    }
+  }
+
+  Future<void> _diffImported() async {
+    final ReportModel? left = _leftReport;
+    final ReportModel? right = _rightReport;
+    if (left == null || right == null) {
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final List<DiffRowModel> rows = await widget.state.service.diffReports(
+        left: left,
+        right: right,
+      );
       if (!mounted) {
         return;
       }
@@ -187,7 +318,13 @@ class _ComparePageState extends State<ComparePage> {
             ),
           ),
           const SizedBox(height: 16),
+          _buildModeSelector(),
+          const SizedBox(height: 12),
           const _PolicyBanner(),
+          if (_mode == CompareMode.reports) ...<Widget>[
+            const SizedBox(height: 12),
+            _buildReportInputs(),
+          ],
           const SizedBox(height: 12),
           SummaryCard(
             title: context.strings('compare.summary'),
@@ -254,15 +391,69 @@ class _ComparePageState extends State<ComparePage> {
           else if (narrow)
             _buildNarrowContent(visibleRows)
           else
-            DiffTable(
-              rows: visibleRows,
-              expandedPath: _expandedPath,
-              onRowTap: _toggleRow,
-              leftLabel: context.strings('compare.baseline'),
-              rightLabel: context.strings('compare.current'),
-            ),
+            _buildDiffTable(visibleRows, leftKey: 'compare.baseline'),
         ],
       ),
+    );
+  }
+
+  Widget _buildDiffTable(
+    List<DiffRowModel> rows, {
+    required String leftKey,
+  }) {
+    return DiffTable(
+      rows: rows,
+      expandedPath: _expandedPath,
+      onRowTap: _toggleRow,
+      leftLabel: context.strings(leftKey),
+      rightLabel: context.strings('compare.current'),
+    );
+  }
+
+  Widget _buildModeSelector() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SegmentedButton<CompareMode>(
+        key: const ValueKey<String>('compare-mode-selector'),
+        showSelectedIcon: false,
+        segments: <ButtonSegment<CompareMode>>[
+          for (final CompareMode mode in CompareMode.values)
+            ButtonSegment<CompareMode>(
+              value: mode,
+              label: Text(context.strings(mode.label)),
+            ),
+        ],
+        selected: <CompareMode>{_mode},
+        onSelectionChanged: (Set<CompareMode> selection) {
+          _changeMode(selection.first);
+        },
+      ),
+    );
+  }
+
+  Widget _buildReportInputs() {
+    final String emptyLabel = context.strings('compare.noReportChosen');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _ReportSlot(
+          slot: 'left',
+          label: context.strings('compare.baseline'),
+          path: _leftPath,
+          emptyLabel: emptyLabel,
+          chooseLabel: context.strings('compare.importLeft'),
+          onPressed: _importing ? null : () => _importReport(left: true),
+        ),
+        const SizedBox(height: 8),
+        _ReportSlot(
+          slot: 'right',
+          label: context.strings('compare.current'),
+          path: _rightPath,
+          emptyLabel: emptyLabel,
+          chooseLabel: context.strings('compare.importRight'),
+          onPressed: _importing ? null : () => _importReport(left: false),
+        ),
+      ],
     );
   }
 
@@ -313,14 +504,65 @@ class _ComparePageState extends State<ComparePage> {
             if (row.right != null) row.right!,
         ],
       ),
-      ComparePane.differences => DiffTable(
-        rows: rows,
-        expandedPath: _expandedPath,
-        onRowTap: _toggleRow,
-        leftLabel: context.strings('compare.baseline'),
-        rightLabel: context.strings('compare.current'),
+      ComparePane.differences => _buildDiffTable(
+        rows,
+        leftKey: 'compare.baseline',
       ),
     };
+  }
+}
+
+/// One imported-report slot in the report-versus-report mode.
+class _ReportSlot extends StatelessWidget {
+  const _ReportSlot({
+    required this.slot,
+    required this.label,
+    required this.path,
+    required this.emptyLabel,
+    required this.chooseLabel,
+    required this.onPressed,
+  });
+
+  /// Stable identifier used for the widget keys, 'left' or 'right'.
+  final String slot;
+  final String label;
+  final String path;
+  final String emptyLabel;
+  final String chooseLabel;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Card(
+      key: ValueKey<String>('compare-import-$slot'),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(label, style: theme.textTheme.labelLarge),
+            const SizedBox(height: 4),
+            Text(
+              path.isEmpty ? emptyLabel : path,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                key: ValueKey<String>('compare-import-$slot-button'),
+                onPressed: onPressed,
+                icon: const Icon(Icons.description_outlined),
+                label: Text(chooseLabel),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

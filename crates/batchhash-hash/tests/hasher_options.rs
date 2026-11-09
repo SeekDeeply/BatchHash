@@ -4,9 +4,12 @@ use std::fs;
 use std::io::Cursor;
 
 use batchhash_hash::{
-    compute_hashes, compute_hashes_file, hash_reader, Blake3Policy, HashError, HashOptions,
+    compute_hashes, compute_hashes_file, compute_hashes_with_sink, hash_reader, Blake3Policy,
+    HashError, HashOptions,
 };
 use batchhash_types::AlgorithmId;
+
+const SMALL_BUFFER: usize = 64 * 1024;
 
 fn patterned_data(len: usize) -> Vec<u8> {
     (0..len)
@@ -103,7 +106,7 @@ fn empty_algorithm_selection_is_rejected() {
 }
 
 #[test]
-fn blake3_parallel_path_matches_streaming() {
+fn file_hashing_matches_reader_hashing_for_every_policy() {
     let dir = tempfile::tempdir().expect("tempdir must be created");
     let path = dir.path().join("large.bin");
     let data = patterned_data(300_000);
@@ -113,30 +116,26 @@ fn blake3_parallel_path_matches_streaming() {
     let streaming = compute_hashes(&mut Cursor::new(data.clone()), &streaming_options)
         .expect("streaming hashing must succeed");
 
-    let parallel_options = HashOptions::new(vec![AlgorithmId::Blake3]).with_mmap_threshold(Some(0));
+    // File input always streams, so every policy must reproduce the same digest.
     assert_eq!(
-        compute_hashes_file(&path, &parallel_options).expect("parallel file hashing must succeed"),
+        compute_hashes_file(&path, &streaming_options).expect("file hashing must succeed"),
         streaming
     );
 
-    let above_threshold =
-        HashOptions::new(vec![AlgorithmId::Blake3]).with_mmap_threshold(Some(u64::MAX));
-    assert_eq!(
-        compute_hashes_file(&path, &above_threshold).expect("streaming file hashing must succeed"),
-        streaming
-    );
-
-    let disabled = HashOptions::new(vec![AlgorithmId::Blake3])
-        .with_mmap_threshold(Some(0))
-        .with_blake3(Blake3Policy::Disabled);
+    let disabled = HashOptions::new(vec![AlgorithmId::Blake3]).with_blake3(Blake3Policy::Disabled);
     assert_eq!(
         compute_hashes_file(&path, &disabled).expect("disabled policy must stream"),
         streaming
     );
 
-    let multi = HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Sha256])
-        .with_mmap_threshold(Some(0));
-    let multi_streaming = compute_hashes(&mut Cursor::new(data.clone()), &multi)
+    let forced = HashOptions::new(vec![AlgorithmId::Blake3]).with_forced_soft(true);
+    assert_eq!(
+        compute_hashes_file(&path, &forced).expect("forced soft policy must stream"),
+        streaming
+    );
+
+    let multi = HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Sha256]);
+    let multi_streaming = compute_hashes(&mut Cursor::new(data), &multi)
         .expect("multi-algorithm streaming must succeed");
     assert_eq!(
         compute_hashes_file(&path, &multi).expect("multi-algorithm file hashing must succeed"),
@@ -144,13 +143,42 @@ fn blake3_parallel_path_matches_streaming() {
     );
 }
 
+/// Progress contract: every chunk is fed to all hashers before the sink observes
+/// it, so bytes-done can only reach the file size once the whole input has been
+/// hashed chunk by chunk (never before the digest work started).
+#[test]
+fn chunks_are_hashed_before_the_sink_observes_them() {
+    let dir = tempfile::tempdir().expect("tempdir must be created");
+    let path = dir.path().join("chunked.bin");
+    let data = patterned_data(SMALL_BUFFER * 2 + 11);
+    fs::write(&path, data.as_slice()).expect("file must be written");
+
+    let options =
+        HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Md5]).with_buffer_size(SMALL_BUFFER);
+    let mut chunks = Vec::new();
+    let mut sink = |chunk: &[u8]| chunks.push(chunk.len());
+    let mut reader = Cursor::new(data.clone());
+    let from_reader = compute_hashes_with_sink(&mut reader, &options, &mut sink)
+        .expect("reader hashing must succeed");
+    assert_eq!(chunks, vec![SMALL_BUFFER, SMALL_BUFFER, 11]);
+    assert_eq!(chunks.iter().sum::<usize>(), data.len());
+
+    // File input streams the same way: one pass, buffer-sized chunks.
+    let mut file_chunks = Vec::new();
+    let mut file_sink = |chunk: &[u8]| file_chunks.push(chunk.len());
+    let mut file_reader = fs::File::open(&path).expect("open fixture");
+    let from_file = compute_hashes_with_sink(&mut file_reader, &options, &mut file_sink)
+        .expect("file hashing must succeed");
+    assert_eq!(file_chunks, chunks);
+    assert_eq!(from_file, from_reader);
+}
+
 #[test]
 fn empty_file_hashes_empty_digests() {
     let dir = tempfile::tempdir().expect("tempdir must be created");
     let path = dir.path().join("empty.bin");
     fs::write(&path, b"").expect("file must be written");
-    let options =
-        HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Md5]).with_mmap_threshold(Some(0));
+    let options = HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Md5]);
     let hashes = compute_hashes_file(&path, &options).expect("empty file hashing must succeed");
     assert_eq!(
         hashes.get(&AlgorithmId::Blake3).map(String::as_str),

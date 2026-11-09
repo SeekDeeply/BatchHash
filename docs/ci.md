@@ -8,17 +8,31 @@
 
 | Job | 内容 | 阻断 |
 |---|---|---|
+| Version / changelog gate | `node scripts/verify-versions.mjs`：Cargo 工作区版本、`app/pubspec.yaml` 版本、CHANGELOG 顶部标题三者必须一致 | 是 |
 | Detect components | 检测 app/ 是否存在，决定 Flutter 相关 job 是否运行 | 否 |
-| Rust format | cargo fmt --all -- --check | 是 |
-| Rust clippy / test | cargo clippy -D warnings + cargo test --workspace | 是 |
+| Rust format | `cargo fmt --all -- --check` | 是 |
+| Rust clippy / test | `cargo clippy --workspace --all-targets --locked -- -D warnings` + `cargo test --workspace --locked` | 是 |
 | Flutter analyze / test | flutter create 平台脚手架 + pub get + analyze + test | 是 |
-| Build Linux (debug) | GTK 工具链 + flutter build linux --debug | 是 |
-| Build Windows (debug) | flutter build windows --debug | 是 |
-| Build macOS (debug) | flutter build macos --debug | 是 |
-| Build iOS simulator | flutter build ios --debug --simulator --no-codesign | 是 |
-| Build Android APK | flutter build apk --debug | 是 |
+| Bridge (Rust FFI + Dart) | 真构建 `batchhash-ffi` 并用真实 .so 跑 `flutter test test/bridge` | 是 |
+| Package native library | Linux bundle 与 Android APK 内必须含有 `libbatchhash_ffi.so` | 是 |
+| Build Linux (debug) | GTK 工具链 + `flutter build linux --debug` | 是 |
+| Build Windows (debug) | `flutter build windows --debug` | 是 |
+| Build macOS (debug) | `flutter build macos --debug` | 是 |
+| Build iOS simulator | `flutter build ios --debug --simulator --no-codesign` | 是 |
+| Build Android APK | `flutter build apk --debug` | 是 |
 
 产物以 artifact 形式短期保留（debug 构建，不用于分发）。
+
+**为什么要 `--locked`**：它同时把 `Cargo.lock` 当成被验证的产物。清单改了依赖
+（例如移除 `mmap2`、给 rename crate 增加 `libc`）而 lock 没跟上时，clippy/test 会
+直接失败，而不是悄悄解析成一个 Release 从未测过的版本。
+
+工具链固定：Rust `1.82.0`（`dtolnay/rust-toolchain@1.82.0`），Flutter `3.24.5`
+（`subosito/flutter-action@v2` 的 `flutter-version`，**不再用 `channel: stable`**）。
+固定版本的意义是：同一份提交在任何时间重跑得到同一套编译器行为。
+
+所有 checkout 都带 `persist-credentials: false`，job 也不持有 `contents: write`：
+CI 不需要写仓库。
 
 ## 格式化流程（.github/workflows/format.yml）
 
@@ -31,20 +45,52 @@
 
 ## Release（.github/workflows/release.yml）
 
-触发：v* tag 或 workflow_dispatch。
+触发：`v*` tag 或 workflow_dispatch。
 
-- Android：appbundle + split-per-abi APK；配置 keystore secrets 时签名。
-- iOS：配置证书时构建 IPA；否则 --no-codesign 验证。
-- macOS / Windows / Linux：release 构建 + zip/tar.gz。
-- 产物上传 GitHub Release。
+- **权限**：工作流级只有 `contents: read`；构建 job 各自显式 `contents: read`；
+  **唯一持有 `contents: write` 的是 `publish` job**，且它 `needs: [android, macos, windows, linux]`。
+- **版本门禁**：`versions` job 跑 `scripts/verify-versions.mjs`；tag 推送时还会校验
+  tag 与版本、CHANGELOG 已发布条目是否一致。
+- **构建 job**：android / ios / ios-unsigned / macos / windows / linux，全部
+  `needs: versions`（ios-unsigned 除外，它是诊断 job）。
+- **产物**：每个构建 job 用 `actions/upload-artifact` 上传
+  `batchhash-android-release`、`batchhash-macos-release`、`batchhash-windows-release`、
+  `batchhash-linux-release`、`batchhash-ios-unsigned-diagnostic`。
+- **发布**：只有 `publish` job 会在 `startsWith(github.ref, 'refs/tags/')` 时创建
+  GitHub Release 并附上全部产物。**手动 workflow_dispatch 只产出可下载 artifact，
+  不创建 Release**——这一点与旧版行为不同。
+- **Android 签名**：见下节。
+- **iOS**：`ios` job 额外受 `vars.ENABLE_IOS_RELEASE` 门控；开启后仍会在
+  “Enforce the iOS release gate” 步骤失败，因为 Rust 静态库**尚未链接进 Runner target**。
+  这是刻意的：宁可失败，也不产出一个会回退到演示数据的 IPA。无签名的
+  `ios-unsigned` 诊断 job 受 `vars.ENABLE_IOS_UNSIGNED` 门控，不产出发布件。
 
 签名 secrets 说明见 docs/release-secrets.md。
 
-## 本地"构建"
+## Android 签名（Release）
 
+仅在 secrets 存在时生效，缺失时构建照常成功但**仍是 debug 签名**（Flutter 默认）：
+
+1. `Configure Android release signing (when secrets are present)`（id `signing`）
+   把 keystore 写到 `app/android/upload-keystore.jks`、把 `key.properties` 写到
+   `app/android/key.properties`。`app/android` 是 Gradle 的 `rootProject` 目录，
+   所以模板里的 `rootProject.file("key.properties")` 正好指向它。
+2. 同一 job 调用 `node scripts/patch-android-signing.mjs app/android` 给生成的
+   `app/build.gradle(.kts)` 注入 `signingConfigs { release { ... } }` 并把 debug
+   签名引用替换为 release。脚本优先改 `.kts`，找不到就改 `.gradle`；**模板形态
+   无法识别、或模板已自带 `signingConfigs` 时直接失败**，不猜。
+3. `Assert release APKs are not debug-signed`（仅当 `steps.signing.outputs.configured == 'true'`）
+   用 `apksigner verify --print-certs` 检查每个 split APK，证书 DN 里若还有
+   `CN=Android Debug` 就报错。
+
+**未验证**：apksigner 在 runner 上的可用路径、脚本对真实 Flutter 模板的注入结果、
+以及最终签名产物，都需要一次带 secrets 的真实运行才能确认；本仓库内没有任何
+证据表明它们已跑通。
+
+## 本地"构建"
 ~~~sh
 ./scripts/trigger-ci-build.sh            # 触发 CI
 ./scripts/trigger-ci-build.sh --release  # 触发 Release
 ~~~
 
-脚本只调用 GitHub API / gh CLI，不在本地编译任何东西。
+脚本只调用 GitHub API / gh 命令，不在本地编译任何东西。

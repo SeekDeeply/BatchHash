@@ -8,9 +8,15 @@ import '../models/models.dart';
 import '../util/formatting.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/entry_list.dart';
+import '../widgets/path_input_dialog.dart';
 import '../widgets/summary_card.dart';
 
 /// Batch hashing workflow: choose input, pick algorithms, hash, inspect.
+///
+/// Input paths come from the in-app path chooser instead of a native picker.
+/// The scanned entries, the progress summary, the last error and the selected
+/// algorithms are mirrored into [BatchHashAppState] so a tab switch does not
+/// throw the batch away.
 class HashPage extends StatefulWidget {
   const HashPage({super.key, required this.state});
 
@@ -21,18 +27,27 @@ class HashPage extends StatefulWidget {
 }
 
 class _HashPageState extends State<HashPage> {
-  static const String _sampleFolder = '/home/user/Documents';
-  static const List<String> _defaultAlgorithms = <String>['blake3', 'sha256'];
-
-  final Set<String> _algorithms = <String>{..._defaultAlgorithms};
-  List<BatchEntry> _entries = const <BatchEntry>[];
+  late Set<String> _algorithms;
+  late List<BatchEntry> _entries;
+  late HashProgress? _progress;
+  late Duration? _elapsed;
+  late String? _error;
+  late bool _cancelled;
   bool _scanning = false;
   bool _computing = false;
-  bool _cancelled = false;
-  String? _error;
-  HashProgress? _progress;
   StreamSubscription<HashProgress>? _subscription;
-  Duration? _elapsed;
+
+  @override
+  void initState() {
+    super.initState();
+    final BatchHashAppState app = widget.state;
+    _algorithms = <String>{...app.algorithms.value};
+    _entries = app.entries.value;
+    _progress = app.progress.value;
+    _elapsed = app.elapsed.value;
+    _error = app.error.value;
+    _cancelled = app.cancelled.value;
+  }
 
   @override
   void dispose() {
@@ -41,10 +56,50 @@ class _HashPageState extends State<HashPage> {
   }
 
   Future<void> _selectFiles() async {
-    await _scanFolder(recursive: false);
+    final BatchHashAppState app = widget.state;
+    final String? input = await PathInputDialog.show(
+      context,
+      title: context.strings('hash.chooseFiles'),
+      hintText: context.strings('path.hint.files'),
+      helperText: context.strings('path.filesHelper'),
+      allowMultiple: true,
+      suggestions: app.recentPaths.value,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (input == null) {
+      return;
+    }
+    final List<String> paths = <String>[
+      for (final String line in input.split('\n'))
+        if (line.trim().isNotEmpty) line.trim(),
+    ];
+    if (paths.isEmpty) {
+      return;
+    }
+    await _scanInputs(paths, recursive: false);
   }
 
   Future<void> _selectFolder() async {
+    final BatchHashAppState app = widget.state;
+    final String? input = await PathInputDialog.show(
+      context,
+      title: context.strings('hash.chooseFolder'),
+      hintText: context.strings('path.hint.folder'),
+      helperText: context.strings('path.folderHelper'),
+      initialValue: app.recentPaths.value.isEmpty
+          ? ''
+          : app.recentPaths.value.first,
+      suggestions: app.recentPaths.value,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (input == null || input.trim().isEmpty) {
+      return;
+    }
+    final String folder = input.trim();
     final bool? recursive = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
@@ -62,49 +117,70 @@ class _HashPageState extends State<HashPage> {
         ],
       ),
     );
+    if (!mounted) {
+      return;
+    }
     if (recursive == null) {
       return;
     }
-    await _scanFolder(recursive: recursive);
+    await _scanInputs(<String>[folder], recursive: recursive);
   }
 
-  Future<void> _scanFolder({required bool recursive}) async {
+  /// Scan every chosen path; one file is passed straight to the service.
+  Future<void> _scanInputs(
+    List<String> paths, {
+    required bool recursive,
+  }) async {
     setState(() {
       _scanning = true;
       _error = null;
       _cancelled = false;
     });
     try {
-      final List<BatchEntry> entries = await widget.state.service.scanDirectory(
-        _sampleFolder,
-        recursive: recursive,
-      );
+      final List<BatchEntry> scanned = <BatchEntry>[];
+      for (final String path in paths) {
+        final List<BatchEntry> entries = await widget.state.service
+            .scanDirectory(path, recursive: recursive);
+        scanned.addAll(entries);
+      }
       if (!mounted) {
         return;
       }
+      final BatchHashAppState app = widget.state;
+      for (final String path in paths.reversed) {
+        app.rememberPath(path);
+      }
       setState(() {
-        _entries = entries;
+        _entries = scanned;
         _progress = null;
         _elapsed = null;
         _scanning = false;
       });
-      widget.state.entries.value = entries;
-      widget.state.report.value = null;
+      app.entries.value = scanned;
+      app.report.value = null;
+      app.progress.value = null;
+      app.elapsed.value = null;
+      app.error.value = null;
+      app.cancelled.value = false;
+      app.scanRoot.value = paths.first;
     } catch (error) {
       if (!mounted) {
         return;
       }
+      final String failure = context.strings(
+        'hash.scanFailed',
+        args: <String, String>{'error': '$error'},
+      );
       setState(() {
         _scanning = false;
-        _error = context.strings(
-          'hash.scanFailed',
-          args: <String, String>{'error': '$error'},
-        );
+        _error = failure;
       });
+      widget.state.error.value = failure;
     }
   }
 
   void _clear() {
+    final BatchHashAppState app = widget.state;
     setState(() {
       _entries = const <BatchEntry>[];
       _progress = null;
@@ -112,8 +188,13 @@ class _HashPageState extends State<HashPage> {
       _cancelled = false;
       _error = null;
     });
-    widget.state.entries.value = const <BatchEntry>[];
-    widget.state.report.value = null;
+    app.entries.value = const <BatchEntry>[];
+    app.report.value = null;
+    app.progress.value = null;
+    app.elapsed.value = null;
+    app.error.value = null;
+    app.cancelled.value = false;
+    app.scanRoot.value = '';
   }
 
   void _toggleAlgorithm(String algorithm, bool selected) {
@@ -124,6 +205,7 @@ class _HashPageState extends State<HashPage> {
         _algorithms.remove(algorithm);
       }
     });
+    widget.state.algorithms.value = <String>{..._algorithms};
   }
 
   void _startHashing() {
@@ -137,6 +219,8 @@ class _HashPageState extends State<HashPage> {
       _progress = null;
       _elapsed = null;
     });
+    widget.state.error.value = null;
+    widget.state.cancelled.value = false;
     final Stopwatch stopwatch = Stopwatch()..start();
     final List<String> algorithms = _algorithms.toList()..sort();
     final Stream<HashProgress> stream = widget.state.service.computeHashes(
@@ -154,6 +238,10 @@ class _HashPageState extends State<HashPage> {
             _entries = progress.entries;
           }
         });
+        widget.state.progress.value = progress;
+        if (progress.entries.isNotEmpty) {
+          widget.state.entries.value = progress.entries;
+        }
         if (progress.done) {
           stopwatch.stop();
           _finishHashing(progress, stopwatch.elapsed, algorithms);
@@ -163,13 +251,15 @@ class _HashPageState extends State<HashPage> {
         if (!mounted) {
           return;
         }
+        final String failure = context.strings(
+          'hash.hashFailed',
+          args: <String, String>{'error': '$error'},
+        );
         setState(() {
           _computing = false;
-          _error = context.strings(
-            'hash.hashFailed',
-            args: <String, String>{'error': '$error'},
-          );
+          _error = failure;
         });
+        widget.state.error.value = failure;
       },
       onDone: () {
         if (!mounted) {
@@ -189,8 +279,13 @@ class _HashPageState extends State<HashPage> {
     Duration elapsed,
     List<String> algorithms,
   ) {
+    final BatchHashAppState app = widget.state;
+    final String root = app.scanRoot.value.trim();
+    final String reportRoot = root.isNotEmpty
+        ? root
+        : (progress.entries.isEmpty ? '' : progress.entries.first.path);
     final ReportModel report = ReportModel(
-      root: _sampleFolder,
+      root: reportRoot,
       generatedAt: DateTime.now(),
       algorithms: algorithms,
       entries: progress.entries,
@@ -202,8 +297,10 @@ class _HashPageState extends State<HashPage> {
       _entries = progress.entries;
       _elapsed = elapsed;
     });
-    widget.state.entries.value = progress.entries;
-    widget.state.report.value = report;
+    app.entries.value = progress.entries;
+    app.report.value = report;
+    app.progress.value = progress;
+    app.elapsed.value = elapsed;
   }
 
   Future<void> _cancelHashing() async {
@@ -218,6 +315,8 @@ class _HashPageState extends State<HashPage> {
       _cancelled = true;
       _progress = null;
     });
+    widget.state.cancelled.value = true;
+    widget.state.progress.value = null;
   }
 
   @override

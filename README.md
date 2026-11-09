@@ -6,8 +6,9 @@
 UI 采用 Flutter + Material Design 3（动态取色、自适应布局、**简体中文优先并可切换英文**），核心引擎使用
 Rust 并通过 JSON C ABI + `dart:ffi` 桥接。支持 Windows / macOS / Linux / Android / iOS。
 
-> 规划版本：v1.5 Final。**P0 已完成**：Rust 引擎四件套 + 报告/对比/写名/撤销 + 开发者 CLI + Flutter UI 外壳，
-> 全部由 CI 验证（格式、clippy、工作区测试、Flutter analyze/test、五平台 debug 构建）。当前向 **P0.5（flutter_rust_bridge 桥接）** 推进。
+> 规划版本：v1.5 Final。**P0 已完成**：Rust 引擎四件套 + 报告/对比/写名/撤销 + 开发者 CLI + Flutter UI（中文优先、可切英文）。
+> 原生桥接已实现为 **JSON C ABI + `dart:ffi`**（不是 flutter_rust_bridge），CI 的 Bridge job 用真实 Rust 库跑通
+> 「哈希 → 写名 → 撤销」链路；格式、clippy、工作区测试、Flutter analyze/test、五平台 debug 构建也都在 CI 验证。
 
 ## 当前状态
 
@@ -18,13 +19,14 @@ Rust 并通过 JSON C ABI + `dart:ffi` 桥接。支持 Windows / macOS / Linux /
 | PathNormalizer + full outer join Diff + 流式对比 | 已实现 | 归一化用例表、8 组 diff 金标准、duplicate/ambiguous/incomplete 语义 |
 | 后缀写名、纯计划、SQLite 日志、跨会话撤销 | 已实现 | 计划不写盘、冲突检测、状态机、端到端 rename→log→undo |
 | 开发者 CLI（hash/report/diff/scan-diff/suffix/extract/probe） | 已实现 | 二进制端到端测试；见 [docs/cli.md](docs/cli.md) |
-| Flutter UI 外壳（MD3、自适应、双列对比、硬件面板） | 已实现（假数据服务） | `flutter analyze` + widget 测试 |
+| Flutter UI（MD3、自适应、双列对比、硬件面板） | 已实现 | `flutter analyze` + widget 测试（脚本层测试不含原生库） |
 | 原生桥接（JSON C ABI + dart:ffi） | 已实现 | CI job `Bridge (Rust FFI + Dart)`：真跑 Rust 库 |
 | UI 接入真实桥接（RustBatchHashService，缺库回退 fake） | 已实现 | 桥接 job 里的服务级端到端测试 |
 | 中文优先界面 + 运行时切换英文（整壳重译） | 已实现 | `flutter analyze` + `l10n_test`（默认中文、双语完整、切换后重译） |
 | 导航不重复（每断点只保留一个导航控件） | 已实现 | `adaptive_test` 断言宽屏只有 rail、无 AppBar 与列表 |
 | Linux 包内嵌 Rust 库 / Android APK 内含 .so | 已实现 | CI 断言 bundle 与 APK 内的 .so |
-| macOS/Windows 打包与 iOS 静态库链接 | 待接入 | 见 docs/native-packaging.md |
+| macOS/Windows release 打包（复制 dylib/dll 并断言） | 已实现，运行时加载未验证 | release.yml 的复制与断言步骤；CI debug 构建不含原生库 |
+| iOS 静态库链接进 Runner | 未完成 | 静态库已产出，**链接未做**；见 docs/native-packaging.md |
 
 ## 构建策略（重要）
 
@@ -41,7 +43,7 @@ Rust 并通过 JSON C ABI + `dart:ffi` 桥接。支持 Windows / macOS / Linux /
 - **16 个注册算法**：MD5、SHA-1、SHA-224/256/384/512、SHA3-256/512、BLAKE2b/2s、BLAKE3、
   XXH3-64/128、XXH64、CRC32/CRC32C。统一 AlgorithmRegistry，稳定 ID、显示名、输出长度、
   加密属性、写名可用性、后缀推断规则集中定义。
-- **单遍多哈希**：一次 I/O 读取同时喂入所有勾选算法；仅 BLAKE3 大文件可走 mmap/分块并行策略。
+- **单遍多哈希**：一次 I/O 读取同时喂入所有勾选算法；大文件按块读取（mmap 已移除），并行由 Rayon 调度。
 - **写名后缀**：`原名[ABCDE].扩展名`，默认 5 位大写，写名算法唯一（`suffix_algorithm`，默认 BLAKE3），
   支持碰撞估算、推荐长度、dry-run、冲突检测、SQLite 日志与跨会话撤销。
 - **报告**：JSON / CSV / Markdown / TXT / md5sum / BSD 导出；JSON / CSV / md5sum / BSD 导入。
@@ -92,6 +94,21 @@ scripts/              CI 构建辅助脚本（本地不执行构建）
 - MD5 / SHA-1 已被密码学攻破；XXH / CRC 为非密码学校验。它们不能用于安全校验。
 - 文件名中的截断后缀只用于便利比对，**不是安全摘要**；报告同时保存完整哈希，对比始终使用完整哈希。
 - 报告导入默认不可信：限制条目数与文件大小、拒绝未来 schema 版本、拒绝路径逃逸。
+
+## 已知限制
+
+以下内容**尚未完成或被 CI 证明**，使用前请知悉：
+
+- **没有系统文件选择器**：不引入 `file_picker` / `file_selector` 等原生插件（仓库禁止本地构建，插件无法在本地验证），
+  路径选择由应用内输入完成。
+- **iOS**：Rust 静态库已能产出，但**尚未链接进 Runner target**；链接完成前 iOS 会回退到 fake 服务，不应宣称 iOS 版可用。
+- **Android 发布签名**：仅在提供 keystore secrets 时签名；签名结果只有真实 Release 运行才能确认，**仓库内未验证**。
+- **macOS**：未配置证书时为 ad-hoc 签名，未公证，Gatekeeper 会提示。
+- **Windows**：未接入代码签名。
+- **界面语言**：切换只在当前会话有效，**未持久化**。
+- **错误信息语言**：Rust 核心返回的错误文本是英文（`kind` 分别为 `invalid_request` / `scan` / `log` 等），
+  界面只本地化固定文案，不翻译 Rust 消息。
+- **运行时加载**：CI 只断言产物内**包含**原生库（构建期）；没有在真实设备/安装包上做过运行时加载测试。
 
 ## 许可证
 

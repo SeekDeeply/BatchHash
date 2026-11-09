@@ -9,6 +9,12 @@
 //! also the entry point of the Flutter bridge. The CLI only parses arguments,
 //! renders tables and writes files.
 //!
+//! Exit status: 0 on success, 1 on any error. An apply run that wrote its report
+//! or plan but failed to execute one or more renames prints every failure and
+//! still exits 1, so a partially applied batch is never mistaken for success. The
+//! report and plan output is already written when that error is returned, so the
+//! artefacts are always available for inspection.
+//!
 //! Commands:
 //!
 //! * hash - hash files or directories, optionally writing filename suffixes.
@@ -31,7 +37,7 @@ use batchhash_core::pipeline::{
     default_case_sensitive, now_rfc3339, run_batch, BatchRequest, BatchRun, PipelineEvent,
 };
 use batchhash_core::scan::{display_path, scan, ScanOptions};
-use batchhash_rename::log_store::{apply_undo, LogStore, UndoStatus};
+use batchhash_rename::log_store::{apply_undo, LogStore, UndoResultStatus, UndoStatus};
 use batchhash_rename::planner::{
     RenamePlan, RenameResultStatus, RenameRowStatus, StdFsBackend, StdRenameFs,
 };
@@ -264,6 +270,32 @@ fn terminal_progress(parsed: &Parsed) -> bool {
     !parsed.switch("quiet") && std::io::IsTerminal::is_terminal(&std::io::stderr())
 }
 
+/// Print every failed rename of an apply run and return a nonzero exit error.
+///
+/// A run that planned renames but could not execute one of them must not look
+/// like success to the caller: CI scripts and users rely on the exit status. The
+/// report or plan output is already written before this runs, so the failure
+/// only changes the exit code and adds stderr detail.
+fn fail_on_rename_errors(run: &BatchRun) -> CliResult<()> {
+    let mut failed = 0usize;
+    for result in &run.rename_results {
+        if result.status != RenameResultStatus::Failed {
+            continue;
+        }
+        failed += 1;
+        eprintln!(
+            "rename failed: {} -> {} ({})",
+            result.original_path,
+            result.new_path,
+            result.error.as_deref().unwrap_or("unknown error")
+        );
+    }
+    if failed == 0 {
+        return Ok(());
+    }
+    Err(format!("{failed} rename(s) failed"))
+}
+
 /// Run the shared pipeline and print a coarse progress meter on stderr.
 fn execute_pipeline(request: &BatchRequest, progress: bool) -> CliResult<BatchRun> {
     let cancel = batchhash_hash::CancelToken::new();
@@ -373,13 +405,17 @@ fn cmd_hash(args: &[String]) -> CliResult<()> {
             plan.summary.missing_hash
         );
         if let Some(batch_id) = &run.batch_id {
-            eprintln!(
-                "renamed {} file(s); batch {batch_id}",
-                run.rename_results
-                    .iter()
-                    .filter(|result| result.status == RenameResultStatus::Renamed)
-                    .count()
-            );
+            let renamed = run
+                .rename_results
+                .iter()
+                .filter(|result| result.status == RenameResultStatus::Renamed)
+                .count();
+            let failed = run
+                .rename_results
+                .iter()
+                .filter(|result| result.status == RenameResultStatus::Failed)
+                .count();
+            eprintln!("renamed {renamed} file(s), {failed} failed; batch {batch_id}");
         } else {
             eprintln!("dry run: no file was renamed");
         }
@@ -387,7 +423,7 @@ fn cmd_hash(args: &[String]) -> CliResult<()> {
     for skip in &run.skipped_paths {
         eprintln!("skipped {}: {}", skip.path, skip.reason);
     }
-    Ok(())
+    fail_on_rename_errors(&run)
 }
 
 // ---------------------------------------------------------------------------
@@ -604,12 +640,18 @@ fn cmd_suffix_plan(args: &[String], apply: bool) -> CliResult<()> {
             .iter()
             .filter(|result| result.status == RenameResultStatus::Renamed)
             .count();
+        let failed = run
+            .rename_results
+            .iter()
+            .filter(|result| result.status == RenameResultStatus::Failed)
+            .count();
         eprintln!(
-            "renamed {renamed} file(s) of {} ready; batch {} logged to {}",
+            "renamed {renamed} file(s) of {} ready, {failed} failed; batch {} logged to {}",
             plan.summary.ready,
             run.batch_id.as_deref().unwrap_or("<none>"),
             db_path.display()
         );
+        fail_on_rename_errors(&run)?;
     } else {
         eprintln!(
             "dry run: {} ready, {} conflict(s), {} skipped, {} missing hash, {} invalid name, {} no permission",
@@ -716,10 +758,30 @@ fn cmd_suffix_undo(args: &[String]) -> CliResult<()> {
     if parsed.switch("apply") && !parsed.switch("dry-run") {
         let results =
             apply_undo(&plan, &mut StdFsBackend, &mut store).map_err(|error| error.to_string())?;
+        let mut undone = 0usize;
+        let mut failed = 0usize;
+        let mut skipped = 0usize;
+        for result in &results {
+            match result.status {
+                UndoResultStatus::Undone => undone += 1,
+                UndoResultStatus::Failed => {
+                    failed += 1;
+                    eprintln!(
+                        "undo failed: {} -> {} ({})",
+                        result.from,
+                        result.to,
+                        result.error.as_deref().unwrap_or("unknown error")
+                    );
+                }
+                UndoResultStatus::Skipped => skipped += 1,
+            }
+        }
         eprintln!(
-            "undo: {} operation(s) processed, {ready} were ready",
-            results.len()
+            "undo: {undone} undone, {failed} failed, {skipped} skipped; {ready} row(s) were ready"
         );
+        if failed > 0 {
+            return Err(format!("{failed} undo rename(s) failed"));
+        }
     } else {
         eprintln!("undo (dry run): {ready} row(s) ready; pass --apply to execute");
     }

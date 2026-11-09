@@ -1435,18 +1435,11 @@ mod tests {
     }
 
     #[test]
-    fn plan_undo_reports_already_undone_and_skips_pending() {
+    fn plan_undo_reports_already_undone_and_leaves_pending_to_its_own_case() {
         let temp = tempdir().expect("tempdir");
         let mut store = LogStore::open_in_memory().expect("in-memory store");
         let batch = test_batch();
         store.create_batch(&batch).expect("create batch");
-
-        let pending = test_operation(
-            &batch.id,
-            &temp.path().join("pending.txt").to_string_lossy(),
-            &temp.path().join("pending[ABCDE].txt").to_string_lossy(),
-        );
-        store.insert_operation(&pending).expect("insert pending");
 
         let original = temp.path().join("done.txt");
         let renamed = temp.path().join("done[ABCDE].txt");
@@ -1460,6 +1453,8 @@ mod tests {
         store.mark_undone(id).expect("mark undone");
 
         let plan = store.plan_undo(&batch.id, &StdRenameFs).expect("plan undo");
+        // Pending rows are covered by plan_undo_reports_pending_operations_instead_of_dropping_them;
+        // this case only pins the already-undone verdict.
         assert_eq!(plan.rows.len(), 1);
         assert_eq!(plan.rows[0].operation_id, id);
         assert_eq!(plan.rows[0].status, UndoStatus::AlreadyUndone);

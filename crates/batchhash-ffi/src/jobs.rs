@@ -162,8 +162,8 @@ fn start_job(body: JobBody) -> String {
                 body(&worker_cancel, &reporter)
             }));
             let mut jobs = registry()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(job) = jobs.get_mut(&thread_id) {
                 if job.cancel.is_cancelled() {
                     // Cancellation wins over a successful return: a run that

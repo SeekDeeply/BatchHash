@@ -24,6 +24,10 @@ fn batch_request(root: &std::path::Path, algorithms: Vec<&str>) -> BatchRequestD
         root_label: None,
         algorithms: algorithms.into_iter().map(str::to_string).collect(),
         follow_links: false,
+        // The same defaults a JSON caller gets, so these tests exercise the
+        // same path the app does: a whole-tree scan with no restriction.
+        recursive: true,
+        restrict_paths: Vec::new(),
         case_sensitive: None,
         suffix: None,
         apply_renames: false,

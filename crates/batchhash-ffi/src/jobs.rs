@@ -55,7 +55,10 @@ impl JobState {
 
     /// Whether the job reached a terminal state.
     pub const fn is_terminal(self) -> bool {
-        matches!(self, JobState::Completed | JobState::Failed | JobState::Cancelled)
+        matches!(
+            self,
+            JobState::Completed | JobState::Failed | JobState::Cancelled
+        )
     }
 }
 
@@ -125,7 +128,9 @@ fn start_job(body: JobBody) -> String {
     let cancel = batchhash_hash::CancelToken::new();
     let worker_cancel = cancel.clone();
     {
-        let mut jobs = registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut jobs = registry()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         jobs.insert(
             job_id.clone(),
             Job {
@@ -146,8 +151,9 @@ fn start_job(body: JobBody) -> String {
             // and block the terminal update below.
             let progress_id = thread_id.clone();
             let reporter = move |sample: ProgressDto| {
-                let mut jobs =
-                    registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut jobs = registry()
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 if let Some(job) = jobs.get_mut(progress_id.as_str()) {
                     job.progress = Some(sample);
                 }
@@ -155,7 +161,9 @@ fn start_job(body: JobBody) -> String {
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 body(&worker_cancel, &reporter)
             }));
-            let mut jobs = registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut jobs = registry()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(job) = jobs.get_mut(&thread_id) {
                 if job.cancel.is_cancelled() {
                     // Cancellation wins over a successful return: a run that
@@ -175,15 +183,16 @@ fn start_job(body: JobBody) -> String {
                         }
                         Err(_) => {
                             job.state = JobState::Failed;
-                            job.error =
-                                Some(ApiError::new("internal", "the native job panicked"));
+                            job.error = Some(ApiError::new("internal", "the native job panicked"));
                         }
                     }
                 }
             }
         });
     if let Err(error) = spawn {
-        let mut jobs = registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut jobs = registry()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(job) = jobs.get_mut(&job_id) {
             job.state = JobState::Failed;
             job.error = Some(ApiError::new(
@@ -230,7 +239,9 @@ pub fn start_diff_directory(request: DiffDirectoryRequest) -> Result<String, Api
 
 /// Poll one job. Returns an `invalid_request` error for an unknown id.
 pub fn poll(job_id: &str) -> Result<JobStatusDto, ApiError> {
-    let jobs = registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let jobs = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let job = jobs
         .get(job_id)
         .ok_or_else(|| ApiError::invalid(format!("unknown job id: {job_id}")))?;
@@ -239,7 +250,9 @@ pub fn poll(job_id: &str) -> Result<JobStatusDto, ApiError> {
 
 /// Ask a running job to stop. Unknown ids are rejected; finished jobs are a no-op.
 pub fn cancel(job_id: &str) -> Result<JobStatusDto, ApiError> {
-    let jobs = registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let jobs = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let job = jobs
         .get(job_id)
         .ok_or_else(|| ApiError::invalid(format!("unknown job id: {job_id}")))?;
@@ -252,7 +265,9 @@ pub fn cancel(job_id: &str) -> Result<JobStatusDto, ApiError> {
 /// Drop a job. A still-running job is cancelled first so its thread stops.
 pub fn release(job_id: &str) -> Result<bool, ApiError> {
     let removed = {
-        let mut jobs = registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut jobs = registry()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         jobs.remove(job_id)
     };
     match removed {

@@ -204,7 +204,6 @@ fn call_err(pointer: *mut c_char) -> serde_json::Value {
     value
 }
 
-
 #[test]
 fn c_abi_jobs_run_poll_and_release() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -219,8 +218,7 @@ fn c_abi_jobs_run_poll_and_release() {
             "algorithms": ["sha256"],
         },
     });
-    let start_text = CString::new(serde_json::to_string(&start).expect("json"))
-        .expect("cstr");
+    let start_text = CString::new(serde_json::to_string(&start).expect("json")).expect("cstr");
     let started = call_ok(unsafe { c_api::bh_job_start(start_text.as_ptr()) });
     let job_id = started["job_id"].as_str().expect("job id").to_string();
     assert!(!job_id.is_empty());
@@ -231,8 +229,7 @@ fn c_abi_jobs_run_poll_and_release() {
     let mut payload: Option<String> = None;
     for _ in 0..600 {
         let poll = serde_json::json!({ "job_id": job_id });
-        let poll_text = CString::new(serde_json::to_string(&poll).expect("json"))
-            .expect("cstr");
+        let poll_text = CString::new(serde_json::to_string(&poll).expect("json")).expect("cstr");
         let status = call_ok(unsafe { c_api::bh_job_poll(poll_text.as_ptr()) });
         final_state = status["state"].as_str().unwrap_or_default().to_string();
         if final_state != "running" {
@@ -248,14 +245,12 @@ fn c_abi_jobs_run_poll_and_release() {
     );
 
     let release = serde_json::json!({ "job_id": job_id });
-    let release_text = CString::new(serde_json::to_string(&release).expect("json"))
-        .expect("cstr");
+    let release_text = CString::new(serde_json::to_string(&release).expect("json")).expect("cstr");
     let released = call_ok(unsafe { c_api::bh_job_release(release_text.as_ptr()) });
     assert_eq!(released["released"], true);
 
     // A released job is unknown, and an unknown job is a caller error.
-    let poll_again = CString::new(serde_json::to_string(&release).expect("json"))
-        .expect("cstr");
+    let poll_again = CString::new(serde_json::to_string(&release).expect("json")).expect("cstr");
     let error = call_err(unsafe { c_api::bh_job_poll(poll_again.as_ptr()) });
     assert_eq!(error["kind"], "invalid_request");
 }
@@ -263,14 +258,12 @@ fn c_abi_jobs_run_poll_and_release() {
 #[test]
 fn c_abi_jobs_reject_unknown_actions_and_ids() {
     let bad_action = serde_json::json!({ "action": "nope", "payload": {} });
-    let text = CString::new(serde_json::to_string(&bad_action).expect("json"))
-        .expect("cstr");
+    let text = CString::new(serde_json::to_string(&bad_action).expect("json")).expect("cstr");
     let error = call_err(unsafe { c_api::bh_job_start(text.as_ptr()) });
     assert_eq!(error["kind"], "invalid_request");
 
     let cancel = serde_json::json!({ "job_id": "job-missing" });
-    let cancel_text = CString::new(serde_json::to_string(&cancel).expect("json"))
-        .expect("cstr");
+    let cancel_text = CString::new(serde_json::to_string(&cancel).expect("json")).expect("cstr");
     let cancel_error = call_err(unsafe { c_api::bh_job_cancel(cancel_text.as_ptr()) });
     assert_eq!(cancel_error["kind"], "invalid_request");
 }

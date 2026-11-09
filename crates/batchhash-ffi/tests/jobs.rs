@@ -42,8 +42,8 @@ fn hashing_job_completes_and_reports_a_payload() {
     std::fs::write(dir.join("a.txt"), b"alpha").expect("write fixture");
     std::fs::write(dir.join("b.txt"), b"bravo").expect("write fixture");
 
-    let job_id = jobs::start_hash_entries(hash_request(&dir, &["a.txt", "b.txt"]))
-        .expect("start the job");
+    let job_id =
+        jobs::start_hash_entries(hash_request(&dir, &["a.txt", "b.txt"])).expect("start the job");
     let status = wait_for(&job_id);
     assert_eq!(status.state, "completed", "{status:?}");
     let payload = status.result_json.expect("a completed job has a payload");
@@ -63,8 +63,7 @@ fn hashing_job_forwards_progress_samples() {
     let payload = vec![7u8; 3 * 1024 * 1024];
     std::fs::write(dir.join("big.bin"), &payload).expect("write fixture");
 
-    let job_id = jobs::start_hash_entries(hash_request(&dir, &["big.bin"]))
-        .expect("start the job");
+    let job_id = jobs::start_hash_entries(hash_request(&dir, &["big.bin"])).expect("start the job");
     let mut seen_bytes = 0u64;
     let mut saw_sample = false;
     for _ in 0..600 {
@@ -96,8 +95,7 @@ fn cancelling_a_job_wins_over_a_successful_return() {
     let payload = vec![5u8; 64 * 1024 * 1024];
     std::fs::write(dir.join("big.bin"), &payload).expect("write fixture");
 
-    let job_id = jobs::start_hash_entries(hash_request(&dir, &["big.bin"]))
-        .expect("start the job");
+    let job_id = jobs::start_hash_entries(hash_request(&dir, &["big.bin"])).expect("start the job");
     jobs::cancel(&job_id).expect("cancel the job");
     let status = wait_for(&job_id);
     assert_eq!(
@@ -180,7 +178,10 @@ fn releasing_a_terminal_job_removes_only_that_entry() {
 
     let job_id = jobs::start_hash_entries(hash_request(&dir, &["a.txt"])).expect("start");
     let _ = wait_for(&job_id);
-    assert!(jobs::poll(&job_id).is_ok(), "the finished job is still tracked");
+    assert!(
+        jobs::poll(&job_id).is_ok(),
+        "the finished job is still tracked"
+    );
     assert!(jobs::release(&job_id).expect("release"));
     assert!(
         jobs::poll(&job_id).is_err(),

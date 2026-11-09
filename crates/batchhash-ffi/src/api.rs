@@ -1385,7 +1385,12 @@ pub fn diff_directory_request_with_progress(
         }
     };
     let outcome = batchhash_hash::hash_entries(&scanned.entries, &options, cancel, &forward);
-    progress(ProgressDto::stage("comparing", 0, outcome.entries.len() as u64, 0.0));
+    progress(ProgressDto::stage(
+        "comparing",
+        0,
+        outcome.entries.len() as u64,
+        0.0,
+    ));
     let mut diff_options = diff_options(request.case_sensitive);
     diff_options.right_kind = batchhash_types::DiffSourceKind::RealtimeDirectory;
     diff_options.left_label = "report".to_string();

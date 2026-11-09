@@ -218,8 +218,9 @@ class _ComparePageState extends State<ComparePage> {
     _generation += 1;
     setState(() {
       _loading = false;
-      _error = null,
-      _rows = const <DiffRowModel>[],
+      _error = null;
+      _rows = const <DiffRowModel>[];
+      _diffProgress = null;
     });
   }
 
@@ -526,16 +527,21 @@ class _ComparePageState extends State<ComparePage> {
             overflow: TextOverflow.ellipsis,
           ),
         ],
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          key: const ValueKey<String>('compare-cancel-loading'),
-          onPressed: _cancelComparison,
-          icon: const Icon(Icons.stop),
-          label: Text(context.strings('compare.cancelLoading')),
-        ),
+        // A synchronous fallback cannot be cancelled, so the button would be a
+        // no-op there; hide it instead of pretending.
+        if (widget.state.service.supportsCancellation) ...<Widget>[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const ValueKey<String>('compare-cancel-loading'),
+            onPressed: _cancelComparison,
+            icon: const Icon(Icons.stop),
+            label: Text(context.strings('compare.cancelLoading')),
+          ),
+        ],
       ],
     );
   }
+
   Widget _buildDiffTable(
     List<DiffRowModel> rows, {
     required String leftKey,

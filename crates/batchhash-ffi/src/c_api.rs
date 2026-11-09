@@ -159,14 +159,12 @@ pub unsafe extern "C" fn bh_job_start(request: *const c_char) -> *mut c_char {
             }
             "hash_entries" => {
                 let value: api::HashEntriesRequest = serde_json::from_value(payload)
-                    .map_err(|error| {
-                        ApiError::invalid(format!("hash_entries payload: {error}"))
-                    })?;
+                    .map_err(|error| ApiError::invalid(format!("hash_entries payload: {error}")))?;
                 crate::jobs::start_hash_entries(value)?
             }
             "diff_directory" => {
-                let value: api::DiffDirectoryRequest = serde_json::from_value(payload)
-                    .map_err(|error| {
+                let value: api::DiffDirectoryRequest =
+                    serde_json::from_value(payload).map_err(|error| {
                         ApiError::invalid(format!("diff_directory payload: {error}"))
                     })?;
                 crate::jobs::start_diff_directory(value)?

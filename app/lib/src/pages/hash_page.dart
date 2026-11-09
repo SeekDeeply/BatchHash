@@ -608,7 +608,9 @@ class _HashPageState extends State<HashPage> {
                   context.strings(_computing ? 'hash.hashing' : 'hash.start'),
                 ),
               ),
-              if (_computing)
+              // A library without the async job API hashes synchronously, so
+              // there is nothing to cancel; offering the button would lie.
+              if (_computing && widget.state.service.supportsCancellation)
                 OutlinedButton.icon(
                   key: const ValueKey<String>('hash-cancel'),
                   onPressed: _cancelHashing,

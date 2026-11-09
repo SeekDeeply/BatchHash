@@ -578,6 +578,12 @@ class RustBatchHashService implements BatchHashService {
     return _diffRows(data);
   }
 
+  /// Only true when the loaded library exposes the async job API.
+  ///
+  /// An older library hashes synchronously, so there is no job to cancel; the
+  /// UI must hide the cancel button rather than offer a no-op.
+  @override
+  bool get supportsCancellation => native.supportsAsyncJobs();
 
   @override
   Future<void> cancelCurrentOperation() async {

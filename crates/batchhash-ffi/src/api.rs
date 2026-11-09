@@ -1415,11 +1415,8 @@ pub fn diff_directory_request_with_progress(
             ),
         ));
     }
-    let restrict: std::collections::BTreeSet<&str> = request
-        .restrict_paths
-        .iter()
-        .map(String::as_str)
-        .collect();
+    let restrict: std::collections::BTreeSet<&str> =
+        request.restrict_paths.iter().map(String::as_str).collect();
     let targets: Vec<batchhash_types::FileEntry> = if restrict.is_empty() {
         scanned.entries.clone()
     } else {
@@ -1435,9 +1432,7 @@ pub fn diff_directory_request_with_progress(
     if max_bytes > 0 && bytes_total > max_bytes {
         return Err(ApiError::new(
             "too_large",
-            format!(
-                "the selection holds {bytes_total} bytes, above the {max_bytes} limit"
-            ),
+            format!("the selection holds {bytes_total} bytes, above the {max_bytes} limit"),
         ));
     }
     let scanned_total = scanned.entries.len();

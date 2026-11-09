@@ -458,7 +458,6 @@ fn import_diff_and_history_round_trip() {
     assert_eq!(batches[0].undone_count, 0);
 }
 
-
 /// Picking one file must not make the comparison read its whole directory.
 /// Regression test for hashing an entire tree from a single-file report.
 #[test]
@@ -476,10 +475,7 @@ fn directory_diff_honours_the_report_scope() {
     let scan_text =
         CString::new(serde_json::to_string(&scan_request).expect("json")).expect("cstr");
     let scanned = call_ok(unsafe { c_api::bh_scan(scan_text.as_ptr()) });
-    let all: Vec<serde_json::Value> = scanned["entries"]
-        .as_array()
-        .expect("entries")
-        .clone();
+    let all: Vec<serde_json::Value> = scanned["entries"].as_array().expect("entries").clone();
     let picked = all
         .iter()
         .filter(|entry| entry["path"] == "picked.txt")
@@ -501,8 +497,8 @@ fn directory_diff_honours_the_report_scope() {
         .to_string();
 
     // Unscoped would see all three files; restricted sees only the reported one.
-    let unscoped = batchhash_ffi::api::diff_directory_request(
-        &batchhash_ffi::api::DiffDirectoryRequest {
+    let unscoped =
+        batchhash_ffi::api::diff_directory_request(&batchhash_ffi::api::DiffDirectoryRequest {
             report_json: report_json.clone(),
             directory: temp.path().to_string_lossy().into_owned(),
             case_sensitive: None,
@@ -510,12 +506,11 @@ fn directory_diff_honours_the_report_scope() {
             recursive: Some(true),
             restrict_paths: Vec::new(),
             max_entries: None,
-        },
-    )
-    .expect("unscoped diff");
+        })
+        .expect("unscoped diff");
 
-    let scoped = batchhash_ffi::api::diff_directory_request(
-        &batchhash_ffi::api::DiffDirectoryRequest {
+    let scoped =
+        batchhash_ffi::api::diff_directory_request(&batchhash_ffi::api::DiffDirectoryRequest {
             report_json,
             directory: temp.path().to_string_lossy().into_owned(),
             case_sensitive: None,
@@ -523,9 +518,8 @@ fn directory_diff_honours_the_report_scope() {
             recursive: Some(true),
             restrict_paths: vec!["picked.txt".to_string()],
             max_entries: None,
-        },
-    )
-    .expect("scoped diff");
+        })
+        .expect("scoped diff");
 
     assert!(
         scoped.summary.total < unscoped.summary.total,
@@ -560,8 +554,8 @@ fn directory_diff_rejects_a_selection_above_the_cap() {
         .expect("report json")
         .to_string();
 
-    let error = batchhash_ffi::api::diff_directory_request(
-        &batchhash_ffi::api::DiffDirectoryRequest {
+    let error =
+        batchhash_ffi::api::diff_directory_request(&batchhash_ffi::api::DiffDirectoryRequest {
             report_json,
             directory: temp.path().to_string_lossy().into_owned(),
             case_sensitive: None,
@@ -569,9 +563,8 @@ fn directory_diff_rejects_a_selection_above_the_cap() {
             recursive: Some(true),
             restrict_paths: Vec::new(),
             max_entries: Some(1),
-        },
-    )
-    .expect_err("the cap must reject a larger directory");
+        })
+        .expect_err("the cap must reject a larger directory");
     assert_eq!(error.kind, "too_large", "{error:?}");
 }
 #[test]

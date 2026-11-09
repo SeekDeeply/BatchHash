@@ -145,6 +145,13 @@ class FileAppConfigStore implements AppConfigStore {
       // No path_provider implementation (unit tests, an unsupported host):
       // configuration memory is best effort, never fatal.
       return null;
+    } catch (_) {
+      // Flutter throws an Error, not an Exception, when path_provider is called
+      // before any binding exists ("Binding has not yet been initialized").
+      // `on Exception` does not catch that, so a pure Dart test would crash on a
+      // feature the app treats as optional. Any failure here degrades to "no
+      // remembered roots" instead of aborting the caller's scan.
+      return null;
     }
   }
 
@@ -174,6 +181,9 @@ class FileAppConfigStore implements AppConfigStore {
     } on Exception catch (_) {
       // A truncated or hand-edited file must not break history.
       return const <RecentRoot>[];
+    } catch (_) {
+      // Same reason as _file(): a platform-channel failure surfaces as an Error.
+      return const <RecentRoot>[];
     }
   }
 
@@ -196,6 +206,8 @@ class FileAppConfigStore implements AppConfigStore {
       await file.writeAsString(jsonEncode(payload), flush: true);
     } on Exception catch (_) {
       // A read-only volume must not fail the scan that triggered the write.
+    } catch (_) {
+      // Persisting history is best effort; never fail the caller's scan.
     }
   }
 }

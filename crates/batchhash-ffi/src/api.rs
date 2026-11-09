@@ -1364,6 +1364,10 @@ mod tests {
             root_label: None,
             algorithms: algorithms.into_iter().map(str::to_string).collect(),
             follow_links: false,
+            // Same defaults a JSON caller gets: a whole-tree scan and no
+            // restriction. Tests that narrow the run set these explicitly.
+            recursive: default_recursive(),
+            restrict_paths: Vec::new(),
             case_sensitive: None,
             suffix: None,
             apply_renames: false,

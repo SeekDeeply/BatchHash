@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:batchhash/src/bridge/native_bridge.dart';
 import 'package:batchhash/src/models/models.dart';
+import 'package:batchhash/src/services/app_config_store.dart';
 import 'package:batchhash/src/services/rust_batch_hash_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -10,6 +11,10 @@ import 'package:flutter_test/flutter_test.dart';
 /// CI builds the native library and exports BATCHHASH_FFI_LIB; without it the
 /// whole group is skipped so a plain checkout still passes.
 void main() {
+  // The service reaches path_provider for its config store. Without a binding
+  // that call throws an Error instead of returning a directory.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   final libraryPath = Platform.environment['BATCHHASH_FFI_LIB'];
   final available = libraryPath != null && libraryPath.isNotEmpty;
 
@@ -31,6 +36,24 @@ void main() {
       if (temp.existsSync()) {
         temp.deleteSync(recursive: true);
       }
+    });
+
+    test('degrades to no history when the config store has no platform channel', () async {
+      // In a plain `flutter test` there is no path_provider implementation, and
+      // calling it without a binding throws an Error rather than an Exception.
+      // Remembering roots is a convenience, so the scan itself must still work.
+      File('$root/a.txt').writeAsStringSync('alpha');
+      final bare = RustBatchHashService(
+        native: BatchHashNative.open(libraryPath!),
+        logDbPath: '$root/log/rename.db',
+        configStore: FileAppConfigStore(
+          supportDirectory: () async =>
+              throw StateError('no support directory on this host'),
+        ),
+      );
+      final scanned = await bare.scanDirectory(root, recursive: true);
+      expect(scanned, hasLength(1));
+      expect(await bare.loadHistory(), isEmpty);
     });
 
     test('tryCreate returns a service when the library loads', () {

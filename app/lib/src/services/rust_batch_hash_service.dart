@@ -487,6 +487,8 @@ class RustBatchHashService implements BatchHashService {
     } on Exception catch (_) {
       // Remembering a root is a convenience; a read-only store must not fail
       // the scan or the rename that triggered it.
+    } catch (_) {
+      // A platform-channel failure arrives as an Error, not an Exception.
     }
   }
 
@@ -513,6 +515,10 @@ class RustBatchHashService implements BatchHashService {
       return await resolver();
     } on Exception catch (_) {
       // No path_provider implementation on this host; the caller falls back.
+      return null;
+    } catch (_) {
+      // Calling path_provider before a binding exists throws an Error; treat it
+      // like a missing implementation and let the caller fall back.
       return null;
     }
   }

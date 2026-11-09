@@ -51,6 +51,9 @@
   Flutter / Rust 工具链固定版本。
 - CI：Release 工作流权限收敛为工作流级 `contents: read`，只有 `publish` job 持有
   `contents: write` 且仅在 tag 推送时创建 Release；各平台改上传 artifact。
+- CI：Windows job 固定到 `windows-2022`。`windows-latest` 已切到 `windows-2025-vs2026`
+  （VS 18），而 Flutter 3.24.5 只把 VS 17 映射到 `Visual Studio 17 2022` generator，其余
+  一律发 `Visual Studio 16 2019`，该镜像上并不存在，Windows 构建会直接失败。
 - CI：配置 secrets 时给 Android 注入 release 签名并用 `apksigner` 断言**不是** debug 签名；
   iOS 发布 job 改为显式门禁失败，另设无签名诊断 job。
 - CI：`verify-versions.mjs` 还会比对 `rust-toolchain.toml` 的 channel 与各工作流的

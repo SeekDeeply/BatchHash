@@ -300,7 +300,7 @@ pub fn run_batch(
     events(PipelineEvent::Phase(BatchPhase::Scanning));
     let scanned = scan(&request.root_path, &request.scan)?;
     let (entries, skipped_paths) = exclude_log_artifacts(scanned.entries, scanned.skipped, request);
-    let entries = restrict_entries(entries, restricted.as_deref());
+    let entries = restrict_entries(entries, restricted.as_ref());
 
     let hashing_total = entries.len() as u64;
     let bytes_total: u64 = entries.iter().map(|entry| entry.size).sum();

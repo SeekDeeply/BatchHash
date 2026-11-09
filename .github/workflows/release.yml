@@ -307,7 +307,12 @@ jobs:
   windows:
     name: Windows
     needs: [versions]
-    runs-on: windows-latest
+    # windows-latest recently moved to the windows-2025-vs2026 image (VS 18).
+    # Flutter 3.24.5 maps only VS 17 to its "Visual Studio 17 2022" CMake
+    # generator and sends every other major version to "Visual Studio 16 2019",
+    # which no longer exists on that image, so the build dies with "could not
+    # find any instance of Visual Studio". windows-2022 ships VS 17.
+    runs-on: windows-2022
     permissions:
       contents: read
     steps:

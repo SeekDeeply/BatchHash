@@ -61,6 +61,10 @@ CI 不需要写仓库。
 
 触发：`v*` tag 或 workflow_dispatch。
 
+- **Windows runner 固定 `windows-2022`**：`windows-latest` 已迁移到 `windows-2025-vs2026`
+  （VS 18），Flutter 3.24.5 只把 VS 17 映射到正确的 CMake generator，其余版本一律发
+  `Visual Studio 16 2019`，在该镜像上不存在，构建会以 "could not find any instance of
+  Visual Studio" 失败。
 - **权限**：工作流级只有 `contents: read`；构建 job 各自显式 `contents: read`；
   **唯一持有 `contents: write` 的是 `publish` job**，且它 `needs: [android, macos, windows, linux]`。
 - **版本门禁**：`versions` job 跑 `scripts/verify-versions.mjs`；tag 推送时还会校验

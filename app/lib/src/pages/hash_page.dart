@@ -478,6 +478,12 @@ class _HashPageState extends State<HashPage> {
             ),
           ),
           const SizedBox(height: 16),
+          _StepHeader(
+            index: 1,
+            label: context.strings('hash.stepInput'),
+            complete: _entries.isNotEmpty,
+          ),
+          const SizedBox(height: 8),
           _buildToolbar(),
           if (error != null) ...<Widget>[
             const SizedBox(height: 12),
@@ -495,9 +501,14 @@ class _HashPageState extends State<HashPage> {
             _InputSummary(entries: _entries, onClear: _clear),
           ],
           const SizedBox(height: 20),
-          Text(
-            context.strings('hash.algorithms'),
-            style: theme.textTheme.titleSmall,
+          _StepHeader(
+            index: 2,
+            label: context.strings('hash.stepAlgorithms'),
+            complete: _algorithms.isNotEmpty,
+            detail: context.strings(
+              'hash.algorithmCount',
+              args: <String, String>{'count': '${_algorithms.length}'},
+            ),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -516,7 +527,13 @@ class _HashPageState extends State<HashPage> {
                 ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
+          _StepHeader(
+            index: 3,
+            label: context.strings('hash.stepRun'),
+            complete: _entries.isNotEmpty && !_computing && elapsed != null,
+          ),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -588,7 +605,15 @@ class _HashPageState extends State<HashPage> {
                   ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
+            _StepHeader(
+              index: 4,
+              label: context.strings('hash.stepResults'),
+              complete: _entries.any(
+                (BatchEntry entry) => entry.hashes.isNotEmpty,
+              ),
+            ),
+            const SizedBox(height: 8),
             Row(
               children: <Widget>[
                 Expanded(
@@ -670,6 +695,61 @@ class _HashPageState extends State<HashPage> {
   }
 }
 
+/// One numbered step of the hashing workflow.
+///
+/// The check mark is the only state signal: a step is complete when its
+/// output exists, so the user can see at a glance what is still missing.
+class _StepHeader extends StatelessWidget {
+  const _StepHeader({
+    required this.index,
+    required this.label,
+    required this.complete,
+    this.detail,
+  });
+
+  final int index;
+  final String label;
+  final bool complete;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final Color color = complete ? scheme.primary : scheme.onSurfaceVariant;
+    final String? detailText = detail;
+    return Row(
+      children: <Widget>[
+        CircleAvatar(
+          radius: 12,
+          backgroundColor: complete
+              ? scheme.primaryContainer
+              : scheme.surfaceContainerHighest,
+          child: complete
+              ? Icon(Icons.check, size: 14, color: scheme.onPrimaryContainer)
+              : Text(
+                  '$index',
+                  style: theme.textTheme.labelSmall?.copyWith(color: color),
+                ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            label,
+            style: theme.textTheme.titleSmall?.copyWith(color: color),
+          ),
+        ),
+        if (detailText != null)
+          Text(
+            detailText,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+      ],
+    );
+  }
+}
 class _InputSummary extends StatelessWidget {
   const _InputSummary({required this.entries, required this.onClear});
 

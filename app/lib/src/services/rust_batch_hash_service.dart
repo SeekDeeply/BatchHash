@@ -239,7 +239,7 @@ class RustBatchHashService implements BatchHashService {
     final result = explicitFiles
         ? <BatchEntry>[
             for (final BatchEntry original in entries)
-              _mergeHash(original, hashed, root),
+              _mergeHash(original, hashed),
           ]
         : (hashed.isEmpty ? entries : hashed);
     yield HashProgress(
@@ -691,14 +691,13 @@ class RustBatchHashService implements BatchHashService {
     return hashes;
   }
 
-  BatchEntry _mergeHash(
-    BatchEntry original,
-    List<BatchEntry> hashed,
-    String root,
-  ) {
-    final String relative = _relativePath(original.path, root);
+  /// Merge the engine result for [original] into the entry the UI shows.
+  ///
+  /// Both sides are root-relative: [scanFiles] stores the relative path on
+  /// the entry and the engine answers in the same form.
+  BatchEntry _mergeHash(BatchEntry original, List<BatchEntry> hashed) {
     for (final BatchEntry entry in hashed) {
-      if (entry.path == relative) {
+      if (entry.path == original.path) {
         return original.copyWith(
           hashes: entry.hashes,
           status: entry.status,

@@ -75,7 +75,8 @@ void main() {
       final progress = await service
           .computeHashes(entries: picked, algorithms: <String>['sha256', 'xxh3-64'])
           .toList();
-      final hashed = progress.single.entries;
+      // The engine streams progress samples; the last one carries the result.
+      final hashed = progress.last.entries;
       expect(hashed, hasLength(2));
       for (final entry in hashed) {
         expect(entry.hashes['sha256'], hasLength(64));
@@ -95,7 +96,7 @@ void main() {
         final progress = await service
             .computeHashes(entries: scanned, algorithms: <String>[algorithm])
             .toList();
-        final entry = progress.single.entries.single;
+        final entry = progress.last.entries.single;
         expect(
           entry.hashes[algorithm],
           isNotNull,
@@ -134,9 +135,10 @@ void main() {
       final progress = await service
           .computeHashes(entries: scanned, algorithms: <String>['md5'])
           .toList();
-      expect(progress, hasLength(1));
-      expect(progress.single.done, isTrue);
-      final hashed = progress.single.entries;
+      // Progress is a stream: every sample except the last is intermediate.
+      expect(progress, isNotEmpty);
+      expect(progress.last.done, isTrue);
+      final hashed = progress.last.entries;
       expect(hashed, hasLength(2));
       for (final entry in hashed) {
         expect(entry.hashes['md5'], isNotNull);
@@ -175,7 +177,7 @@ void main() {
         root: root,
         generatedAt: DateTime.utc(2026, 1, 1),
         algorithms: const <String>['sha256'],
-        entries: progress.single.entries,
+        entries: progress.last.entries,
       );
 
       final written = await service.exportReport(
@@ -201,7 +203,7 @@ void main() {
         root: root,
         generatedAt: DateTime.utc(2026, 1, 1),
         algorithms: const <String>['md5'],
-        entries: progress.single.entries,
+        entries: progress.last.entries,
       );
       // Export outside the scanned root so the export itself cannot show up as
       // an added file in the directory comparison below.

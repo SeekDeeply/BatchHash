@@ -204,6 +204,86 @@ fn call_err(pointer: *mut c_char) -> serde_json::Value {
     value
 }
 
+
+#[test]
+fn c_abi_jobs_run_poll_and_release() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("a.txt"), b"alpha");
+    write(&temp.path().join("b.txt"), b"bravo");
+
+    let start = serde_json::json!({
+        "action": "hash_entries",
+        "payload": {
+            "root": temp.path().to_string_lossy(),
+            "paths": ["a.txt", "b.txt"],
+            "algorithms": ["sha256"],
+        },
+    });
+    let start_text = CString::new(serde_json::to_string(&start).expect("json"))
+        .expect("cstr");
+    let started = call_ok(unsafe { c_api::bh_job_start(start_text.as_ptr()) });
+    let job_id = started["job_id"].as_str().expect("job id").to_string();
+    assert!(!job_id.is_empty());
+
+    // Poll until the worker finishes; the start call returns immediately, which
+    // is the whole point of the job API.
+    let mut final_state = String::new();
+    let mut payload: Option<String> = None;
+    for _ in 0..600 {
+        let poll = serde_json::json!({ "job_id": job_id });
+        let poll_text = CString::new(serde_json::to_string(&poll).expect("json"))
+            .expect("cstr");
+        let status = call_ok(unsafe { c_api::bh_job_poll(poll_text.as_ptr()) });
+        final_state = status["state"].as_str().unwrap_or_default().to_string();
+        if final_state != "running" {
+            payload = status["result_json"].as_str().map(str::to_string);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert_eq!(final_state, "completed", "the job must finish");
+    assert!(
+        payload.expect("payload").contains("report_json"),
+        "the completed job carries the batch result"
+    );
+
+    let release = serde_json::json!({ "job_id": job_id });
+    let release_text = CString::new(serde_json::to_string(&release).expect("json"))
+        .expect("cstr");
+    let released = call_ok(unsafe { c_api::bh_job_release(release_text.as_ptr()) });
+    assert_eq!(released["released"], true);
+
+    // A released job is unknown, and an unknown job is a caller error.
+    let poll_again = CString::new(serde_json::to_string(&release).expect("json"))
+        .expect("cstr");
+    let error = call_err(unsafe { c_api::bh_job_poll(poll_again.as_ptr()) });
+    assert_eq!(error["kind"], "invalid_request");
+}
+
+#[test]
+fn c_abi_jobs_reject_unknown_actions_and_ids() {
+    let bad_action = serde_json::json!({ "action": "nope", "payload": {} });
+    let text = CString::new(serde_json::to_string(&bad_action).expect("json"))
+        .expect("cstr");
+    let error = call_err(unsafe { c_api::bh_job_start(text.as_ptr()) });
+    assert_eq!(error["kind"], "invalid_request");
+
+    let cancel = serde_json::json!({ "job_id": "job-missing" });
+    let cancel_text = CString::new(serde_json::to_string(&cancel).expect("json"))
+        .expect("cstr");
+    let cancel_error = call_err(unsafe { c_api::bh_job_cancel(cancel_text.as_ptr()) });
+    assert_eq!(cancel_error["kind"], "invalid_request");
+}
+
+#[test]
+fn c_abi_version_advertises_async_jobs() {
+    let version = call_ok(unsafe { c_api::bh_api_version() });
+    let features = version["features"].as_array().expect("features array");
+    assert!(
+        features.iter().any(|value| value == "async_jobs"),
+        "the Dart side detects job support from this capability"
+    );
+}
 #[test]
 fn c_abi_version_and_algorithms() {
     let version = call_ok(unsafe { c_api::bh_api_version() });

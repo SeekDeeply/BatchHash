@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
+import '../util/formatting.dart';
+import '../util/platform_pickers.dart';
 import '../widgets/diff_table.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/entry_list.dart';
@@ -99,6 +101,9 @@ class _ComparePageState extends State<ComparePage> {
   @override
   void dispose() {
     widget.state.report.removeListener(_handleReportChanged);
+    // Leaving the page must stop the native comparison, not leave it hashing
+    // a directory nobody is looking at.
+    unawaited(_cancelDiffStream());
     super.dispose();
   }
 
@@ -134,46 +139,103 @@ class _ComparePageState extends State<ComparePage> {
   String _reportKey(ReportModel report) =>
       '${report.root}|${report.generatedAt.microsecondsSinceEpoch}';
 
+  /// Generation of the comparison currently being streamed.
+
+  ///
+  /// A directory comparison hashes every scanned file, so it can outlive the
+  /// widget's interest in it: switching mode, importing another report or
+  /// starting a new run bumps the generation, and a late sample from an older
+  /// stream is dropped instead of overwriting newer rows.
+  int _generation = 0;
+  StreamSubscription<DiffProgress>? _diffSubscription;
+  DiffProgress? _diffProgress;
+
   Future<void> _load(ReportModel report) async {
-    try {
-      final List<DiffRowModel> rows = await widget.state.service
-          .diffReportAgainstDirectory(
-            report: report,
-            directory: report.root,
-            recursive: true,
-          );
-      if (!mounted) {
-        return;
+    await _startDirectoryDiff(report, report.root);
+  }
+
+  Future<void> _startDirectoryDiff(
+    ReportModel report,
+    String directory,
+  ) async {
+    await _cancelDiffStream();
+    final int generation = ++_generation;
+    _diffSubscription = widget.state.service
+        .compareReportWithDirectory(report: report, directory: directory)
+        .listen(
+          (DiffProgress progress) {
+            if (!mounted || generation != _generation) {
+              return;
+            }
+            setState(() {
+              _diffProgress = progress;
+              if (progress.done) {
+                _loading = false;
+                if (progress.cancelled) {
+                  _error = null;
+                } else {
+                  _rows = progress.rows;
+                }
+              }
+            });
+          },
+          onError: (Object error) {
+            if (!mounted || generation != _generation) {
+              return;
+            }
+            final String failure = context.strings(
+              'compare.compareFailed',
+              args: <String, String>{'error': '$error'},
+            );
+            setState(() {
+              _loading = false;
+              _error = failure;
+            });
+          },
+        );
+  }
+
+  /// Stop the running comparison and forget its progress.
+  Future<void> _cancelDiffStream({bool cancelJob = true}) async {
+    final StreamSubscription<DiffProgress>? subscription = _diffSubscription;
+    _diffSubscription = null;
+    _diffProgress = null;
+    if (subscription != null) {
+      await subscription.cancel();
+      if (cancelJob) {
+        // Dropping the subscription alone would leave the native worker
+        // hashing the directory in the background.
+        await widget.state.service.cancelCurrentOperation();
       }
-      setState(() {
-        _rows = rows;
-        _loading = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      final String failure = context.strings(
-        'compare.compareFailed',
-        args: <String, String>{'error': '$error'},
-      );
-      setState(() {
-        _loading = false;
-        _error = failure;
-      });
     }
+  }
+
+  Future<void> _cancelComparison() async {
+    await _cancelDiffStream();
+    if (!mounted) {
+      return;
+    }
+    _generation += 1;
+    setState(() {
+      _loading = false;
+      _error = null,
+      _rows = const <DiffRowModel>[],
+    });
   }
 
   void _changeMode(CompareMode mode) {
     if (mode == _mode) {
       return;
     }
+    unawaited(_cancelDiffStream());
+    _generation += 1;
     setState(() {
       _mode = mode;
       _rows = const <DiffRowModel>[];
       _error = null;
       _loading = false;
       _loadedReportKey = null;
+      _diffProgress = null;
     });
     if (mode == CompareMode.directory) {
       _handleReportChanged();
@@ -187,12 +249,18 @@ class _ComparePageState extends State<ComparePage> {
     final String titleKey = left
         ? 'compare.importLeft'
         : 'compare.importRight';
-    final String? input = await PathInputDialog.show(
-      context,
-      title: context.strings(titleKey),
-      hintText: context.strings('path.hint.report'),
-      suggestions: app.recentPaths.value,
-    );
+    final List<String> picked = await PlatformPickers.files(() async {
+      final String? typed = await PathInputDialog.show(
+        context,
+        title: context.strings(titleKey),
+        hintText: context.strings('path.hint.report'),
+        suggestions: app.recentPaths.value,
+      );
+      return typed == null || typed.trim().isEmpty
+          ? const <String>[]
+          : <String>[typed.trim()];
+    });
+    final String? input = picked.isEmpty ? null : picked.first;
     if (!mounted) {
       return;
     }
@@ -242,16 +310,25 @@ class _ComparePageState extends State<ComparePage> {
     if (left == null || right == null) {
       return;
     }
+    // Comparing two stored reports is pure but still proportional to their
+    // size, so it runs off the UI isolate and honours the same generation
+    // guard as the directory comparison.
+    await _cancelDiffStream();
+    final int generation = ++_generation;
+    if (!mounted) {
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
+      _diffProgress = null;
     });
     try {
       final List<DiffRowModel> rows = await widget.state.service.diffReports(
         left: left,
         right: right,
       );
-      if (!mounted) {
+      if (!mounted || generation != _generation) {
         return;
       }
       setState(() {
@@ -259,7 +336,7 @@ class _ComparePageState extends State<ComparePage> {
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) {
+      if (!mounted || generation != _generation) {
         return;
       }
       final String failure = context.strings(
@@ -378,9 +455,9 @@ class _ComparePageState extends State<ComparePage> {
             _buildPaneSelector(),
           ],
           const SizedBox(height: 12),
-          if (_loading)
-            const LinearProgressIndicator()
-          else if (error != null)
+          if (_loading) ...<Widget>[
+            _buildLoadingProgress(),
+          ] else if (error != null)
             _MessageCard(message: error, isError: true)
           else if (_rows.isEmpty)
             EmptyState(
@@ -397,6 +474,68 @@ class _ComparePageState extends State<ComparePage> {
     );
   }
 
+
+  /// Progress area shown while a comparison runs.
+  ///
+  /// A determinate bar only appears once the native side reports a total; an
+  /// indeterminate one before that would claim knowledge the app does not have.
+  Widget _buildLoadingProgress() {
+    final ThemeData theme = Theme.of(context);
+    final DiffProgress? progress = _diffProgress;
+    final double? value =
+        progress != null && progress.isDeterminate ? progress.fraction : null;
+    final String phaseKey = switch (progress?.phase) {
+      HashPhase.scanning => 'compare.phaseScanning',
+      HashPhase.hashing => 'compare.phaseHashing',
+      HashPhase.comparing => 'compare.phaseComparing',
+      HashPhase.completed => 'compare.phaseComparing',
+      _ => 'compare.phaseHashing',
+    };
+    return Column(
+      key: const ValueKey<String>('compare-loading-progress'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        LinearProgressIndicator(
+          value: value,
+          semanticsLabel: context.strings('compare.title'),
+        ),
+        const SizedBox(height: 6),
+        Text(context.strings(phaseKey), style: theme.textTheme.bodyMedium),
+        if (progress != null && progress.bytesTotal > 0) ...<Widget>[
+          const SizedBox(height: 2),
+          Text(
+            context.strings(
+              'compare.progressBytes',
+              args: <String, String>{
+                'done': formatBytes(progress.bytesDone),
+                'total': formatBytes(progress.bytesTotal),
+              },
+            ),
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+        if (progress != null && progress.currentPath.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 2),
+          Text(
+            context.strings(
+              'compare.progressCurrent',
+              args: <String, String>{'path': progress.currentPath},
+            ),
+            style: theme.textTheme.bodySmall,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const ValueKey<String>('compare-cancel-loading'),
+          onPressed: _cancelComparison,
+          icon: const Icon(Icons.stop),
+          label: Text(context.strings('compare.cancelLoading')),
+        ),
+      ],
+    );
+  }
   Widget _buildDiffTable(
     List<DiffRowModel> rows, {
     required String leftKey,

@@ -8,6 +8,7 @@ import '../app_state.dart';
 import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../util/formatting.dart';
+import '../util/platform_pickers.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/entry_list.dart';
 import '../widgets/path_input_dialog.dart';
@@ -279,12 +280,54 @@ class _HashPageState extends State<HashPage> {
     widget.state.algorithms.value = <String>{..._algorithms};
   }
 
+  /// Ask for an export destination, preferring the native folder picker.
+  ///
+  /// Returns null when the user cancels, which must not fall through to the
+  /// service default: silently writing into an app-private folder is exactly
+  /// the behaviour this replaced.
+  Future<String?> _chooseExportDirectory() async {
+    final String? picked = await PlatformPickers.directory(() async {
+      return PathInputDialog.show(
+        context,
+        title: context.strings('hash.exportChooseTitle'),
+        // Not path.hint.destination: that copy offers an empty value as "use
+        // the app default", which this path deliberately refuses.
+        hintText: context.strings('path.hint.folder'),
+        helperText: context.strings('hash.exportChooseHint'),
+        initialValue: widget.state.exportDirectory.value,
+        suggestions: widget.state.recentPaths.value,
+      );
+    });
+    if (!mounted) {
+      return null;
+    }
+    if (picked == null || picked.trim().isEmpty) {
+      return null;
+    }
+    final String directory = picked.trim();
+    widget.state.exportDirectory.value = directory;
+    widget.state.rememberPath(directory);
+    return directory;
+  }
+
   Future<void> _exportQuick(ReportFormat format) async {
     final ReportModel? report = widget.state.report.value;
     if (report == null) return;
+    final String? directory = await _chooseExportDirectory();
+    if (directory == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.strings('hash.exportNoDestination'))),
+      );
+      return;
+    }
     try {
       final List<ExportedReport> files = await widget.state.service
-          .exportReport(report: report, formats: <ReportFormat>{format});
+          .exportReport(
+            report: report,
+            formats: <ReportFormat>{format},
+            directory: directory,
+          );
       if (!mounted) {
         return;
       }
@@ -416,7 +459,24 @@ class _HashPageState extends State<HashPage> {
     app.elapsed.value = elapsed;
   }
 
+  /// Human readable remaining time for the progress line.
+  String _formatEta(double seconds) {
+    if (seconds.isNaN || seconds.isInfinite || seconds < 0) {
+      return context.strings('common.unknown');
+    }
+    final int whole = seconds.round();
+    if (whole < 60) {
+      return '${whole}s';
+    }
+    final int minutes = whole ~/ 60;
+    final int rest = whole % 60;
+    return rest == 0 ? '${minutes}m' : '${minutes}m ${rest}s';
+  }
+
   Future<void> _cancelHashing() async {
+    // Ask the native worker to stop first: dropping the Dart subscription alone
+    // would leave the Rust job hashing a large file in the background.
+    await widget.state.service.cancelCurrentOperation();
     final StreamSubscription<HashProgress>? subscription = _subscription;
     _subscription = null;
     await subscription?.cancel();
@@ -564,11 +624,59 @@ class _HashPageState extends State<HashPage> {
           if (progress != null && _computing) ...<Widget>[
             const SizedBox(height: 12),
             LinearProgressIndicator(
-              value: progress.fraction,
+              // Determinate whenever the native side reported a byte or entry
+              // total; indeterminate only before the first sample arrives.
+              value: progress.isDeterminate ? progress.fraction : null,
               semanticsLabel: context.strings('hash.progressLabel'),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
+            Text(
+              context.strings(
+                progress.phase == HashPhase.scanning
+                    ? 'hash.phaseScanning'
+                    : 'hash.phaseHashing',
+              ),
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 2),
             Text(progressText, style: theme.textTheme.bodySmall),
+            if (progress.bytesTotal > 0) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                context.strings(
+                  'hash.progressBytes',
+                  args: <String, String>{
+                    'done': formatBytes(progress.bytesDone),
+                    'total': formatBytes(progress.bytesTotal),
+                  },
+                ),
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+            if (progress.etaSeconds != null) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                context.strings(
+                  'hash.progressEta',
+                  args: <String, String>{
+                    'eta': _formatEta(progress.etaSeconds!),
+                  },
+                ),
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+            if (progress.currentPath.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                context.strings(
+                  'hash.progressCurrent',
+                  args: <String, String>{'path': progress.currentPath},
+                ),
+                style: theme.textTheme.bodySmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ],
           if (_entries.isNotEmpty) ...<Widget>[
             const SizedBox(height: 16),

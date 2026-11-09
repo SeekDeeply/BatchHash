@@ -7,6 +7,7 @@ import '../app_state.dart';
 import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../util/formatting.dart';
+import '../util/platform_pickers.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/path_input_dialog.dart';
 import '../widgets/summary_card.dart';
@@ -16,8 +17,9 @@ import '../widgets/summary_card.dart';
 ///
 /// All copy, including the export result and error messages, is resolved from
 /// the active locale with `context.strings`. The destination comes from the
-/// in-app path chooser, and every exported file can be copied to the clipboard
-/// or revealed in the desktop file manager.
+/// system folder picker, with the in-app path chooser as the fallback when the
+/// plugin is unavailable; every exported file can be copied to the clipboard or
+/// revealed in the desktop file manager.
 class ReportPage extends StatefulWidget {
   const ReportPage({super.key, required this.state});
 
@@ -41,29 +43,39 @@ class _ReportPageState extends State<ReportPage> {
   static bool get _canOpenFolder =>
       Platform.isLinux || Platform.isMacOS || Platform.isWindows;
 
+  /// Ask for an export destination, preferring the native folder picker.
+  ///
+  /// The in-app dialog is only the fallback when the system picker cannot run.
+  /// A cancelled pick returns null and must leave the stored destination alone.
   Future<void> _chooseDirectory() async {
     final BatchHashAppState app = widget.state;
-    final String? value = await PathInputDialog.show(
-      context,
-      title: context.strings('report.destination'),
-      hintText: context.strings('path.hint.destination'),
-      helperText: context.strings('path.destinationHelper'),
-      initialValue: app.exportDirectory.value,
-      allowEmpty: true,
-      suggestions: app.recentPaths.value,
+    final String? picked = await PlatformPickers.directory(
+      () async {
+        if (!mounted) {
+          return null;
+        }
+        return PathInputDialog.show(
+          context,
+          title: context.strings('report.destination'),
+          hintText: context.strings('path.hint.destination'),
+          helperText: context.strings('path.destinationHelper'),
+          initialValue: app.exportDirectory.value,
+          allowEmpty: true,
+          suggestions: app.recentPaths.value,
+        );
+      },
     );
     if (!mounted) {
       return;
     }
-    if (value == null) {
+    if (picked == null) {
       return;
     }
-    final String trimmed = value.trim();
+    final String trimmed = picked.trim();
     app.exportDirectory.value = trimmed;
     if (trimmed.isNotEmpty) {
       app.rememberPath(trimmed);
     }
-    setState(() {});
   }
 
   Future<void> _export(ReportModel report) async {
@@ -330,36 +342,44 @@ class _ReportPageState extends State<ReportPage> {
   }
 
   Widget _buildDestination(ThemeData theme) {
-    final String directory = widget.state.exportDirectory.value.trim();
-    final String value = directory.isEmpty
-        ? context.strings('report.destinationDefault')
-        : directory;
-    return Card(
-      key: const ValueKey<String>('report-destination'),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              context.strings('report.destination'),
-              style: theme.textTheme.labelLarge,
+    // The card listens to the notifier, so it always shows the effective
+    // destination of the next export: the chosen folder verbatim, or the app
+    // default label while the user has not chosen one.
+    return ValueListenableBuilder<String>(
+      valueListenable: widget.state.exportDirectory,
+      builder: (BuildContext context, String directory, Widget? child) {
+        final String trimmed = directory.trim();
+        final String value = trimmed.isEmpty
+            ? context.strings('report.destinationDefault')
+            : trimmed;
+        return Card(
+          key: const ValueKey<String>('report-destination'),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  context.strings('report.destination'),
+                  style: theme.textTheme.labelLarge,
+                ),
+                const SizedBox(height: 4),
+                Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    key: const ValueKey<String>('report-choose-destination'),
+                    onPressed: _exporting ? null : _chooseDirectory,
+                    icon: const Icon(Icons.folder_open_outlined),
+                    label: Text(context.strings('report.chooseDestination')),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
-            Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
-                key: const ValueKey<String>('report-choose-destination'),
-                onPressed: _exporting ? null : _chooseDirectory,
-                icon: const Icon(Icons.folder_open_outlined),
-                label: Text(context.strings('report.chooseDestination')),
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 

@@ -77,6 +77,25 @@ abstract class BatchHashService {
     required ReportModel right,
   });
 
+  /// Ask the running operation to stop.
+  ///
+  /// Implementations that cannot cancel must still complete the future; the
+  /// UI hides the cancel affordance when [supportsCancellation] is false.
+  Future<void> cancelCurrentOperation();
+
+  /// Whether [cancelCurrentOperation] can actually stop a run.
+  bool get supportsCancellation => false;
+
+  /// Compare [report] against a live [directory], streaming progress.
+  ///
+  /// A directory comparison hashes every file it scans, so it takes as long as
+  /// a batch of the same size; the stream exists so the UI can show that work
+  /// instead of freezing until it finishes.
+  Stream<DiffProgress> compareReportWithDirectory({
+    required ReportModel report,
+    required String directory,
+    bool recursive = true,
+  });
   Future<List<DiffRowModel>> diffReportAgainstDirectory({
     required ReportModel report,
     required String directory,

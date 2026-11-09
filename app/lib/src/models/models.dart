@@ -186,6 +186,36 @@ class DiffRowModel {
   final String? note;
 }
 
+/// Stage a long-running native job is currently in.
+///
+/// The values match the phase strings the Rust core reports, so a sample can be
+/// mapped without a translation table that could silently drift.
+enum HashPhase {
+  scanning('scanning'),
+  hashing('hashing'),
+  planningSuffix('planning_suffix'),
+  applyingSuffix('applying_suffix'),
+  comparing('comparing'),
+  completed('completed');
+
+  const HashPhase(this.wireName);
+
+  /// Identifier used by the native layer.
+  final String wireName;
+
+  /// Map a native phase string; unknown values fall back to [hashing], which
+  /// keeps the progress bar moving instead of freezing on an unexpected stage.
+  static HashPhase fromWire(Object? value) {
+    final name = value is String ? value : '';
+    for (final phase in HashPhase.values) {
+      if (phase.wireName == name) {
+        return phase;
+      }
+    }
+    return HashPhase.hashing;
+  }
+}
+
 /// Progress event emitted while a batch is hashed.
 class HashProgress {
   const HashProgress({
@@ -193,6 +223,11 @@ class HashProgress {
     required this.total,
     this.entries = const <BatchEntry>[],
     this.done = false,
+    this.phase = HashPhase.hashing,
+    this.bytesDone = 0,
+    this.bytesTotal = 0,
+    this.etaSeconds,
+    this.currentPath = '',
   });
 
   final int completed;
@@ -200,7 +235,101 @@ class HashProgress {
   final List<BatchEntry> entries;
   final bool done;
 
-  double get fraction => total <= 0 ? 0.0 : completed / total;
+  /// Stage that produced this sample.
+  final HashPhase phase;
+
+  /// Bytes read so far. A large file reports byte progress even while its
+  /// entry count is still zero completed, which is what makes the bar move.
+  final int bytesDone;
+
+  /// Total bytes to read; zero when the size is not known yet.
+  final int bytesTotal;
+
+  /// Estimated seconds remaining, when the rate is known.
+  final double? etaSeconds;
+
+  /// Display path of the file currently being read.
+  final String currentPath;
+
+  /// Completion in the range 0.0..1.0.
+  ///
+  /// Byte progress wins when it is available: hashing one huge file would
+  /// otherwise sit at zero completed entries for its whole duration.
+  double get fraction {
+    if (bytesTotal > 0 && bytesDone >= 0) {
+      final byteFraction = bytesDone / bytesTotal;
+      if (byteFraction > 0) {
+        return byteFraction.clamp(0.0, 1.0);
+      }
+    }
+    return total <= 0 ? 0.0 : (completed / total).clamp(0.0, 1.0);
+  }
+
+  /// Whether a determinate bar can be shown, i.e. any total is known.
+  ///
+  /// A determinate bar at 0% is honest and still moves; an indeterminate one
+  /// looks identical to a stalled job, which is what users reported.
+  bool get isDeterminate => bytesTotal > 0 || total > 0;
+}
+
+/// Progress event emitted while a report is compared against a directory.
+class DiffProgress {
+  const DiffProgress({
+    this.rows = const <DiffRowModel>[],
+    this.done = false,
+    this.cancelled = false,
+    this.phase = HashPhase.comparing,
+    this.completed = 0,
+    this.total = 0,
+    this.bytesDone = 0,
+    this.bytesTotal = 0,
+    this.etaSeconds,
+    this.currentPath = '',
+  });
+
+  /// Rows produced so far; the full set once [done] is true.
+  final List<DiffRowModel> rows;
+
+  /// Whether the comparison reached a terminal state.
+  final bool done;
+
+  /// Whether the terminal state is a cancellation rather than a result.
+  final bool cancelled;
+
+  /// Stage that produced this sample.
+  final HashPhase phase;
+
+  /// Entries finished in the current stage.
+  final int completed;
+
+  /// Entries in the current stage; zero while the total is unknown.
+  final int total;
+
+  /// Bytes read so far.
+  final int bytesDone;
+
+  /// Total bytes to read; zero while unknown.
+  final int bytesTotal;
+
+  /// Estimated seconds remaining, when the rate is known.
+  final double? etaSeconds;
+
+  /// Display path of the file currently being read.
+  final String currentPath;
+
+  /// Completion in the range 0.0..1.0, preferring byte progress.
+  double get fraction {
+    if (bytesTotal > 0 && bytesDone > 0) {
+      return (bytesDone / bytesTotal).clamp(0.0, 1.0);
+    }
+    if (total > 0) {
+      return (completed / total).clamp(0.0, 1.0);
+    }
+    return 0.0;
+  }
+
+  /// Whether a determinate bar can be shown.
+  bool get isDeterminate => bytesTotal > 0 || total > 0;
 }
 
 /// Status of one row in a rename dry run.

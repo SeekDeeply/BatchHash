@@ -36,6 +36,10 @@ pub unsafe extern "C" fn bh_api_version() -> *mut c_char {
             "c_abi_version": C_ABI_VERSION,
             "tool": batchhash_types::TOOL_NAME,
             "tool_version": batchhash_types::TOOL_VERSION,
+            // Capabilities let the Dart side detect optional features without
+            // inferring them from the ABI version: the envelope shape did not
+            // change when async jobs were added, so the version did not either.
+            "features": ["async_jobs", "progress"],
         }))
     })
 }
@@ -124,6 +128,110 @@ pub unsafe extern "C" fn bh_export_report(request: *const c_char) -> *mut c_char
         let parsed: ExportRequest = parse_request(request, false)?;
         let text = api::export(&parsed.report_json, &parsed.format)?;
         Ok(json!({ "text": text }))
+    })
+}
+
+/// Start a native job. Request: {"action": "batch" | "hash_entries" |
+/// "diff_directory", ...payload fields for that action}.
+///
+/// Returns {"job_id": "..."} immediately; the work runs on its own thread so
+/// the calling isolate stays responsive. Poll with [bh_job_poll].
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_job_start(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        #[derive(serde::Deserialize)]
+        struct StartRequest {
+            action: String,
+            #[serde(default)]
+            payload: Option<serde_json::Value>,
+        }
+        let parsed: StartRequest = parse_request(request, false)?;
+        let payload = parsed.payload.unwrap_or(serde_json::Value::Null);
+        let job_id = match parsed.action.as_str() {
+            "batch" => {
+                let value: BatchRequestDto = serde_json::from_value(payload)
+                    .map_err(|error| ApiError::invalid(format!("batch payload: {error}")))?;
+                crate::jobs::start_batch(value)?
+            }
+            "hash_entries" => {
+                let value: api::HashEntriesRequest = serde_json::from_value(payload)
+                    .map_err(|error| {
+                        ApiError::invalid(format!("hash_entries payload: {error}"))
+                    })?;
+                crate::jobs::start_hash_entries(value)?
+            }
+            "diff_directory" => {
+                let value: api::DiffDirectoryRequest = serde_json::from_value(payload)
+                    .map_err(|error| {
+                        ApiError::invalid(format!("diff_directory payload: {error}"))
+                    })?;
+                crate::jobs::start_diff_directory(value)?
+            }
+            other => {
+                return Err(ApiError::invalid(format!(
+                    "unknown job action: {other}; expected batch, hash_entries or diff_directory",
+                )));
+            }
+        };
+        Ok(json!({ "job_id": job_id }))
+    })
+}
+
+/// Poll a job. Request: {"job_id": "..."}.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_job_poll(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        #[derive(serde::Deserialize)]
+        struct PollRequest {
+            job_id: String,
+        }
+        let parsed: PollRequest = parse_request(request, false)?;
+        let status = crate::jobs::poll(&parsed.job_id)?;
+        serde_json::to_value(status).map_err(internal_error)
+    })
+}
+
+/// Request cancellation of a job. Request: {"job_id": "..."}.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_job_cancel(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        #[derive(serde::Deserialize)]
+        struct CancelRequest {
+            job_id: String,
+        }
+        let parsed: CancelRequest = parse_request(request, false)?;
+        let status = crate::jobs::cancel(&parsed.job_id)?;
+        serde_json::to_value(status).map_err(internal_error)
+    })
+}
+
+/// Release a job and its result. Request: {"job_id": "..."}.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_job_release(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        #[derive(serde::Deserialize)]
+        struct ReleaseRequest {
+            job_id: String,
+        }
+        let parsed: ReleaseRequest = parse_request(request, false)?;
+        let released = crate::jobs::release(&parsed.job_id)?;
+        Ok(json!({ "released": released }))
     })
 }
 

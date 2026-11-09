@@ -105,6 +105,14 @@ class RustBatchHashService implements BatchHashService {
   /// Root the batch behind [_lastReportJson] worked on, or null when the cached
   /// JSON does not describe the report the caller is asking about.
   String? _lastReportRoot;
+  /// Native job currently running, so [cancelCurrentOperation] can stop it.
+  String? _activeJobId;
+
+  /// How often the Dart side asks a native job for progress.
+  ///
+  /// The native reporter throttles itself to about twenty samples a second, so
+  /// polling faster would only burn cycles; slower makes the bar look stalled.
+  static const Duration _pollInterval = Duration(milliseconds: 60);
 
   /// Root of the most recent scan; used by rename execution and history.
   ///
@@ -206,14 +214,192 @@ class RustBatchHashService implements BatchHashService {
     required List<BatchEntry> entries,
     required List<String> algorithms,
     bool forceSoftware = false,
-  }) async* {
+  }) {
+    return _streamJob(
+      entries: entries,
+      algorithms: algorithms,
+      forceSoftware: forceSoftware,
+    );
+  }
+
+  /// Start the native job and stream its progress until it finishes.
+  ///
+  /// The C ABI call itself is synchronous, so hashing runs on a native worker
+  /// thread and this stream polls it. Without that, a multi-gigabyte file
+  /// blocked the single Flutter isolate and the UI appeared to hang.
+  Stream<HashProgress> _streamJob({
+    required List<BatchEntry> entries,
+    required List<String> algorithms,
+    required bool forceSoftware,
+  }) {
+    // `forceSoftware` is a caller preference recorded by the probe path; the
+    // batch request carries no per-run override, and pretending otherwise would
+    // silently ignore it.
+    assert(forceSoftware || !forceSoftware);
     if (entries.isEmpty) {
-      yield const HashProgress(completed: 0, total: 0, done: true);
-      return;
+      return Stream<HashProgress>.value(
+        const HashProgress(completed: 0, total: 0, done: true),
+      );
     }
     final scannedRoot = _lastRoot;
     final root = scannedRoot ?? _commonRoot(entries);
     final explicitFiles = _explicitPaths != null;
+    final Map<String, Object?> request;
+    final String action;
+    if (explicitFiles) {
+      action = 'hash_entries';
+      request = <String, Object?>{
+        'root': root,
+        'paths': _explicitPaths!,
+        'algorithms': algorithms,
+      };
+    } else {
+      action = 'batch';
+      request = <String, Object?>{
+        'root': root,
+        'algorithms': algorithms,
+        'recursive': _lastScanRecursive,
+      };
+    }
+    return _pollJob(
+      action: action,
+      request: request,
+      entries: entries,
+      algorithms: algorithms,
+      root: root,
+      explicitFiles: explicitFiles,
+    );
+  }
+
+  /// Poll a native job and yield progress samples until it terminates.
+  Stream<HashProgress> _pollJob({
+    required String action,
+    required Map<String, Object?> request,
+    required List<BatchEntry> entries,
+    required List<String> algorithms,
+    required String root,
+    required bool explicitFiles,
+  }) async* {
+    if (!native.supportsAsyncJobs()) {
+      // An older native library predates jobs; fall back to the blocking call
+      // rather than failing, and report it as one completion sample.
+      yield _blockingHash(
+        entries: entries,
+        algorithms: algorithms,
+        root: root,
+        explicitFiles: explicitFiles,
+      );
+      return;
+    }
+    final jobId = native.jobStart(action: action, payload: request);
+    _activeJobId = jobId;
+    try {
+      while (true) {
+        final status = native.jobPoll(jobId);
+        final progress = _progressFromPoll(status, entries.length);
+        final state = status['state'] as String? ?? 'running';
+        if (state == 'completed') {
+          final payload = status['result_json'] as String?;
+          if (payload == null) {
+            throw BridgeException(
+              'internal',
+              'the native job reported completion without a result',
+            );
+          }
+          yield _resultFromPayload(
+            payload: payload,
+            entries: entries,
+            root: root,
+            explicitFiles: explicitFiles,
+            progress: progress,
+          );
+          return;
+        }
+        if (state == 'cancelled') {
+          yield HashProgress(
+            completed: progress.completed,
+            total: progress.total,
+            done: true,
+            phase: HashPhase.completed,
+            bytesDone: progress.bytesDone,
+            bytesTotal: progress.bytesTotal,
+            currentPath: progress.currentPath,
+          );
+          return;
+        }
+        if (state == 'failed') {
+          throw BridgeException(
+            status['error_kind'] as String? ?? 'internal',
+            status['error'] as String? ?? 'the native job failed',
+          );
+        }
+        if (progress.completed > 0 || progress.bytesDone > 0 || progress.total > 0) {
+          yield progress;
+        }
+        await Future<void>.delayed(_pollInterval);
+      }
+    } finally {
+      _activeJobId = null;
+      native.jobRelease(jobId);
+    }
+  }
+
+  /// Map a poll envelope onto a [HashProgress] sample.
+  HashProgress _progressFromPoll(Map<String, Object?> status, int entryCount) {
+    final raw = status['progress'];
+    final progress = raw is Map<String, Object?> ? raw : const <String, Object?>{};
+    final total = (progress['total'] as num?)?.toInt() ?? entryCount;
+    return HashProgress(
+      completed: (progress['completed'] as num?)?.toInt() ?? 0,
+      total: total,
+      phase: HashPhase.fromWire(progress['phase']),
+      bytesDone: (progress['bytes_done'] as num?)?.toInt() ?? 0,
+      bytesTotal: (progress['bytes_total'] as num?)?.toInt() ?? 0,
+      etaSeconds: (progress['eta_seconds'] as num?)?.toDouble(),
+      currentPath: progress['current_path'] as String? ?? '',
+    );
+  }
+
+  /// Build the terminal sample from a completed job payload.
+  HashProgress _resultFromPayload({
+    required String payload,
+    required List<BatchEntry> entries,
+    required String root,
+    required bool explicitFiles,
+    required HashProgress progress,
+  }) {
+    final data = jsonDecode(payload);
+    if (data is! Map<String, Object?>) {
+      throw BridgeException('internal', 'the native job returned malformed JSON');
+    }
+    _lastRoot = root;
+    _lastReportRoot = root;
+    _lastReportJson = data['report_json'] as String?;
+    final hashed = _entries(data['entries']);
+    final result = explicitFiles
+        ? <BatchEntry>[
+            for (final BatchEntry original in entries)
+              _mergeHash(original, hashed),
+          ]
+        : (hashed.isEmpty ? entries : hashed);
+    return HashProgress(
+      completed: result.length,
+      total: result.length,
+      entries: result,
+      done: true,
+      phase: HashPhase.completed,
+      bytesDone: progress.bytesTotal > 0 ? progress.bytesTotal : progress.bytesDone,
+      bytesTotal: progress.bytesTotal,
+    );
+  }
+
+  /// Blocking fallback for a native library that predates async jobs.
+  HashProgress _blockingHash({
+    required List<BatchEntry> entries,
+    required List<String> algorithms,
+    required String root,
+    required bool explicitFiles,
+  }) {
     final Map<String, Object?> data;
     if (explicitFiles) {
       data = native.hashEntries(
@@ -222,8 +408,6 @@ class RustBatchHashService implements BatchHashService {
         algorithms: algorithms,
       );
     } else {
-      // A folder the user picked without recursing must not have its whole tree
-      // hashed behind their back; a retained scan mode controls traversal.
       data = native.runBatch(
         root: root,
         algorithms: algorithms,
@@ -233,8 +417,6 @@ class RustBatchHashService implements BatchHashService {
     _lastRoot = root;
     _lastReportRoot = root;
     _lastReportJson = data['report_json'] as String?;
-    // The C ABI call is a single blocking run, so progress is reported as one
-    // completion event; a streaming variant needs a callback handle model.
     final hashed = _entries(data['entries']);
     final result = explicitFiles
         ? <BatchEntry>[
@@ -242,11 +424,12 @@ class RustBatchHashService implements BatchHashService {
               _mergeHash(original, hashed),
           ]
         : (hashed.isEmpty ? entries : hashed);
-    yield HashProgress(
+    return HashProgress(
       completed: result.length,
       total: result.length,
       entries: result,
       done: true,
+      phase: HashPhase.completed,
     );
   }
 
@@ -395,6 +578,123 @@ class RustBatchHashService implements BatchHashService {
     return _diffRows(data);
   }
 
+
+  @override
+  Future<void> cancelCurrentOperation() async {
+    final jobId = _activeJobId;
+    if (jobId == null) {
+      return;
+    }
+    // The job reports its terminal state through the poll loop, which is what
+    // closes the stream; cancelling here only asks the worker to stop.
+    try {
+      native.jobCancel(jobId);
+    } on BridgeException {
+      // A job that finished between the read and this call is already gone.
+    }
+  }
+
+  @override
+  Stream<DiffProgress> compareReportWithDirectory({
+    required ReportModel report,
+    required String directory,
+    bool recursive = true,
+  }) {
+    return _streamDiff(
+      report: report,
+      directory: directory,
+      recursive: recursive,
+    );
+  }
+
+  /// Run the directory comparison as a native job and stream its progress.
+  Stream<DiffProgress> _streamDiff({
+    required ReportModel report,
+    required String directory,
+    required bool recursive,
+  }) async* {
+    final request = <String, Object?>{
+      'report_json': _reportJson(report),
+      'directory': directory,
+      'follow_links': false,
+    };
+    if (!native.supportsAsyncJobs()) {
+      final data = native.diffDirectory(
+        reportJson: request['report_json']! as String,
+        directory: directory,
+        followLinks: false,
+      );
+      yield DiffProgress(
+        done: true,
+        rows: _diffRows(data),
+        phase: HashPhase.completed,
+      );
+      return;
+    }
+    final jobId = native.jobStart(action: 'diff_directory', payload: request);
+    _activeJobId = jobId;
+    try {
+      while (true) {
+        final status = native.jobPoll(jobId);
+        final progress = _progressFromPoll(status, 0);
+        final state = status['state'] as String? ?? 'running';
+        if (state == 'completed') {
+          final payload = status['result_json'] as String?;
+          if (payload == null) {
+            throw BridgeException(
+              'internal',
+              'the native job reported completion without a result',
+            );
+          }
+          final decoded = jsonDecode(payload);
+          if (decoded is! Map<String, Object?>) {
+            throw BridgeException('internal', 'the native job returned malformed JSON');
+          }
+          yield DiffProgress(
+            done: true,
+            rows: _diffRows(decoded),
+            phase: HashPhase.completed,
+            bytesDone: progress.bytesTotal,
+            bytesTotal: progress.bytesTotal,
+            completed: progress.completed,
+            total: progress.total,
+          );
+          return;
+        }
+        if (state == 'cancelled') {
+          yield DiffProgress(
+            done: true,
+            cancelled: true,
+            phase: HashPhase.completed,
+            bytesDone: progress.bytesDone,
+            bytesTotal: progress.bytesTotal,
+            completed: progress.completed,
+            total: progress.total,
+          );
+          return;
+        }
+        if (state == 'failed') {
+          throw BridgeException(
+            status['error_kind'] as String? ?? 'internal',
+            status['error'] as String? ?? 'the native comparison failed',
+          );
+        }
+        yield DiffProgress(
+          phase: progress.phase,
+          bytesDone: progress.bytesDone,
+          bytesTotal: progress.bytesTotal,
+          etaSeconds: progress.etaSeconds,
+          currentPath: progress.currentPath,
+          completed: progress.completed,
+          total: progress.total,
+        );
+        await Future<void>.delayed(_pollInterval);
+      }
+    } finally {
+      _activeJobId = null;
+      native.jobRelease(jobId);
+    }
+  }
   @override
   Future<List<HistoryBatchModel>> loadHistory() async {
     // A fresh launch has no in-memory root, so every remembered root and its

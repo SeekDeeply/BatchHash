@@ -179,6 +179,53 @@ class BatchHashNative {
     });
   }
 
+
+  /// Start a native job and return its id immediately.
+  ///
+  /// [action] is one of `batch`, `hash_entries` or `diff_directory`; [payload]
+  /// carries that action's request fields. The work runs on a native thread, so
+  /// the calling isolate stays responsive while a large file is hashed.
+  String jobStart({required String action, required Map<String, Object?> payload}) {
+    final data = _callMap('bh_job_start', <String, Object?>{
+      'action': action,
+      'payload': payload,
+    });
+    final id = data['job_id'] as String?;
+    if (id == null || id.isEmpty) {
+      throw BridgeException('internal', 'the native library returned no job id');
+    }
+    return id;
+  }
+
+  /// Poll a job. Call repeatedly until `state` is terminal.
+  Map<String, Object?> jobPoll(String jobId) {
+    return _callMap('bh_job_poll', <String, Object?>{'job_id': jobId});
+  }
+
+  /// Ask a job to stop. The job reports its terminal state through [jobPoll].
+  Map<String, Object?> jobCancel(String jobId) {
+    return _callMap('bh_job_cancel', <String, Object?>{'job_id': jobId});
+  }
+
+  /// Release a job and its payload. Swallows an unknown-id error so cleanup is
+  /// safe to call twice.
+  void jobRelease(String jobId) {
+    try {
+      _callMap('bh_job_release', <String, Object?>{'job_id': jobId});
+    } on BridgeException {
+      // Releasing an already released job is not an error worth surfacing.
+    }
+  }
+
+  /// Whether the loaded library supports asynchronous jobs.
+  ///
+  /// The envelope shape did not change when jobs were added, so this is
+  /// advertised as a capability instead of being inferred from the version.
+  bool supportsAsyncJobs() {
+    final version = this.version();
+    final features = version['features'];
+    return features is List<Object?> && features.contains('async_jobs');
+  }
   /// Plan suffix renames from entries that already carry their hashes.
   Map<String, Object?> planRenames({
     required List<Map<String, Object?>> entries,

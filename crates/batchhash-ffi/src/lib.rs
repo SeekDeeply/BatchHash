@@ -21,6 +21,7 @@
 
 pub mod api;
 pub mod c_api;
+pub mod jobs;
 
 /// Version of the bridge API contract (bumped when request/response shapes change).
 pub const API_VERSION: u32 = 1;

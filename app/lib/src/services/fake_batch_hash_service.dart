@@ -210,14 +210,37 @@ class FakeBatchHashService implements BatchHashService {
       yield const HashProgress(completed: 0, total: 0, done: true);
       return;
     }
+    _cancelled = false;
+    final int totalBytes = entries.fold<int>(
+      0,
+      (int sum, BatchEntry entry) => sum + entry.size,
+    );
     final List<BatchEntry> current = <BatchEntry>[];
     for (var index = 0; index < entries.length; index += 1) {
+      if (_cancelled) {
+        yield HashProgress(
+          completed: index,
+          total: entries.length,
+          entries: List<BatchEntry>.unmodifiable(current),
+          done: true,
+          phase: HashPhase.completed,
+          bytesDone: totalBytes > 0 ? totalBytes ~/ entries.length * index : 0,
+          bytesTotal: totalBytes,
+        );
+        return;
+      }
       current.add(_applyHashes(entries[index], sortedAlgorithms));
       yield HashProgress(
         completed: index + 1,
         total: entries.length,
         entries: List<BatchEntry>.unmodifiable(current),
         done: index == entries.length - 1,
+        phase: HashPhase.hashing,
+        bytesDone: totalBytes > 0
+            ? totalBytes ~/ entries.length * (index + 1)
+            : 0,
+        bytesTotal: totalBytes,
+        currentPath: entries[index].path,
       );
       await Future<void>.delayed(const Duration(milliseconds: 5));
     }
@@ -350,6 +373,55 @@ class FakeBatchHashService implements BatchHashService {
     return _buildDiffRows();
   }
 
+
+  @override
+  bool get supportsCancellation => true;
+
+  /// Set by [cancelCurrentOperation]; a running stream checks it between steps.
+  bool _cancelled = false;
+
+  @override
+  Future<void> cancelCurrentOperation() async {
+    _cancelled = true;
+  }
+
+  @override
+  Stream<DiffProgress> compareReportWithDirectory({
+    required ReportModel report,
+    required String directory,
+    bool recursive = true,
+  }) async* {
+    // A new run starts uncancelled; a sticky flag would make the next
+    // comparison abort immediately and mask a real regression.
+    _cancelled = false;
+    // The fake reports staged progress so a widget test can assert that the
+    // page renders a moving bar instead of one terminal frame.
+    const int totalBytes = 4096;
+    for (var step = 1; step <= 4; step += 1) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      if (_cancelled) {
+        yield const DiffProgress(done: true, cancelled: true, phase: HashPhase.completed);
+        return;
+      }
+      yield DiffProgress(
+        phase: step == 1 ? HashPhase.scanning : HashPhase.hashing,
+        completed: step,
+        total: 4,
+        bytesDone: totalBytes ~/ 4 * step,
+        bytesTotal: totalBytes,
+        currentPath: 'docs/part-$step.bin',
+      );
+    }
+    yield DiffProgress(
+      done: true,
+      phase: HashPhase.completed,
+      rows: _buildDiffRows(),
+      completed: 4,
+      total: 4,
+      bytesDone: totalBytes,
+      bytesTotal: totalBytes,
+    );
+  }
   @override
   Future<List<HistoryBatchModel>> loadHistory() async {
     return List<HistoryBatchModel>.unmodifiable(_history);

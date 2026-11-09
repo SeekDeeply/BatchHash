@@ -52,6 +52,80 @@ impl std::fmt::Display for ApiError {
 
 impl std::error::Error for ApiError {}
 
+/// One progress sample forwarded from a long-running native job.
+///
+/// The shape mirrors `batchhash_core::pipeline::BatchProgress` and
+/// `batchhash_hash::ProgressSnapshot` so the UI can render a byte-accurate
+/// progress bar without knowing which stage produced the sample.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProgressDto {
+    /// Current stage: scanning, hashing, planning_suffix, applying_suffix,
+    /// comparing or completed.
+    pub phase: String,
+    /// Entries finished in the current stage.
+    pub completed: u64,
+    /// Entries in the current stage.
+    pub total: u64,
+    /// Bytes read so far.
+    pub bytes_done: u64,
+    /// Total bytes to read.
+    pub bytes_total: u64,
+    /// Completion percentage in the inclusive range 0.0..=100.0.
+    pub percent: f64,
+    /// Estimated seconds remaining, or null while the rate is unknown.
+    pub eta_seconds: Option<f64>,
+    /// Display path of the file currently being read.
+    pub current_path: String,
+    /// Milliseconds elapsed since the job started.
+    pub elapsed_ms: u64,
+}
+
+impl ProgressDto {
+    /// Convert a pipeline progress sample.
+    pub fn from_pipeline(progress: &batchhash_core::pipeline::BatchProgress) -> Self {
+        Self {
+            phase: progress.phase.as_str().to_string(),
+            completed: progress.completed,
+            total: progress.total,
+            bytes_done: progress.bytes_done,
+            bytes_total: progress.bytes_total,
+            percent: progress.percent,
+            eta_seconds: progress.eta_seconds,
+            current_path: progress.current_path.clone(),
+            elapsed_ms: progress.elapsed_ms,
+        }
+    }
+
+    /// Convert a hashing scheduler sample.
+    pub fn from_scheduler(snapshot: &batchhash_hash::ProgressSnapshot) -> Self {
+        Self {
+            phase: "hashing".to_string(),
+            completed: snapshot.completed,
+            total: snapshot.total,
+            bytes_done: snapshot.bytes_done,
+            bytes_total: snapshot.bytes_total,
+            percent: snapshot.percent,
+            eta_seconds: snapshot.eta_seconds,
+            current_path: snapshot.current_path.clone(),
+            elapsed_ms: snapshot.elapsed_ms,
+        }
+    }
+
+    /// A synthetic sample for a stage that reports no byte detail.
+    pub fn stage(phase: &str, completed: u64, total: u64, percent: f64) -> Self {
+        Self {
+            phase: phase.to_string(),
+            completed,
+            total,
+            bytes_done: 0,
+            bytes_total: 0,
+            percent,
+            eta_seconds: None,
+            current_path: String::new(),
+            elapsed_ms: 0,
+        }
+    }
+}
 /// One algorithm as exposed to the UI.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AlgorithmDto {
@@ -432,6 +506,37 @@ pub fn scan_request(request: &ScanRequest) -> Result<ScanResultDto, ApiError> {
 
 /// Run the full pipeline (scan, hash, optional suffix write, report, log).
 pub fn run_batch_request(request: &BatchRequestDto) -> Result<BatchResultDto, ApiError> {
+    let cancel = batchhash_hash::CancelToken::new();
+    run_batch_request_with_progress(request, &cancel, &|_progress: ProgressDto| {})
+}
+
+/// Validate a batch request without running it.
+///
+/// An asynchronous job must fail at start rather than on its worker thread, so
+/// the caller learns about a bad algorithm or suffix before it has a job id.
+pub fn validate_batch_request(request: &BatchRequestDto) -> Result<(), ApiError> {
+    parse_algorithms(&request.algorithms)?;
+    if let Some(suffix) = &request.suffix {
+        parse_suffix(suffix)?;
+    }
+    if request.apply_renames && request.suffix.is_none() {
+        return Err(ApiError::invalid(
+            "apply_renames requires a suffix configuration",
+        ));
+    }
+    Ok(())
+}
+
+/// Run the full pipeline while forwarding progress samples to [progress].
+///
+/// [progress] is called from worker threads, so it must be `Sync` and must
+/// only store the sample or push it into a channel. Cancellation is honoured at
+/// chunk granularity through [cancel].
+pub fn run_batch_request_with_progress(
+    request: &BatchRequestDto,
+    cancel: &batchhash_hash::CancelToken,
+    progress: &(dyn Fn(ProgressDto) + Sync),
+) -> Result<BatchResultDto, ApiError> {
     let algorithms = parse_algorithms(&request.algorithms)?;
     let suffix = match &request.suffix {
         Some(suffix) => Some(parse_suffix(suffix)?),
@@ -456,9 +561,12 @@ pub fn run_batch_request(request: &BatchRequestDto) -> Result<BatchResultDto, Ap
     pipeline_request.log_db = request.log_db.as_ref().map(std::path::PathBuf::from);
     pipeline_request.overwrite = request.overwrite;
 
-    let cancel = batchhash_hash::CancelToken::new();
-    let noop = |_event: batchhash_core::pipeline::PipelineEvent| {};
-    let run = run_batch(&pipeline_request, &cancel, &noop).map_err(pipeline_api_error)?;
+    let forward = |event: batchhash_core::pipeline::PipelineEvent| {
+        if let batchhash_core::pipeline::PipelineEvent::Progress(sample) = event {
+            progress(ProgressDto::from_pipeline(&sample));
+        }
+    };
+    let run = run_batch(&pipeline_request, cancel, &forward).map_err(pipeline_api_error)?;
 
     let report_json = export_report(&run.report, ReportFormat::Json)
         .map_err(|error| ApiError::new("export", error.to_string()))?;
@@ -954,6 +1062,16 @@ fn entry_from_input(input: &EntryInputDto, root: &str) -> FileEntry {
 
 /// Hash an explicit list of root-relative paths.
 pub fn hash_entries_request(request: &HashEntriesRequest) -> Result<BatchResultDto, ApiError> {
+    let cancel = batchhash_hash::CancelToken::new();
+    hash_entries_request_with_progress(request, &cancel, &|_progress: ProgressDto| {})
+}
+
+/// Hash explicit root-relative paths while forwarding progress samples.
+pub fn hash_entries_request_with_progress(
+    request: &HashEntriesRequest,
+    cancel: &batchhash_hash::CancelToken,
+    progress: &(dyn Fn(ProgressDto) + Sync),
+) -> Result<BatchResultDto, ApiError> {
     let algorithms = parse_algorithms(&request.algorithms)?;
     let mut entries = Vec::with_capacity(request.paths.len());
     let mut skipped = Vec::new();
@@ -1006,8 +1124,12 @@ pub fn hash_entries_request(request: &HashEntriesRequest) -> Result<BatchResultD
         hasher: HashOptions::new(algorithms.clone()),
         io: FileIo::Path,
     };
-    let cancel = batchhash_hash::CancelToken::new();
-    let outcome = batchhash_hash::hash_entries(&entries, &options, &cancel, &|_event| {});
+    let forward = |event: batchhash_hash::BatchEvent| {
+        if let batchhash_hash::BatchEvent::Progress(snapshot) = event {
+            progress(ProgressDto::from_scheduler(&snapshot));
+        }
+    };
+    let outcome = batchhash_hash::hash_entries(&entries, &options, cancel, &forward);
     let hashed = outcome.entries;
     let hardware: HardwareReport = batchhash_hash::probe_auto().into();
     let mut report = batchhash_core::build_report(
@@ -1226,19 +1348,44 @@ pub fn diff_reports_request(request: &DiffReportsRequest) -> Result<DiffResultDt
 
 /// Compare a stored report against a live directory scan.
 pub fn diff_directory_request(request: &DiffDirectoryRequest) -> Result<DiffResultDto, ApiError> {
+    let cancel = batchhash_hash::CancelToken::new();
+    diff_directory_request_with_progress(request, &cancel, &|_progress: ProgressDto| {})
+}
+
+/// Compare a stored report against a live directory while forwarding progress.
+///
+/// The scan and the re-hash of the directory are both long-running, which is
+/// why this exists: a blocking FFI call froze the UI on large inputs.
+pub fn diff_directory_request_with_progress(
+    request: &DiffDirectoryRequest,
+    cancel: &batchhash_hash::CancelToken,
+    progress: &(dyn Fn(ProgressDto) + Sync),
+) -> Result<DiffResultDto, ApiError> {
     let report = parse_report_json(&request.report_json)?;
+    progress(ProgressDto::stage("scanning", 0, 0, 0.0));
     let scan_options = ScanOptions {
         follow_links: request.follow_links,
         ..ScanOptions::default()
     };
     let scanned = scan(std::path::Path::new(&request.directory), &scan_options)
         .map_err(|error| ApiError::new("io", error.to_string()))?;
+    progress(ProgressDto::stage(
+        "scanning",
+        scanned.entries.len() as u64,
+        scanned.entries.len() as u64,
+        100.0,
+    ));
     let options = HashEntryOptions {
         hasher: HashOptions::new(report.algorithms.clone()),
         io: FileIo::Path,
     };
-    let cancel = batchhash_hash::CancelToken::new();
-    let outcome = batchhash_hash::hash_entries(&scanned.entries, &options, &cancel, &|_event| {});
+    let forward = |event: batchhash_hash::BatchEvent| {
+        if let batchhash_hash::BatchEvent::Progress(snapshot) = event {
+            progress(ProgressDto::from_scheduler(&snapshot));
+        }
+    };
+    let outcome = batchhash_hash::hash_entries(&scanned.entries, &options, cancel, &forward);
+    progress(ProgressDto::stage("comparing", 0, outcome.entries.len() as u64, 0.0));
     let mut diff_options = diff_options(request.case_sensitive);
     diff_options.right_kind = batchhash_types::DiffSourceKind::RealtimeDirectory;
     diff_options.left_label = "report".to_string();

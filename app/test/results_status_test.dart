@@ -41,7 +41,7 @@ Icon iconFor(WidgetTester tester, String path) {
 }
 
 void main() {
-  testWidgets('hashed rows show complete digest values and copy controls', (
+  testWidgets('hashed rows collapse to the first digest and expand to all', (
     WidgetTester tester,
   ) async {
     setViewSize(tester, const Size(800, 900));
@@ -54,9 +54,24 @@ void main() {
       },
     );
     await tester.pumpWidget(
-      wrapInApp(const SingleChildScrollView(child: EntryList(entries: <BatchEntry>[entry]))),
+      wrapInApp(
+        const SingleChildScrollView(
+          child: EntryList(entries: <BatchEntry>[entry]),
+        ),
+      ),
     );
     await tester.pumpAndSettle();
+
+    // Collapsed by default: only the first digest (map order) is rendered.
+    expect(find.text(entry.hashes['sha256']!), findsOneWidget);
+    expect(find.text(entry.hashes['xxh3-64']!), findsNothing);
+    expect(find.byIcon(Icons.copy_outlined), findsNWidgets(1));
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('entry-digest-toggle-archive.bin')),
+    );
+    await tester.pumpAndSettle();
+
     expect(find.text(entry.hashes['sha256']!), findsOneWidget);
     expect(find.text(entry.hashes['xxh3-64']!), findsOneWidget);
     expect(find.byIcon(Icons.copy_outlined), findsNWidgets(2));

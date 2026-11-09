@@ -48,6 +48,27 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 | `bh_run_batch` | `BatchRequestDto` | 扫描 → 哈希 → 可选写名 → 报告 → SQLite 日志 |
 | `bh_undo` | `{"db": "...", "batch_id"?: "...", "apply": bool}` | 撤销计划/执行 |
 | `bh_export_report` | `{"report_json": "...", "format": "csv"}` | 报告格式转换 |
+| `bh_job_start` | `{"action": "batch"\|"hash_entries"\|"diff_directory", "payload": {...}}` | 立刻返回 `job_id`，工作在原生线程执行 |
+| `bh_job_poll` | `{"job_id": "..."}` | 当前状态、最新进度样本、完成后的 `result_json` |
+| `bh_job_cancel` | `{"job_id": "..."}` | 请求停止；任务仍通过 poll 报告终态 |
+| `bh_job_release` | `{"job_id": "..."}` | 丢弃任务与结果，释放其占用 |
+
+### 异步任务（长任务必须走这里）
+
+单次同步调用会一直阻塞到结束。哈希一个数 GB 的文件、或把一个报告与一个大目录对比，
+足以让 Flutter 唯一的 isolate 停住，界面看起来就是「卡死」。因此这两类工作通过任务协议执行：
+
+1. `bh_job_start` 只做校验与排队，立即返回 `job_id`；校验失败（例如未知算法）在 start 阶段
+   就以 `invalid_request` 报错，而不是异步失败。
+2. `bh_job_poll` 返回 `state`（`running` / `completed` / `failed` / `cancelled`）、
+   `progress` 与终态数据。`progress` 含 `phase`、`completed`/`total`、
+   `bytes_done`/`bytes_total`、`percent`、`eta_seconds`、`current_path`、`elapsed_ms`。
+3. `bh_job_cancel` 请求停止；**取消优先于成功**——已取消的任务不会返回 `result_json`。
+4. `bh_job_release` 释放任务；释放后再 poll 该 id 会以 `invalid_request` 失败。
+
+`bh_api_version` 的 `features` 数组声明这些能力（当前为 `async_jobs`、`progress`）。
+信封结构没有变化，所以 C ABI 版本没有随之递增；Dart 侧按能力探测，而不是靠版本号猜。
+旧的原生库没有这些符号时，服务层回退到同步调用，功能可用但只有一次性进度。
 
 `bh_run_batch` 的响应包含：汇总计数、条目（相对路径、显示路径、大小、mtime、状态、错误类型、哈希数组）、
 扫描跳过的路径、写名计划行与汇总、`batch_id`、重命名成功/失败数、是否取消、耗时，
@@ -87,12 +108,13 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 |---|---|
 | `probeHardware` | `bh_probe` |
 | `scanDirectory` | `bh_scan` |
-| `computeHashes` | `bh_run_batch`（单次阻塞调用，完成后发一个 100% 进度事件） |
+| `computeHashes` | `bh_job_start` + `bh_job_poll`（原生线程执行，流式阶段/字节进度） |
 | `planRenames` | `bh_plan_renames`（纯计划，不落盘，复用已算好的哈希） |
 | `executeRenames` | `bh_run_batch` + `apply_renames`（写 SQLite 日志） |
 | `exportReport` | `bh_build_report` + `bh_export_report`，Dart 负责落盘 |
 | `importReport` | `bh_import_report` |
-| `diffReports` / `diffReportAgainstDirectory` | `bh_diff_reports` / `bh_diff_directory` |
+| `diffReports` / `diffReportAgainstDirectory` | `bh_diff_reports` / `bh_diff_directory`（目录对比走任务协议） |
+| `cancelCurrentOperation` | `bh_job_cancel`（真正停止原生工作，而非只断开 Dart 订阅） |
 | `loadHistory` / `undoBatch` | `bh_list_batches` / `bh_undo` |
 
 `BatchHashApp` 的注入顺序是：显式传入的 service → `RustBatchHashService.tryCreate()` →
@@ -100,8 +122,8 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 
 已知限制（诚实记录）：
 
-- `computeHashes` 的进度是「一次性完成事件」而非逐文件流；真正的流式进度需要给 C ABI 增加
-  句柄/回调模型，属于后续迭代。
+- 旧版原生库（没有 `bh_job_*` 符号）仍会被加载，此时哈希走同步回退：结果正确，但没有中间进度，
+  也无法中途取消。随包分发的库总是新版，回退只为开发期的库版本滞后兜底。
 - `executeRenames` 复用 `run_batch` 的「扫描 → 计划 → 执行」路径，因此会重新读一遍文件；
   它通过 `restrict_paths` 把范围锁在预览计划里 `ready` 的行，所以「重新读」不会扩大范围，
   但执行与预览之间新增或消失的文件仍会体现为结果差异（消失的只是不出现，不会报错）。

@@ -86,6 +86,84 @@ class _DigestLine extends StatelessWidget {
   }
 }
 
+/// Collapsible digest list for one entry.
+///
+/// Collapsed by default: only the first digest is visible, so a long digest
+/// list cannot push the rest of the results off screen. Expanded it shows every
+/// digest with its copy button. The expanded flag lives in the [State] and the
+/// widget is keyed by entry path, so a progress refresh that replaces the
+/// [BatchEntry] objects keeps the state with the same file instead of moving it
+/// to whichever row happens to occupy the same position.
+class _DigestSection extends StatefulWidget {
+  const _DigestSection({
+    super.key,
+    required this.entryPath,
+    required this.hashes,
+  });
+
+  final String entryPath;
+  final Map<String, String> hashes;
+
+  @override
+  State<_DigestSection> createState() => _DigestSectionState();
+}
+
+class _DigestSectionState extends State<_DigestSection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final List<MapEntry<String, String>> digests = widget.hashes.entries
+        .toList(growable: false);
+    if (digests.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final int total = digests.length;
+    final bool expanded = _expanded;
+    final List<MapEntry<String, String>> visible = expanded
+        ? digests
+        : digests.take(1).toList(growable: false);
+    final String toggleLabel = expanded
+        ? context.strings('entry.collapseDigests')
+        : context.strings(
+            'entry.expandDigests',
+            args: <String, String>{'count': '$total'},
+          );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const Divider(height: 16),
+        for (final MapEntry<String, String> digest in visible)
+          _DigestLine(algorithm: digest.key, digest: digest.value),
+        if (!expanded && total > 1)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              context.strings(
+                'entry.moreDigests',
+                args: <String, String>{'count': '${total - 1}'},
+              ),
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        const SizedBox(height: 2),
+        Tooltip(
+          message: toggleLabel,
+          child: TextButton.icon(
+            key: ValueKey<String>(
+              'entry-digest-toggle-${widget.entryPath}',
+            ),
+            onPressed: () => setState(() => _expanded = !_expanded),
+            icon: Icon(expanded ? Icons.expand_less : Icons.expand_more),
+            label: Text(toggleLabel),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// One batch entry row: status, path, size and every computed digest.
 class EntryTile extends StatelessWidget {
   const EntryTile({super.key, required this.entry});
@@ -143,12 +221,12 @@ class EntryTile extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(_subtitle(context), style: theme.textTheme.bodySmall),
-              if (entry.hashes.isNotEmpty) ...<Widget>[
-                const Divider(height: 16),
-                for (final MapEntry<String, String> digest
-                    in entry.hashes.entries)
-                  _DigestLine(algorithm: digest.key, digest: digest.value),
-              ],
+              if (entry.hashes.isNotEmpty)
+                _DigestSection(
+                  key: ValueKey<String>('entry-digests-${entry.path}'),
+                  entryPath: entry.path,
+                  hashes: entry.hashes,
+                ),
             ],
           ),
         ),

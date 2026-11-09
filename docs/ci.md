@@ -16,12 +16,13 @@
 | Bridge (Rust FFI + Dart) | 真构建 `batchhash-ffi` 并用真实 .so 跑 `flutter test test/bridge` | 是 |
 | Package native library | Linux bundle 与 Android APK 内必须含有 `libbatchhash_ffi.so` | 是 |
 | Build Linux (debug) | GTK 工具链 + `flutter build linux --debug` | 是 |
-| Build Windows (debug) | `flutter build windows --debug` | 是 |
+| Build Windows (debug compile check) | `flutter build windows --debug`，**不上传 artifact** | 是 |
 | Build macOS (debug) | `flutter build macos --debug` | 是 |
 | Build iOS simulator | `flutter build ios --debug --simulator --no-codesign` | 是 |
 | Build Android APK | `flutter build apk --debug` | 是 |
 
-产物以 artifact 形式短期保留（debug 构建，不用于分发）。
+产物以 artifact 形式短期保留。**Windows 是例外：Windows 的 debug job 只做编译检查，不上传任何
+artifact**，原因见下节「Windows 分发为什么只有 Release 包」。
 
 **为什么要 `--locked`**：它同时把 `Cargo.lock` 当成被验证的产物。清单改了依赖
 （例如移除 `mmap2`、给 rename crate 增加 `libc`）而 lock 没跟上时，clippy/test 会
@@ -84,6 +85,35 @@ CI 不需要写仓库。
   `ios-unsigned` 诊断 job 受 `vars.ENABLE_IOS_UNSIGNED` 门控，不产出发布件。
 
 签名 secrets 说明见 docs/release-secrets.md。
+
+## Windows 分发为什么只有 Release 包
+
+用户报过这样的启动错误：`由于找不到 MSVCP140D.dll / VCRUNTIME140D.dll /
+VCRUNTIME140_1D.dll / ucrtbased.dll，无法继续执行代码`。这四个名字末尾的 `D` 表示
+**Debug CRT**，只有装了 Visual Studio 的机器才有，且授权不允许随应用分发。
+
+成因是当时 CI 的 Windows job 会把 `runner/Debug` 整个目录作为 artifact 上传，那个 zip
+看起来就是一个可直接运行的 exe 包，于是被当成发布版下载运行。现在的规则：
+
+1. **CI 的 Windows job 不再上传任何 artifact**（job 名带 `debug compile check`）。
+   它只证明 Windows 端能编译链接，并断言 `batchhash.exe` 确实产出。
+2. **能下载的 Windows 包只有 `batchhash-windows-release`**，来自 release.yml 的
+   `flutter build windows --release`。
+3. Release 包会把与当前 MSVC 工具链配套的 **x64 Release CRT**（`vcruntime140.dll`、
+   `msvcp140.dll` 等）复制到 exe 同目录（app-local），这样干净的 Windows 10/11
+   即使没装 VC++ Redistributable 也能启动。
+4. 打包前用 `dumpbin /dependents` 扫描包内每个 exe/dll：
+   - 命中任何 Debug CRT 依赖 → **失败**（不允许发布这种包）；
+   - 依赖了 MSVC 运行时但包里没有对应 DLL → **失败**（不允许发布一个必然起不来的包）。
+5. 打包后再用 `tar -tf` 复核 zip 内含 `batchhash.exe`、`batchhash_ffi.dll`、
+   `flutter_windows.dll` 与 CRT DLL，且不含任何 Debug CRT。
+
+**别做的两件事**：不要从第三方"dll 下载站"单独下载这些 DLL 塞进系统目录（来路不明，
+且不解决根因）；也不要为了跑起来去装 Visual Studio——那是开发环境，不是运行时前提。
+
+以上都是**构建期静态断言**：它证明包内没有 Debug CRT 依赖、且该带的运行时都带齐了，
+**不等于**已经在真实 Windows 上跑过。首次发布前仍需人工在干净机器上启动一次（见
+[docs/release-checklist.md](release-checklist.md)）。
 
 ## Android 签名（Release）
 

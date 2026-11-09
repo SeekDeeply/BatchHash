@@ -34,7 +34,7 @@ CI job `Package native library (Linux + Android)`（`.github/workflows/ci.yml`�
 |---|---|---|
 | android | `cargo ndk` 三个 ABI → `app/android/app/src/main/jniLibs` | 三个 split APK 与 AAB 内各自有对应 ABI 的 .so |
 | macos | `target/release/libbatchhash_ffi.dylib` → `BatchHash.app/Contents/Frameworks/` | 文件存在；随后做 **ad-hoc** 签名（`codesign --sign -`）；打包后再用 `unzip -l` 复核 |
-| windows | `target/release/batchhash_ffi.dll` → `Release/` | 文件存在 |
+| windows | `target/release/batchhash_ffi.dll` → `Release/`，并把 x64 **Release CRT** 复制到同目录 | 文件存在；`dumpbin /dependents` 扫描确认无 Debug CRT 依赖、且所有 MSVC 运行时依赖都已打进包里；zip 内含 exe/dll/CRT 且不含 Debug CRT |
 | linux | `target/release/libbatchhash_ffi.so` → `bundle/lib/` | 文件存在；打包后用 `tar -tzf` 复核 |
 | ios | 静态库 `lipo` 成 fat .a | 仅产出库文件，**不构建 IPA**（见下） |
 
@@ -42,6 +42,16 @@ CI job `Package native library (Linux + Android)`（`.github/workflows/ci.yml`�
 设备或安装后的应用上做过**运行时加载**测试，因此「`dart:ffi` 真能加载到这些库」只有
 Linux/Android 的 debug 链路在 CI 里有间接证据（Bridge job 用真实 .so 跑 Dart 测试），
 桌面 release 包的运行时加载从未被执行过。
+
+Windows 的 PE 依赖扫描同理：它证明**包内没有 Debug CRT 依赖、且该带的运行时都带齐了**，
+不证明它已经在某台干净的 Windows 上启动成功。这两件事不要混为一谈。
+
+**Windows 为什么不提供 debug 包下载**：debug 链的是 Debug CRT（`MSVCP140D.dll`、
+`VCRUNTIME140D.dll`、`VCRUNTIME140_1D.dll`、`ucrtbased.dll`），只在装了 Visual Studio
+的机器上存在，且不允许分发。曾经把 CI 的 `runner/Debug` 当作 artifact 上传，用户在普通
+机器上双击就得到「找不到 MSVCP140D.dll」的对话框。现在 CI 的 Windows job 只做编译检查、
+不上传 artifact，可下载的 Windows 包只有 release.yml 产出的 Release zip。详见
+[docs/ci.md](ci.md) 的「Windows 分发为什么只有 Release 包」。
 
 ## 尚未完成的部分
 

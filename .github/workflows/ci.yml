@@ -247,7 +247,14 @@ jobs:
           if-no-files-found: error
 
   build-windows:
-    name: Build Windows (debug)
+    # Compile check only. Deliberately uploads no artifact: a Debug executable
+    # links against the Debug CRT (MSVCP140D.dll, VCRUNTIME140D.dll,
+    # VCRUNTIME140_1D.dll, ucrtbased.dll), which cannot legally be shipped and
+    # does not exist on any normal Windows machine. A downloadable Debug zip was
+    # mistaken for a release and failed at startup with exactly that missing-DLL
+    # dialog, so the Windows artifact users can get is now release-only (see
+    # release.yml). Do not add upload-artifact back to this job.
+    name: Build Windows (debug compile check)
     needs: [detect, flutter]
     if: needs.detect.outputs.flutter == 'true'
     # windows-latest recently moved to the windows-2025-vs2026 image (VS 18).
@@ -272,11 +279,14 @@ jobs:
         run: |
           flutter pub get
           flutter build windows --debug
-      - uses: actions/upload-artifact@v4
-        with:
-          name: batchhash-windows-debug
-          path: app/build/windows/x64/runner/Debug
-          if-no-files-found: error
+      - name: Assert the compile check produced a runner
+        shell: pwsh
+        # No artifact is uploaded here on purpose (see the job comment). This
+        # step only proves the build really linked something, so a silently
+        # skipped build cannot pass as a green compile check.
+        run: |
+          $exe = "app/build/windows/x64/runner/Debug/batchhash.exe"
+          if (-not (Test-Path $exe)) { throw "expected $exe; the Windows debug build produced no runner" }
 
   build-macos:
     name: Build macOS (debug)

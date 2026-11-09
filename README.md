@@ -26,6 +26,7 @@ Rust 并通过 JSON C ABI + `dart:ffi` 桥接。支持 Windows / macOS / Linux /
 | 导航不重复（每断点只保留一个导航控件） | 已实现 | `adaptive_test` 断言宽屏只有 rail、无 AppBar 与列表 |
 | Linux 包内嵌 Rust 库 / Android APK 内含 .so | 已实现 | CI 断言 bundle 与 APK 内的 .so |
 | macOS/Windows release 打包（复制 dylib/dll 并断言） | 已实现，运行时加载未验证 | release.yml 的复制与断言步骤；CI debug 构建不含原生库 |
+| Windows 包自带 MSVC Release 运行时、拒绝 Debug CRT | 已实现，未在干净机器实测启动 | release.yml 用 `dumpbin /dependents` 断言：无 Debug CRT 依赖、所需运行时已打包；CI 的 Windows job 不再上传可执行 debug 包 |
 | iOS 静态库链接进 Runner | 未完成 | 静态库已产出，**链接未做**；见 docs/native-packaging.md |
 
 ## 构建策略（重要）
@@ -51,6 +52,17 @@ Rust 并通过 JSON C ABI + `dart:ffi` 桥接。支持 Windows / macOS / Linux /
   full outer join Diff Engine，流式增量对比、`incomplete` / `unstable` 语义。
 - **硬件加速可观测**：CPU 哈希加速与 Flutter GPU 渲染加速分区展示；后端状态允许 `unknown`，
   不做虚假精确；软件回退为中性语义。
+
+## 下载哪个 Windows 包
+
+只下载 **Release** 里的 `BatchHash-windows.zip`。Windows 包已把 MSVC Release 运行时
+（`vcruntime140.dll`、`msvcp140.dll` 等）放在 exe 同目录，干净的 Windows 10/11 无需
+预装 VC++ Redistributable，也不需要 Visual Studio。
+
+如果你看到 `由于找不到 MSVCP140D.dll / VCRUNTIME140D.dll / ucrtbased.dll，无法继续执行代码`，
+那说明运行的是 **debug 构建**（名字末尾的 `D` 就是 Debug CRT）。Debug CRT 只在装了
+Visual Studio 的机器上存在，且不允许随应用分发。CI 的 Windows job 因此只做编译检查、
+不再上传任何可执行包；请改下 Release 产物。**不要**去第三方站点下载单个 DLL 塞进系统目录。
 
 ## 仓库结构
 

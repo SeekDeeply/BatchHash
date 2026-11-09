@@ -19,6 +19,21 @@
   现在逐项映射到本地化文案，未变化/重复键/越界/损坏/不稳定不再被混同为「成功」或「未知」。
 - 写名计划行状态与报告格式说明不再显示英文原文。
 
+### 修复（Windows 包无法启动）
+
+- **Windows 包在普通机器上启动即报「找不到 MSVCP140D.dll / VCRUNTIME140D.dll /
+  VCRUNTIME140_1D.dll / ucrtbased.dll」**：这几个名字末尾的 `D` 是 **Debug CRT**，只在
+  装了 Visual Studio 的机器上存在，且不允许随应用分发。根因是 CI 的 Windows job 把
+  `runner/Debug` 整个目录当作 artifact 上传，看起来就像可直接运行的发布包。
+  现在 CI 的 Windows job 只做编译检查（并断言 `batchhash.exe` 确实产出），**不再上传任何
+  可执行包**；能下载的 Windows 包只来自 release.yml 的 Release 构建。
+- **Windows Release 包补齐运行库**：把与当前 MSVC 工具链配套的 x64 **Release CRT**
+  复制到 exe 同目录（app-local），干净 Windows 10/11 无需预装 VC++ Redistributable。
+- **Windows Release 包新增依赖门禁**：打包前用 `dumpbin /dependents` 扫描包内每个
+  exe/dll——命中任何 Debug CRT 依赖直接失败；依赖了 MSVC 运行时但包里没有对应 DLL
+  也直接失败（不发布一个必然起不来的包）。打包后再用 `tar -tf` 复核 zip 内含
+  `batchhash.exe`、`batchhash_ffi.dll`、`flutter_windows.dll` 与 CRT，且不含 Debug CRT。
+
 ### 修复（正确性审计）
 
 - **写名可能覆盖已存在的文件**：执行阶段此前只信任计划结果，计划之后新建的目标文件会被静默替换。

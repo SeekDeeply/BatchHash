@@ -372,18 +372,29 @@ jobs:
           if (-not $dumpbin) { throw "dumpbin.exe not found under $vsPath" }
           Write-Host "dumpbin: $($dumpbin.FullName)"
 
-          # Pick the newest redistributable by parsed version, not by string sort:
-          # "14.9" sorts above "14.44" as text, which would silently bundle an
-          # older CRT than the toolchain that built the binaries.
-          $crtDir = Get-ChildItem -Path (Join-Path $vsPath "VC\Redist\MSVC") -Recurse -Directory `
+          # Two filters matter here, and both are easy to get wrong:
+          #
+          # * The redist tree holds a desktop x64 CRT and a onecore\x64 one whose
+          #   path also matches '\\x64\\'. OneCore is the UWP/minimal-API-set
+          #   variant; bundling it into a desktop app is the wrong runtime, so
+          #   exclude it explicitly instead of letting the sort decide.
+          # * Sort by the parsed version, not as text: "14.9" sorts above "14.44"
+          #   as a string, which would bundle an older CRT than the toolchain
+          #   that produced the binaries.
+          $candidates = @(Get-ChildItem -Path (Join-Path $vsPath "VC\Redist\MSVC") -Recurse -Directory `
             -Filter "Microsoft.VC*.CRT" -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\x64\\' } |
+            Where-Object { $_.FullName -match '\\x64\\' -and $_.FullName -notmatch '\\onecore\\' })
+          if ($candidates.Count -eq 0) { throw "no desktop x64 CRT redistributable under $vsPath\VC\Redist\MSVC" }
+          Write-Host "desktop x64 CRT candidates: $($candidates.Count)"
+          $crtDir = $candidates |
             Sort-Object -Property @{ Expression = {
                 $versionText = Split-Path (Split-Path $_.FullName -Parent) -Leaf
                 try { [version]$versionText } catch { [version]'0.0' }
               } } -Descending |
             Select-Object -First 1
-          if (-not $crtDir) { throw "no x64 CRT redistributable under $vsPath\VC\Redist\MSVC" }
+          if ($crtDir.FullName -match '\\onecore\\') {
+            throw "selected a onecore CRT by mistake: $($crtDir.FullName)"
+          }
           Write-Host "release CRT: $($crtDir.FullName)"
 
           # Only release CRT: drop any name carrying the debug D marker, so a
@@ -393,6 +404,11 @@ jobs:
           if ($copied.Count -eq 0) { throw "the CRT redistributable directory contains no DLLs" }
           foreach ($dll in $copied) { Copy-Item $dll.FullName -Destination $release -Force }
           Write-Host "bundled CRT DLLs: $(($copied | ForEach-Object Name) -join ', ')"
+          # The binaries must reach these by name; a package that bundles the CRT
+          # but leaves every exe/dll statically linked proves nothing about the
+          # clean-machine case, so assert a real dynamic link exists.
+          $vtRuntime = Get-ChildItem -Path $release -Filter "vcruntime140*.dll" -File
+          if (-not $vtRuntime) { throw "vcruntime140.dll was not bundled" }
 
           $binaries = @(Get-ChildItem -Path $release -Recurse -File | Where-Object { $_.Extension -in '.exe', '.dll' })
           if (-not $binaries) { throw "no executables or DLLs to inspect in $release" }

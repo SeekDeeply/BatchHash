@@ -550,4 +550,3 @@ mod tests {
         assert_eq!(report.summary.total_bytes, u64::MAX);
     }
 }
-

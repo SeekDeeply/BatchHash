@@ -11,7 +11,13 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
-  dynamic_color: ^1.7.0
+  # Capped at <1.8.0 on purpose. From 1.8.0 on, harmonization.dart calls
+  # Color.toARGB32(), an API that only exists from Flutter 3.27, while the
+  # package's own constraint still says flutter >=3.4. CI pins Flutter 3.24.5,
+  # so a caret range (or any range admitting 1.8.x) resolves to a version whose
+  # test compilation fails with "The method 'toARGB32' isn't defined".
+  # 1.7.0 is the last release that uses the older Color.value API.
+  dynamic_color: ">=1.7.0 <1.8.0"
   ffi: ^2.1.3
   path_provider: ^2.1.4
 

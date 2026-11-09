@@ -1,18 +1,23 @@
 [toolchain]
 # Single source of truth for the Rust version. It must stay in step with the
-# pins in .github/workflows/ (dtolnay/rust-toolchain@1.82.0) and with
-# `rust-version = "1.82"` in Cargo.toml, which declares the MSRV floor and is
+# pins in .github/workflows/ (dtolnay/rust-toolchain@1.89.0) and with
+# `rust-version = "1.89"` in Cargo.toml, which declares the MSRV floor and is
 # therefore equal to, not textually identical with, this channel.
 #
 # This file wins over whatever a CI action installed: rustup switches to the
 # channel named here as soon as it runs inside the repository. A mismatch is
 # silent and destructive, because extra targets are installed per channel —
-# pinning "stable" here while CI installed the Android targets under 1.82.0
-# made the packaging job fail with "can't find crate for `core`".
+# pinning "stable" here while CI installed the Android targets under another
+# version made the packaging job fail with "can't find crate for `core`".
+#
+# 1.89.0 is not arbitrary: the locked dependency set declares it. `uuid 1.29.0`
+# requires 1.89.0, and `cpufeatures`/`getrandom`/`hashbrown`/`indexmap` are
+# edition-2024 crates needing Cargo >= 1.85. An older channel cannot even
+# parse those manifests.
 #
 # Android targets are deliberately NOT listed here: that would force every
 # developer machine to download them. The packaging job installs them itself,
 # under this exact channel.
-channel = "1.82.0"
+channel = "1.89.0"
 components = ["rustfmt", "clippy"]
 profile = "minimal"

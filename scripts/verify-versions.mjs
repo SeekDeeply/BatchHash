@@ -129,6 +129,32 @@ function workflowToolchainPins() {
   return pins;
 }
 
+function rustVersionFloor() {
+  const cargo = read('Cargo.toml');
+  const section = cargo.match(/\[workspace\.package\]([\s\S]*?)(?=\n\[|$)/);
+  const version = section && section[1].match(/^\s*rust-version\s*=\s*"([^"]+)"/m);
+  if (!version) {
+    fail('Cargo.toml [workspace.package] has no rust-version');
+    return null;
+  }
+  return version[1];
+}
+
+// Compare two Rust versions as far as they are specified: 1.89 vs 1.89.0 are
+// equal, and "1.82" is below "1.89.0".
+function compareRustVersions(left, right) {
+  const parts = (value) => value.split('.').map((piece) => Number(piece) || 0);
+  const a = parts(left);
+  const b = parts(right);
+  for (let index = 0; index < 3; index += 1) {
+    const delta = (a[index] ?? 0) - (b[index] ?? 0);
+    if (delta !== 0) {
+      return delta < 0 ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
 const cargo = cargoWorkspaceVersion();
 const pubspec = pubspecVersion();
 const log = changelog();
@@ -185,6 +211,20 @@ if (toolchain) {
   }
   if (pins.size === 0) {
     fail('no dtolnay/rust-toolchain pin found in any workflow');
+  }
+
+  // The channel must actually satisfy the declared MSRV floor. A channel below
+  // it cannot build the locked dependency set at all: an edition-2024 crate
+  // fails to parse its manifest long before any of our code compiles.
+  const floor = rustVersionFloor();
+  if (floor) {
+    console.log('Cargo rust-version: ' + floor);
+    if (compareRustVersions(toolchain, floor) < 0) {
+      fail(
+        'rust-toolchain.toml pins ' + toolchain + ', below the rust-version = "' +
+          floor + '" floor declared in Cargo.toml',
+      );
+    }
   }
 }
 

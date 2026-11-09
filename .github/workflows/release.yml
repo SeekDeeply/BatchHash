@@ -14,7 +14,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   FLUTTER_VERSION: "3.24.5"
-  RUST_VERSION: "1.82.0"
+  RUST_VERSION: "1.89.0"
 
 jobs:
   # Refuse to build artifacts whose version disagrees with the tag, the
@@ -57,33 +57,18 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Install Rust (Android targets)
-        uses: dtolnay/rust-toolchain@1.82.0
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Install cargo-ndk
-        # The prebuilt release binary, not `cargo install`: the repository pins
-        # Rust 1.82.0 through rust-toolchain.toml, so a source install would
-        # compile cargo-ndk with that toolchain and could fail on its MSRV. The
-        # version is pinned because the asset name carries it.
-        env:
-          CARGO_NDK_VERSION: "4.1.2"
+        # Built from source: the pinned toolchain (1.89.0) satisfies cargo-ndk's
+        # MSRV, and this is the path CI has already exercised end to end.
         run: |
-          set -euo pipefail
           if ! command -v cargo-ndk >/dev/null 2>&1; then
-            asset="cargo-ndk-x86_64-unknown-linux-gnu-v$CARGO_NDK_VERSION.tgz"
-            curl --proto '=https' --tlsv1.2 --retry 5 -fsSL \
-              "https://github.com/bbqsrc/cargo-ndk/releases/download/v$CARGO_NDK_VERSION/$asset" \
-              -o "$RUNNER_TEMP/cargo-ndk.tgz"
-            # The archive wraps its binaries in a versioned directory.
-            mkdir -p "$RUNNER_TEMP/cargo-ndk"
-            tar -xzf "$RUNNER_TEMP/cargo-ndk.tgz" -C "$RUNNER_TEMP/cargo-ndk" --strip-components=1
-            for binary in cargo-ndk cargo-ndk-env cargo-ndk-runner cargo-ndk-test; do
-              install -m 0755 "$RUNNER_TEMP/cargo-ndk/$binary" "$HOME/.cargo/bin/$binary"
-            done
+            cargo install cargo-ndk --locked
           fi
-          cargo ndk --version
       - name: Generate platform scaffolding
         working-directory: app
         run: |
@@ -196,7 +181,7 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Install Rust (iOS targets)
-        uses: dtolnay/rust-toolchain@1.82.0
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - name: Cache cargo
@@ -241,7 +226,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Install Rust (iOS targets)
-        uses: dtolnay/rust-toolchain@1.82.0
+        uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: aarch64-apple-ios
       - name: Generate platform scaffolding
@@ -278,7 +263,7 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.82.0
+        uses: dtolnay/rust-toolchain@1.89.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Generate platform scaffolding
@@ -334,7 +319,7 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.82.0
+        uses: dtolnay/rust-toolchain@1.89.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Generate platform scaffolding
@@ -384,7 +369,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.82.0
+        uses: dtolnay/rust-toolchain@1.89.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
       - name: Generate platform scaffolding

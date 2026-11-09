@@ -53,6 +53,16 @@
   `contents: write` 且仅在 tag 推送时创建 Release；各平台改上传 artifact。
 - CI：配置 secrets 时给 Android 注入 release 签名并用 `apksigner` 断言**不是** debug 签名；
   iOS 发布 job 改为显式门禁失败，另设无签名诊断 job。
+- CI：`verify-versions.mjs` 还会比对 `rust-toolchain.toml` 的 channel 与各工作流的
+  `dtolnay/rust-toolchain@<版本>`，并要求 channel 不低于 `Cargo.toml` 的 MSRV 下限。
+  这条检查是本轮事故的产物：`rust-toolchain.toml` 曾写 `stable` 而工作流装的是另一个版本 +
+  Android target，rustup 在仓库内强制切 channel，导致打包 job 报 `can't find crate for core`。
+- Rust 工具链固定为 **1.89.0**（原 1.82.0 站不住）：锁定依赖集自己要求它——`uuid 1.29.0`
+  声明 1.89.0，`cpufeatures`/`getrandom`/`hashbrown`/`indexmap` 是 edition 2024 crate，
+  更低版本的 Cargo 连它们的清单都解析不了。
+- `dynamic_color` 约束收紧为 `>=1.7.0 <1.8.0`：1.8.0 起用了只有 Flutter 3.27+ 才有的
+  `Color.toARGB32()`，而包的约束仍写 `flutter >=3.4`；CI 钉 Flutter 3.24.5，
+  按 `^1.7.0` 解析会选中编译不过的版本。
 
 ### 已知限制
 

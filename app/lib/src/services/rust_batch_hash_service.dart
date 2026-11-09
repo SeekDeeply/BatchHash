@@ -100,12 +100,16 @@ class RustBatchHashService implements BatchHashService {
   String? _logDbPath;
   String? _lastRoot;
   bool _lastScanRecursive = false;
+  List<String>? _explicitPaths;
   String? _lastReportJson;
   /// Root the batch behind [_lastReportJson] worked on, or null when the cached
   /// JSON does not describe the report the caller is asking about.
   String? _lastReportRoot;
 
   /// Root of the most recent scan; used by rename execution and history.
+  ///
+  /// For an explicit file selection this is the directory the picked files
+  /// share, so it is always a directory a report can be rooted at.
   String? get lastRoot => _lastRoot;
 
   /// Rename log path used by this service.
@@ -155,6 +159,7 @@ class RustBatchHashService implements BatchHashService {
     String path, {
     bool recursive = false,
   }) async {
+    _explicitPaths = null;
     final data = native.scan(path);
     _lastRoot = path;
     _lastScanRecursive = recursive;
@@ -164,6 +169,36 @@ class RustBatchHashService implements BatchHashService {
       return entries;
     }
     return entries.where((entry) => !entry.path.contains('/')).toList();
+  }
+
+  @override
+  String get lastScannedRoot => _lastRoot ?? '';
+
+  @override
+  Future<List<BatchEntry>> scanFiles(List<String> paths) async {
+    if (paths.isEmpty) return const <BatchEntry>[];
+    final root = _commonPath(paths);
+    final relative = <String>[
+      for (final String path in paths) _relativePath(path, root),
+    ];
+    _explicitPaths = relative;
+    _lastRoot = root;
+    _lastScanRecursive = false;
+    await _rememberRoot(root);
+    final result = <BatchEntry>[];
+    for (var i = 0; i < paths.length; i++) {
+      final data = native.scan(paths[i]);
+      final entries = _entries(data['entries']);
+      final entry = entries.isEmpty ? null : entries.first;
+      result.add(BatchEntry(
+        path: relative[i],
+        size: entry?.size ?? 0,
+        mtime: entry?.mtime,
+        status: entry?.status ?? EntryStatus.failed,
+        errorKind: entry?.errorKind ?? (entry == null ? 'not_found' : null),
+      ));
+    }
+    return result;
   }
 
   @override
@@ -178,23 +213,35 @@ class RustBatchHashService implements BatchHashService {
     }
     final scannedRoot = _lastRoot;
     final root = scannedRoot ?? _commonRoot(entries);
-    // A folder the user picked without recursing must not have its whole tree
-    // hashed behind their back; a derived root has no retained scan mode.
-    final recursive = scannedRoot == null ? true : _lastScanRecursive;
-    // Case sensitivity follows the platform default; the native layer knows
-    // the host better than this layer does.
-    final data = native.runBatch(
-      root: root,
-      algorithms: algorithms,
-      recursive: recursive,
-    );
+    final explicitFiles = _explicitPaths != null;
+    final Map<String, Object?> data;
+    if (explicitFiles) {
+      data = native.hashEntries(
+        root: root,
+        paths: _explicitPaths!,
+        algorithms: algorithms,
+      );
+    } else {
+      // A folder the user picked without recursing must not have its whole tree
+      // hashed behind their back; a retained scan mode controls traversal.
+      data = native.runBatch(
+        root: root,
+        algorithms: algorithms,
+        recursive: _lastScanRecursive,
+      );
+    }
     _lastRoot = root;
     _lastReportRoot = root;
     _lastReportJson = data['report_json'] as String?;
     // The C ABI call is a single blocking run, so progress is reported as one
     // completion event; a streaming variant needs a callback handle model.
     final hashed = _entries(data['entries']);
-    final result = hashed.isEmpty ? entries : hashed;
+    final result = explicitFiles
+        ? <BatchEntry>[
+            for (final BatchEntry original in entries)
+              _mergeHash(original, hashed, root),
+          ]
+        : (hashed.isEmpty ? entries : hashed);
     yield HashProgress(
       completed: result.length,
       total: result.length,
@@ -644,6 +691,27 @@ class RustBatchHashService implements BatchHashService {
     return hashes;
   }
 
+  BatchEntry _mergeHash(
+    BatchEntry original,
+    List<BatchEntry> hashed,
+    String root,
+  ) {
+    final String relative = _relativePath(original.path, root);
+    for (final BatchEntry entry in hashed) {
+      if (entry.path == relative) {
+        return original.copyWith(
+          hashes: entry.hashes,
+          status: entry.status,
+          errorKind: entry.errorKind,
+        );
+      }
+    }
+    return original.copyWith(
+      status: EntryStatus.failed,
+      errorKind: 'missing_hash_result',
+    );
+  }
+
   Map<String, Object?> _entryJson(BatchEntry entry) {
     final mtime = entry.mtime;
     return <String, Object?>{
@@ -661,13 +729,53 @@ class RustBatchHashService implements BatchHashService {
     };
   }
 
-  String _commonRoot(List<BatchEntry> entries) {
-    if (entries.isEmpty) {
-      return '.';
+  String _commonPath(List<String> paths) {
+    final directories = paths.map(_parentPath).toList();
+    if (directories.isEmpty) return '.';
+    final first = directories.first;
+    final windows = RegExp(r'^[A-Za-z]:').hasMatch(first) || first.contains('\\');
+    final separator = windows ? '\\' : '/';
+    final absolute = first.startsWith('/') || RegExp(r'^[A-Za-z]:').hasMatch(first);
+    final segments = directories
+        .map((path) => path.split(RegExp(r'[/\\]+')).where((s) => s.isNotEmpty).toList())
+        .toList();
+    var shared = 0;
+    while (segments.every((parts) => parts.length > shared) &&
+        segments.map((parts) => windows ? parts[shared].toLowerCase() : parts[shared]).toSet().length == 1) {
+      shared++;
     }
-    final first = entries.first.path;
-    final index = first.lastIndexOf('/');
-    return index <= 0 ? '.' : first.substring(0, index);
+    var root = segments.first.take(shared).join(separator);
+    if (absolute && !windows) root = '/$root';
+    if (RegExp(r'^[A-Za-z]:$').hasMatch(root)) root += separator;
+    if (root.isEmpty && absolute) return separator;
+    return root.isEmpty ? '.' : root;
+  }
+
+  String _commonRoot(List<BatchEntry> entries) => _commonPath(
+    entries.map((BatchEntry entry) => entry.path).toList(),
+  );
+
+  String _parentPath(String path) {
+    final int index = path.lastIndexOf(RegExp(r'[/\\]'));
+    if (index < 0) return '.';
+    if (index == 0) return path.substring(0, 1);
+    if (index == 2 && RegExp(r'^[A-Za-z]:').hasMatch(path)) return path.substring(0, 3);
+    return path.substring(0, index);
+  }
+
+  String _relativePath(String path, String root) {
+    final String normalizedPath = path.replaceAll('\\', '/');
+    final String normalizedRoot = root
+        .replaceAll('\\', '/')
+        .replaceAll(RegExp(r'/+$'), '');
+    if (normalizedRoot.isEmpty || normalizedRoot == '.') {
+      return normalizedPath.replaceFirst(RegExp(r'^\.?/'), '');
+    }
+    final String prefix = normalizedRoot == '/' ? '/' : '$normalizedRoot/';
+    if (!normalizedPath.toLowerCase().startsWith(prefix.toLowerCase())) {
+      throw StateError('selected file is outside the common root: $path');
+    }
+    return normalizedPath.substring(prefix.length);
   }
 
   EntryStatus _status(String? value) {

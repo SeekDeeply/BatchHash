@@ -110,6 +110,9 @@ class FakeBatchHashService implements BatchHashService {
   /// Root of the most recent successful scan, or null before the first one.
   String? get lastRoot => _lastRoot;
 
+  @override
+  String get lastScannedRoot => _lastRoot ?? '';
+
   /// Root-relative paths the most recent rename execution was narrowed to.
   List<String> get lastRestrictPaths =>
       List<String>.unmodifiable(_lastRestrictPaths);
@@ -143,6 +146,57 @@ class FakeBatchHashService implements BatchHashService {
     }
     _lastRoot = path;
     return _buildEntries(hashed: false, recursive: recursive);
+  }
+
+  @override
+  Future<List<BatchEntry>> scanFiles(List<String> paths) async {
+    if (paths.isEmpty) {
+      return const <BatchEntry>[];
+    }
+    // Mirror the native service: entries are root-relative and the root is
+    // the directory the picked files share, never a single file.
+    final String root = _sharedRoot(paths);
+    _lastRoot = root;
+    return <BatchEntry>[
+      for (final String path in paths)
+        BatchEntry(
+          path: _relativeTo(path, root),
+          size: 4096,
+          mtime: DateTime.utc(2024, 1, 1),
+        ),
+    ];
+  }
+
+  String _sharedRoot(List<String> paths) {
+    final List<List<String>> parts = <List<String>>[
+      for (final String path in paths)
+        (path.split(RegExp(r'[/\\]+')).where((String s) => s.isNotEmpty)
+              .toList()
+            ..removeLast()),
+    ];
+    var shared = 0;
+    while (parts.every((List<String> value) => value.length > shared) &&
+        parts
+                .map((List<String> value) => value[shared].toLowerCase())
+                .toSet()
+                .length ==
+            1) {
+      shared++;
+    }
+    final String first = paths.first;
+    final bool windows = RegExp(r'^[A-Za-z]:').hasMatch(first);
+    final List<String> head = parts.first.take(shared).toList();
+    if (windows) {
+      return head.join('\\');
+    }
+    return '/${head.join('/')}';
+  }
+
+  String _relativeTo(String path, String root) {
+    final String normalized = path.replaceAll('\\', '/');
+    final String prefix =
+        root.replaceAll('\\', '/').replaceAll(RegExp(r'/+$'), '');
+    return normalized.substring(prefix.length + 1);
   }
 
   @override
@@ -550,7 +604,7 @@ class FakeBatchHashService implements BatchHashService {
     'blake2s' => 64,
     'sha256' => 64,
     'blake3' => 64,
-    'xxh3' => 16,
+    'xxh3-64' => 16,
     'crc32' => 8,
     'crc32c' => 8,
     _ => 64,

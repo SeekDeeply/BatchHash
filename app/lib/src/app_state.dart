@@ -29,7 +29,17 @@ class BatchHashAppState {
   final ValueNotifier<bool> cancelled = ValueNotifier<bool>(false);
 
   /// Root path of the last scan, used as the report root.
+  ///
+  /// For an explicit file selection this is the directory the picked files
+  /// share, never a single picked file: a report root has to be a directory.
   final ValueNotifier<String> scanRoot = ValueNotifier<String>('');
+
+  /// Absolute files the user picked one by one, newest selection only.
+  ///
+  /// Empty when the input came from a folder scan. Kept so later steps
+  /// (rename, report) can tell an explicit selection from a directory walk.
+  final ValueNotifier<List<String>> pickedFiles =
+      ValueNotifier<List<String>>(const <String>[]);
 
   /// Most recent path-chooser inputs, newest first, at most eight entries.
   final ValueNotifier<List<String>> recentPaths =
@@ -61,6 +71,7 @@ class BatchHashAppState {
     error.dispose();
     cancelled.dispose();
     scanRoot.dispose();
+    pickedFiles.dispose();
     recentPaths.dispose();
     exportDirectory.dispose();
   }

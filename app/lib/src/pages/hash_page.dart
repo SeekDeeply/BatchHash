@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_state.dart';
 import '../l10n/app_strings_scope.dart';
@@ -11,12 +13,10 @@ import '../widgets/entry_list.dart';
 import '../widgets/path_input_dialog.dart';
 import '../widgets/summary_card.dart';
 
-/// Batch hashing workflow: choose input, pick algorithms, hash, inspect.
+/// Batch hashing workflow: choose input, configure, calculate, inspect, export.
 ///
-/// Input paths come from the in-app path chooser instead of a native picker.
-/// The scanned entries, the progress summary, the last error and the selected
-/// algorithms are mirrored into [BatchHashAppState] so a tab switch does not
-/// throw the batch away.
+/// Native file dialogs are used where the platform provides them. The scanned
+/// entries, progress, report and selected algorithms survive tab changes.
 class HashPage extends StatefulWidget {
   const HashPage({super.key, required this.state});
 
@@ -56,47 +56,70 @@ class _HashPageState extends State<HashPage> {
   }
 
   Future<void> _selectFiles() async {
-    final BatchHashAppState app = widget.state;
+    List<String> paths = <String>[];
+    try {
+      final FilePickerResult? result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+        withData: false,
+      );
+      paths = <String>[
+        for (final PlatformFile file in result?.files ?? const <PlatformFile>[])
+          if (file.path != null && file.path!.isNotEmpty) file.path!,
+      ];
+    } on PlatformException {
+      paths = await _fallbackFilePaths();
+    } on MissingPluginException {
+      paths = await _fallbackFilePaths();
+    }
+    if (!mounted || paths.isEmpty) {
+      return;
+    }
+    await _scanFiles(paths);
+  }
+
+  Future<List<String>> _fallbackFilePaths() async {
     final String? input = await PathInputDialog.show(
       context,
       title: context.strings('hash.chooseFiles'),
       hintText: context.strings('path.hint.files'),
       helperText: context.strings('path.filesHelper'),
       allowMultiple: true,
-      suggestions: app.recentPaths.value,
+      suggestions: widget.state.recentPaths.value,
     );
-    if (!mounted) {
-      return;
-    }
-    if (input == null) {
-      return;
-    }
-    final List<String> paths = <String>[
+    if (input == null) return <String>[];
+    return <String>[
       for (final String line in input.split('\n'))
         if (line.trim().isNotEmpty) line.trim(),
     ];
-    if (paths.isEmpty) {
-      return;
-    }
-    await _scanInputs(paths, recursive: false);
   }
 
-  Future<void> _selectFolder() async {
-    final BatchHashAppState app = widget.state;
-    final String? input = await PathInputDialog.show(
+  Future<String?> _pickFolderPath() async {
+    try {
+      return await FilePicker.platform.getDirectoryPath();
+    } on PlatformException {
+      return _fallbackFolderPath();
+    } on MissingPluginException {
+      return _fallbackFolderPath();
+    }
+  }
+
+  Future<String?> _fallbackFolderPath() async {
+    return PathInputDialog.show(
       context,
       title: context.strings('hash.chooseFolder'),
       hintText: context.strings('path.hint.folder'),
       helperText: context.strings('path.folderHelper'),
-      initialValue: app.recentPaths.value.isEmpty
+      initialValue: widget.state.recentPaths.value.isEmpty
           ? ''
-          : app.recentPaths.value.first,
-      suggestions: app.recentPaths.value,
+          : widget.state.recentPaths.value.first,
+      suggestions: widget.state.recentPaths.value,
     );
-    if (!mounted) {
-      return;
-    }
-    if (input == null || input.trim().isEmpty) {
+  }
+
+  Future<void> _selectFolder() async {
+    final String? input = await _pickFolderPath();
+    if (!mounted || input == null || input.trim().isEmpty) {
       return;
     }
     final String folder = input.trim();
@@ -126,7 +149,53 @@ class _HashPageState extends State<HashPage> {
     await _scanInputs(<String>[folder], recursive: recursive);
   }
 
-  /// Scan every chosen path; one file is passed straight to the service.
+  /// Scan exactly the files a native picker returned.
+  Future<void> _scanFiles(List<String> paths) async {
+    setState(() {
+      _scanning = true;
+      _error = null;
+      _cancelled = false;
+    });
+    try {
+      final BatchHashAppState app = widget.state;
+      final List<BatchEntry> scanned = await app.service.scanFiles(paths);
+      if (!mounted) {
+        return;
+      }
+      for (final String path in paths.reversed) {
+        app.rememberPath(path);
+      }
+      setState(() {
+        _entries = scanned;
+        _progress = null;
+        _elapsed = null;
+        _scanning = false;
+      });
+      app.entries.value = scanned;
+      app.report.value = null;
+      app.progress.value = null;
+      app.elapsed.value = null;
+      app.error.value = null;
+      app.cancelled.value = false;
+      app.scanRoot.value = app.service.lastScannedRoot;
+      app.pickedFiles.value = List<String>.unmodifiable(paths);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final String failure = context.strings(
+        'hash.scanFailed',
+        args: <String, String>{'error': '$error'},
+      );
+      setState(() {
+        _scanning = false;
+        _error = failure;
+      });
+      widget.state.error.value = failure;
+    }
+  }
+
+  /// Scan every chosen folder path.
   Future<void> _scanInputs(
     List<String> paths, {
     required bool recursive,
@@ -162,7 +231,8 @@ class _HashPageState extends State<HashPage> {
       app.elapsed.value = null;
       app.error.value = null;
       app.cancelled.value = false;
-      app.scanRoot.value = paths.first;
+      app.scanRoot.value = app.service.lastScannedRoot;
+      app.pickedFiles.value = const <String>[];
     } catch (error) {
       if (!mounted) {
         return;
@@ -195,6 +265,7 @@ class _HashPageState extends State<HashPage> {
     app.error.value = null;
     app.cancelled.value = false;
     app.scanRoot.value = '';
+    app.pickedFiles.value = const <String>[];
   }
 
   void _toggleAlgorithm(String algorithm, bool selected) {
@@ -206,6 +277,45 @@ class _HashPageState extends State<HashPage> {
       }
     });
     widget.state.algorithms.value = <String>{..._algorithms};
+  }
+
+  Future<void> _exportQuick(ReportFormat format) async {
+    final ReportModel? report = widget.state.report.value;
+    if (report == null) return;
+    try {
+      final List<ExportedReport> files = await widget.state.service
+          .exportReport(report: report, formats: <ReportFormat>{format});
+      if (!mounted) {
+        return;
+      }
+      if (files.isEmpty) {
+        setState(() {
+          _error = context.strings(
+            'hash.exportFailed',
+            args: <String, String>{'error': 'no file was written'},
+          );
+        });
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.strings(
+              'hash.exported',
+              args: <String, String>{'path': files.first.path},
+            ),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = context.strings(
+          'hash.exportFailed',
+          args: <String, String>{'error': '$error'},
+        );
+      });
+    }
   }
 
   void _startHashing() {
@@ -281,9 +391,12 @@ class _HashPageState extends State<HashPage> {
   ) {
     final BatchHashAppState app = widget.state;
     final String root = app.scanRoot.value.trim();
+    // The service roots explicit file selections at their shared directory, so
+    // the cached value is always a directory; a fallback keeps a report valid
+    // when nothing was scanned yet.
     final String reportRoot = root.isNotEmpty
         ? root
-        : (progress.entries.isEmpty ? '' : progress.entries.first.path);
+        : app.service.lastScannedRoot;
     final ReportModel report = ReportModel(
       root: reportRoot,
       generatedAt: DateTime.now(),
@@ -377,7 +490,11 @@ class _HashPageState extends State<HashPage> {
               isError: false,
             ),
           ],
-          const SizedBox(height: 16),
+          if (_entries.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 12),
+            _InputSummary(entries: _entries, onClear: _clear),
+          ],
+          const SizedBox(height: 20),
           Text(
             context.strings('hash.algorithms'),
             style: theme.textTheme.titleSmall,
@@ -490,6 +607,27 @@ class _HashPageState extends State<HashPage> {
               ],
             ),
             const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Wrap(
+                spacing: 8,
+                children: <Widget>[
+                  OutlinedButton.icon(
+                    key: const ValueKey<String>('hash-export-json'),
+                    onPressed: _computing ? null : () => _exportQuick(ReportFormat.json),
+                    icon: const Icon(Icons.data_object),
+                    label: Text(context.strings('hash.exportJson')),
+                  ),
+                  OutlinedButton.icon(
+                    key: const ValueKey<String>('hash-export-csv'),
+                    onPressed: _computing ? null : () => _exportQuick(ReportFormat.csv),
+                    icon: const Icon(Icons.table_chart_outlined),
+                    label: Text(context.strings('hash.exportCsv')),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
             EntryList(entries: _entries),
           ] else if (!_scanning) ...<Widget>[
             const SizedBox(height: 48),
@@ -528,6 +666,44 @@ class _HashPageState extends State<HashPage> {
             label: Text(context.strings('hash.clear')),
           ),
       ],
+    );
+  }
+}
+
+class _InputSummary extends StatelessWidget {
+  const _InputSummary({required this.entries, required this.onClear});
+
+  final List<BatchEntry> entries;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Card(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.folder_copy_outlined, color: theme.colorScheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                context.strings(
+                  'hash.inputSummary',
+                  args: <String, String>{'count': '${entries.length}'},
+                ),
+                style: theme.textTheme.titleSmall,
+              ),
+            ),
+            IconButton(
+              tooltip: context.strings('hash.clear'),
+              onPressed: onClear,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

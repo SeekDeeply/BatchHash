@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
@@ -38,7 +39,54 @@ class EntryList extends StatelessWidget {
   }
 }
 
-/// One batch entry row with an icon, a text status and a semantics label.
+/// One algorithm/digest pair, selectable and copyable.
+class _DigestLine extends StatelessWidget {
+  const _DigestLine({required this.algorithm, required this.digest});
+
+  final String algorithm;
+  final String digest;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          SizedBox(
+            width: 82,
+            child: Text(algorithm, style: theme.textTheme.labelMedium),
+          ),
+          Expanded(
+            child: SelectableText(
+              digest,
+              key: ValueKey<String>('digest-$algorithm-$digest'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          Tooltip(
+            message: context.strings(
+              'entry.copyDigest',
+              args: <String, String>{'algorithm': algorithm},
+            ),
+            child: IconButton(
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+              iconSize: 18,
+              icon: const Icon(Icons.copy_outlined),
+              onPressed: () => Clipboard.setData(ClipboardData(text: digest)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One batch entry row: status, path, size and every computed digest.
 class EntryTile extends StatelessWidget {
   const EntryTile({super.key, required this.entry});
 
@@ -60,25 +108,49 @@ class EntryTile extends StatelessWidget {
       key: ValueKey<String>('entry-row-${entry.path}'),
       container: true,
       label: semanticsLabel,
-      child: ListTile(
-        dense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-        leading: Icon(
-          entryStatusIcon(entry.status),
-          key: ValueKey<String>('entry-status-icon-${entry.path}'),
-          color: statusColor,
-          semanticLabel: statusSemantics,
-        ),
-        title: Text(entry.path, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          _subtitle(context),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: StatusChip(
-          label: statusLabel,
-          color: statusColor,
-          icon: entryStatusIcon(entry.status),
+      child: Card(
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(
+                    entryStatusIcon(entry.status),
+                    key: ValueKey<String>('entry-status-icon-${entry.path}'),
+                    color: statusColor,
+                    semanticLabel: statusSemantics,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      entry.path,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  StatusChip(
+                    label: statusLabel,
+                    color: statusColor,
+                    icon: entryStatusIcon(entry.status),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(_subtitle(context), style: theme.textTheme.bodySmall),
+              if (entry.hashes.isNotEmpty) ...<Widget>[
+                const Divider(height: 16),
+                for (final MapEntry<String, String> digest
+                    in entry.hashes.entries)
+                  _DigestLine(algorithm: digest.key, digest: digest.value),
+              ],
+            ],
+          ),
         ),
       ),
     );

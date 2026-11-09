@@ -56,6 +56,53 @@ void main() {
       expect(await bare.loadHistory(), isEmpty);
     });
 
+    test('hashes every explicitly picked file across directories', () async {
+      // A native picker returns absolute paths that may live in different
+      // folders. Hashing must cover the whole selection instead of silently
+      // re-scanning only the first file's folder.
+      Directory('$root/one').createSync();
+      Directory('$root/two').createSync();
+      File('$root/one/a.txt').writeAsStringSync('alpha');
+      File('$root/two/b.txt').writeAsStringSync('bravo');
+      File('$root/two/unpicked.txt').writeAsStringSync('charlie');
+
+      final picked = await service.scanFiles(<String>[
+        '$root/one/a.txt',
+        '$root/two/b.txt',
+      ]);
+      expect(picked, hasLength(2));
+
+      final progress = await service
+          .computeHashes(entries: picked, algorithms: <String>['sha256', 'xxh3-64'])
+          .toList();
+      final hashed = progress.single.entries;
+      expect(hashed, hasLength(2));
+      for (final entry in hashed) {
+        expect(entry.hashes['sha256'], hasLength(64));
+        expect(entry.hashes['xxh3-64'], hasLength(16));
+      }
+      // The file the user did not pick must never appear in the result.
+      expect(hashed.map((entry) => entry.path), isNot(contains('unpicked.txt')));
+    });
+
+    test('every algorithm offered in the UI is accepted by the engine', () async {
+      // The xxh3 bug was a name mismatch: the UI sent 'xxh3' while the engine
+      // only knows 'xxh3-64', so the whole request failed as invalid_request.
+      // Hashing one file with each offered id pins the contract.
+      File('$root/probe.txt').writeAsStringSync('batchhash');
+      final scanned = await service.scanFiles(<String>['$root/probe.txt']);
+      for (final String algorithm in kAvailableAlgorithms) {
+        final progress = await service
+            .computeHashes(entries: scanned, algorithms: <String>[algorithm])
+            .toList();
+        final entry = progress.single.entries.single;
+        expect(
+          entry.hashes[algorithm],
+          isNotNull,
+          reason: 'algorithm $algorithm was rejected by the engine',
+        );
+      }
+    });
     test('tryCreate returns a service when the library loads', () {
       final created = RustBatchHashService.tryCreate(overridePath: libraryPath);
       expect(created, isNotNull);

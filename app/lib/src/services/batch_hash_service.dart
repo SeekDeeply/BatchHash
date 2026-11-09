@@ -19,6 +19,21 @@ abstract class BatchHashService {
   /// cannot honour it must fail loudly rather than return a superset.
   Future<List<BatchEntry>> scanDirectory(String path, {bool recursive = false});
 
+  /// Picked files are kept as an explicit set; implementations must not
+  /// rescan only the last selected file when hashing them.
+  Future<List<BatchEntry>> scanFiles(List<String> paths);
+
+  /// Directory the most recent scan or explicit selection is rooted at.
+  ///
+  /// Always a directory, so it can be used as a report root; empty before the
+  /// first scan.
+  String get lastScannedRoot;
+
+  /// Compute [algorithms] for [entries].
+  ///
+  /// Entries come from either [scanDirectory] or [scanFiles]; implementations
+  /// must hash exactly the entries they were given and never widen the set to
+  /// a whole folder behind the caller's back.
   Stream<HashProgress> computeHashes({
     required List<BatchEntry> entries,
     required List<String> algorithms,

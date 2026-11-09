@@ -41,6 +41,27 @@ Icon iconFor(WidgetTester tester, String path) {
 }
 
 void main() {
+  testWidgets('hashed rows show complete digest values and copy controls', (
+    WidgetTester tester,
+  ) async {
+    setViewSize(tester, const Size(800, 900));
+    const entry = BatchEntry(
+      path: 'archive.bin',
+      size: 12,
+      hashes: <String, String>{
+        'sha256': '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        'xxh3-64': '0123456789abcdef',
+      },
+    );
+    await tester.pumpWidget(
+      wrapInApp(const SingleChildScrollView(child: EntryList(entries: <BatchEntry>[entry]))),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text(entry.hashes['sha256']!), findsOneWidget);
+    expect(find.text(entry.hashes['xxh3-64']!), findsOneWidget);
+    expect(find.byIcon(Icons.copy_outlined), findsNWidgets(2));
+  });
+
   testWidgets('ok, failed and skipped rows use icon plus semantics label', (
     WidgetTester tester,
   ) async {

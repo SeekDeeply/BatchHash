@@ -10,7 +10,7 @@ const List<String> kAvailableAlgorithms = <String>[
   'blake2b',
   'blake2s',
   'blake3',
-  'xxh3',
+  'xxh3-64',
   'crc32',
   'crc32c',
 ];
@@ -21,7 +21,7 @@ const List<String> kSuffixAlgorithms = <String>[
   'sha256',
   'sha1',
   'md5',
-  'xxh3',
+  'xxh3-64',
 ];
 
 /// Outcome of hashing a single file.

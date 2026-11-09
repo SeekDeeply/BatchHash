@@ -94,12 +94,12 @@ abstract class BatchHashService {
   Stream<DiffProgress> compareReportWithDirectory({
     required ReportModel report,
     required String directory,
-    bool recursive = true,
+    bool recursive = false,
   });
   Future<List<DiffRowModel>> diffReportAgainstDirectory({
     required ReportModel report,
     required String directory,
-    bool recursive = true,
+    bool recursive = false,
   });
 
   /// Every batch this app has produced, newest first.

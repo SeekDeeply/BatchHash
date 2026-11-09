@@ -436,6 +436,9 @@ fn import_diff_and_history_round_trip() {
             directory: temp.path().to_string_lossy().into_owned(),
             case_sensitive: None,
             follow_links: false,
+            recursive: Some(true),
+            restrict_paths: Vec::new(),
+            max_entries: None,
         })
         .expect("directory diff");
     assert_eq!(
@@ -455,6 +458,122 @@ fn import_diff_and_history_round_trip() {
     assert_eq!(batches[0].undone_count, 0);
 }
 
+
+/// Picking one file must not make the comparison read its whole directory.
+/// Regression test for hashing an entire tree from a single-file report.
+#[test]
+fn directory_diff_honours_the_report_scope() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("picked.txt"), b"alpha");
+    // A sibling and a nested file that the report never mentions.
+    write(&temp.path().join("sibling.txt"), b"bravo");
+    write(&temp.path().join("nested/deep.txt"), b"charlie");
+
+    let scan_request = serde_json::json!({
+        "root": temp.path().to_string_lossy(),
+        "follow_links": false,
+    });
+    let scan_text =
+        CString::new(serde_json::to_string(&scan_request).expect("json")).expect("cstr");
+    let scanned = call_ok(unsafe { c_api::bh_scan(scan_text.as_ptr()) });
+    let all: Vec<serde_json::Value> = scanned["entries"]
+        .as_array()
+        .expect("entries")
+        .clone();
+    let picked = all
+        .iter()
+        .filter(|entry| entry["path"] == "picked.txt")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(picked.len(), 1, "the fixture has one picked file");
+
+    let hash_request = serde_json::json!({
+        "root": temp.path().to_string_lossy(),
+        "paths": ["picked.txt"],
+        "algorithms": ["sha256"],
+    });
+    let hash_text =
+        CString::new(serde_json::to_string(&hash_request).expect("json")).expect("cstr");
+    let hashed = call_ok(unsafe { c_api::bh_hash_entries(hash_text.as_ptr()) });
+    let report_json = hashed["report_json"]
+        .as_str()
+        .expect("report json")
+        .to_string();
+
+    // Unscoped would see all three files; restricted sees only the reported one.
+    let unscoped = batchhash_ffi::api::diff_directory_request(
+        &batchhash_ffi::api::DiffDirectoryRequest {
+            report_json: report_json.clone(),
+            directory: temp.path().to_string_lossy().into_owned(),
+            case_sensitive: None,
+            follow_links: false,
+            recursive: Some(true),
+            restrict_paths: Vec::new(),
+            max_entries: None,
+        },
+    )
+    .expect("unscoped diff");
+
+    let scoped = batchhash_ffi::api::diff_directory_request(
+        &batchhash_ffi::api::DiffDirectoryRequest {
+            report_json,
+            directory: temp.path().to_string_lossy().into_owned(),
+            case_sensitive: None,
+            follow_links: false,
+            recursive: Some(true),
+            restrict_paths: vec!["picked.txt".to_string()],
+            max_entries: None,
+        },
+    )
+    .expect("scoped diff");
+
+    assert!(
+        scoped.summary.total < unscoped.summary.total,
+        "scoping must reduce what gets compared: scoped={} unscoped={}",
+        scoped.summary.total,
+        unscoped.summary.total
+    );
+    assert_eq!(
+        scoped.summary.added, 0,
+        "files outside the scope must not appear as added"
+    );
+}
+
+/// A comparison must refuse a selection that exceeds the entry cap instead of
+/// grinding through it.
+#[test]
+fn directory_diff_rejects_a_selection_above_the_cap() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("a.txt"), b"alpha");
+    write(&temp.path().join("b.txt"), b"bravo");
+
+    let hash_request = serde_json::json!({
+        "root": temp.path().to_string_lossy(),
+        "paths": ["a.txt"],
+        "algorithms": ["sha256"],
+    });
+    let hash_text =
+        CString::new(serde_json::to_string(&hash_request).expect("json")).expect("cstr");
+    let hashed = call_ok(unsafe { c_api::bh_hash_entries(hash_text.as_ptr()) });
+    let report_json = hashed["report_json"]
+        .as_str()
+        .expect("report json")
+        .to_string();
+
+    let error = batchhash_ffi::api::diff_directory_request(
+        &batchhash_ffi::api::DiffDirectoryRequest {
+            report_json,
+            directory: temp.path().to_string_lossy().into_owned(),
+            case_sensitive: None,
+            follow_links: false,
+            recursive: Some(true),
+            restrict_paths: Vec::new(),
+            max_entries: Some(1),
+        },
+    )
+    .expect_err("the cap must reject a larger directory");
+    assert_eq!(error.kind, "too_large", "{error:?}");
+}
 #[test]
 fn c_abi_plan_and_diff_functions() {
     let temp = tempfile::tempdir().expect("tempdir");

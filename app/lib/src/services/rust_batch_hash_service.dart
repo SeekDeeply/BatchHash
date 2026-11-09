@@ -568,14 +568,54 @@ class RustBatchHashService implements BatchHashService {
   Future<List<DiffRowModel>> diffReportAgainstDirectory({
     required ReportModel report,
     required String directory,
-    bool recursive = true,
+    bool recursive = false,
   }) async {
     final data = native.diffDirectory(
       reportJson: _reportJson(report),
       directory: directory,
       followLinks: false,
+      recursive: recursive,
+      restrictPaths: _scopePaths(report),
     );
     return _diffRows(data);
+  }
+
+  /// Relative paths of the files this report covers.
+  ///
+  /// The report already names exactly the files the user hashed. Handing those
+  /// to the engine keeps a comparison about one file instead of the whole tree
+  /// that file happens to live in.
+  List<String> _scopePaths(ReportModel report) {
+    final String root = report.root;
+    final List<String> paths = <String>[];
+    for (final BatchEntry entry in report.entries) {
+      final String relative = _relativeTo(root, entry.path);
+      if (relative.isNotEmpty) {
+        paths.add(relative);
+      }
+    }
+    return paths;
+  }
+
+  /// Strip the root prefix from a display path.
+  ///
+  /// Returns an empty string when the entry is not under the root, which the
+  /// engine would reject anyway; skipping it keeps the rest of the scope valid.
+  String _relativeTo(String root, String path) {
+    if (root.isEmpty) {
+      return '';
+    }
+    final String normalizedRoot = root.endsWith('/') || root.endsWith('\\')
+        ? root.substring(0, root.length - 1)
+        : root;
+    if (!path.startsWith(normalizedRoot)) {
+      return '';
+    }
+    String relative = path.substring(normalizedRoot.length);
+    while (relative.startsWith('/') || relative.startsWith('\\')) {
+      relative = relative.substring(1);
+    }
+    return relative;
   }
 
   /// Only true when the loaded library exposes the async job API.
@@ -604,7 +644,7 @@ class RustBatchHashService implements BatchHashService {
   Stream<DiffProgress> compareReportWithDirectory({
     required ReportModel report,
     required String directory,
-    bool recursive = true,
+    bool recursive = false,
   }) {
     return _streamDiff(
       report: report,
@@ -619,16 +659,24 @@ class RustBatchHashService implements BatchHashService {
     required String directory,
     required bool recursive,
   }) async* {
+    // Scope the comparison to the files the report lists. Without this the
+    // engine hashes whatever sits next to them, which for a single picked file
+    // means its whole parent tree.
+    final List<String> scope = _scopePaths(report);
     final request = <String, Object?>{
       'report_json': _reportJson(report),
       'directory': directory,
       'follow_links': false,
+      'recursive': recursive,
+      if (scope.isNotEmpty) 'restrict_paths': scope,
     };
     if (!native.supportsAsyncJobs()) {
       final data = native.diffDirectory(
         reportJson: request['report_json']! as String,
         directory: directory,
         followLinks: false,
+        recursive: recursive,
+        restrictPaths: scope,
       );
       yield DiffProgress(
         done: true,

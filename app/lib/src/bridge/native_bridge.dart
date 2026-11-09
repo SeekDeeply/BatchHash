@@ -303,12 +303,20 @@ class BatchHashNative {
     required String directory,
     bool? caseSensitive,
     bool followLinks = false,
+    bool? recursive,
+    List<String> restrictPaths = const <String>[],
+    int? maxEntries,
   }) {
     return _callMap('bh_diff_directory', <String, Object?>{
       'report_json': reportJson,
       'directory': directory,
       if (caseSensitive != null) 'case_sensitive': caseSensitive,
       'follow_links': followLinks,
+      // Sent explicitly so an older default can never silently widen the
+      // comparison to a whole tree.
+      if (recursive != null) 'recursive': recursive,
+      if (restrictPaths.isNotEmpty) 'restrict_paths': restrictPaths,
+      if (maxEntries != null) 'max_entries': maxEntries,
     });
   }
 

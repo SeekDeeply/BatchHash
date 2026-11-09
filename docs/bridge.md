@@ -113,7 +113,20 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 | `executeRenames` | `bh_run_batch` + `apply_renames`（写 SQLite 日志） |
 | `exportReport` | `bh_build_report` + `bh_export_report`，Dart 负责落盘 |
 | `importReport` | `bh_import_report` |
-| `diffReports` / `diffReportAgainstDirectory` | `bh_diff_reports` / `bh_diff_directory`（目录对比走任务协议） |
+| `diffReports` / `diffReportAgainstDirectory` | `bh_diff_reports` / `bh_diff_directory`（目录对比走任务协议，范围见下） |
+
+### 目录对比的范围与上限
+
+`DiffDirectoryRequest` 有三个决定「这次到底读多少」的字段，都不该由引擎替调用方猜：
+
+- `recursive`（缺省 `false`）：是否进入子目录。报告里的 root 往往只是所选文件的公共父目录，
+  默认递归会把整棵树算进去——这正是「选了一个文件却扫描整个目录」的原因。
+- `restrict_paths`（缺省空）：只哈希这些根相对路径。缺省空表示「扫描到的都算」，
+  所以只关心报告里那些文件的调用方**必须**显式传入，否则范围退回整个扫描结果。
+- `max_entries`（缺省 50000）：条目上限，`0` 表示不限制。超限返回 `too_large`。
+
+另有字节上限 `DIFF_SCAN_MAX_BYTES`（8 GiB）。哈希是流式的，内存不会涨，
+但无上限的对比会持续压满磁盘与 CPU；上限让它在变成系统问题之前就失败。
 | `cancelCurrentOperation` | `bh_job_cancel`（真正停止原生工作，而非只断开 Dart 订阅） |
 | `loadHistory` / `undoBatch` | `bh_list_batches` / `bh_undo` |
 

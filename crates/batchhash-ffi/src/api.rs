@@ -20,6 +20,19 @@ use batchhash_types::{
 /// Version of the request/response contract.
 pub const CONTRACT_VERSION: u32 = 1;
 
+/// Default cap on entries a realtime directory comparison may scan.
+///
+/// Without a cap a single comparison against a home directory can queue
+/// hundreds of thousands of files, saturating CPU and disk. Callers can raise
+/// it explicitly, but the default must fail loudly instead of running forever.
+pub const DIFF_SCAN_MAX_ENTRIES: u64 = 50_000;
+
+/// Default cap on the bytes a realtime directory comparison may read.
+///
+/// Hashing is streaming, so memory stays flat; this cap protects disk and CPU
+/// from a comparison that would otherwise grind through a whole volume.
+pub const DIFF_SCAN_MAX_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
 /// Error returned by every bridge call.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ApiError {
@@ -949,6 +962,23 @@ pub struct DiffDirectoryRequest {
     /// Follow symbolic links while scanning.
     #[serde(default)]
     pub follow_links: bool,
+    /// Whether to descend into subdirectories.
+    ///
+    /// Absent means "this folder only". A report built from explicitly picked
+    /// files carries a root that is merely their common parent, so descending
+    /// by default would hash an entire tree the user never chose.
+    #[serde(default)]
+    pub recursive: Option<bool>,
+    /// Root-relative paths to hash, instead of every scanned entry.
+    ///
+    /// This is what keeps the comparison tied to the report: only the files
+    /// the report actually lists are read back, so a one-file report never
+    /// re-hashes a directory.
+    #[serde(default)]
+    pub restrict_paths: Vec<String>,
+    /// Hard cap on scanned entries; zero uses [DIFF_SCAN_MAX_ENTRIES].
+    #[serde(default)]
+    pub max_entries: Option<u64>,
 }
 
 /// Diff counters.
@@ -1363,16 +1393,58 @@ pub fn diff_directory_request_with_progress(
 ) -> Result<DiffResultDto, ApiError> {
     let report = parse_report_json(&request.report_json)?;
     progress(ProgressDto::stage("scanning", 0, 0, 0.0));
+    // A report built from explicitly picked files has a root that is only
+    // their shared parent. Descending the tree and hashing everything under it
+    // would read far more than the user asked for, so the default is "this
+    // folder only" and restrict_paths narrows it further.
+    let recursive = request.recursive.unwrap_or(false);
     let scan_options = ScanOptions {
         follow_links: request.follow_links,
+        recursive,
         ..ScanOptions::default()
     };
     let scanned = scan(std::path::Path::new(&request.directory), &scan_options)
         .map_err(|error| ApiError::new("io", error.to_string()))?;
+    let max_entries = request.max_entries.unwrap_or(DIFF_SCAN_MAX_ENTRIES);
+    if max_entries > 0 && scanned.entries.len() as u64 > max_entries {
+        return Err(ApiError::new(
+            "too_large",
+            format!(
+                "the directory holds {} entries, above the {max_entries} limit",
+                scanned.entries.len()
+            ),
+        ));
+    }
+    let restrict: std::collections::BTreeSet<&str> = request
+        .restrict_paths
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let targets: Vec<batchhash_types::FileEntry> = if restrict.is_empty() {
+        scanned.entries.clone()
+    } else {
+        scanned
+            .entries
+            .iter()
+            .filter(|entry| restrict.contains(entry.relative_path.as_str()))
+            .cloned()
+            .collect()
+    };
+    let bytes_total: u64 = targets.iter().map(|entry| entry.size).sum();
+    let max_bytes = DIFF_SCAN_MAX_BYTES;
+    if max_bytes > 0 && bytes_total > max_bytes {
+        return Err(ApiError::new(
+            "too_large",
+            format!(
+                "the selection holds {bytes_total} bytes, above the {max_bytes} limit"
+            ),
+        ));
+    }
+    let scanned_total = scanned.entries.len();
     progress(ProgressDto::stage(
         "scanning",
-        scanned.entries.len() as u64,
-        scanned.entries.len() as u64,
+        scanned_total as u64,
+        scanned_total as u64,
         100.0,
     ));
     let options = HashEntryOptions {
@@ -1384,7 +1456,7 @@ pub fn diff_directory_request_with_progress(
             progress(ProgressDto::from_scheduler(&snapshot));
         }
     };
-    let outcome = batchhash_hash::hash_entries(&scanned.entries, &options, cancel, &forward);
+    let outcome = batchhash_hash::hash_entries(&targets, &options, cancel, &forward);
     progress(ProgressDto::stage(
         "comparing",
         0,

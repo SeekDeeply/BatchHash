@@ -150,8 +150,15 @@ class _ComparePageState extends State<ComparePage> {
   StreamSubscription<DiffProgress>? _diffSubscription;
   DiffProgress? _diffProgress;
 
+  /// Folder the directory comparison reads from.
+  ///
+  /// Empty means "the report root", resolved when the comparison starts; a
+  /// user-chosen folder persists so switching modes does not lose it.
+  String _diffDirectory = '';
+
   Future<void> _load(ReportModel report) async {
-    await _startDirectoryDiff(report, report.root);
+    final String directory = _diffDirectory.isEmpty ? report.root : _diffDirectory;
+    await _startDirectoryDiff(report, directory);
   }
 
   Future<void> _startDirectoryDiff(
@@ -402,6 +409,9 @@ class _ComparePageState extends State<ComparePage> {
           if (_mode == CompareMode.reports) ...<Widget>[
             const SizedBox(height: 12),
             _buildReportInputs(),
+          ] else ...<Widget>[
+            const SizedBox(height: 12),
+            _buildScopeCard(),
           ],
           const SizedBox(height: 12),
           SummaryCard(
@@ -542,6 +552,93 @@ class _ComparePageState extends State<ComparePage> {
     );
   }
 
+  /// Show what the directory comparison will actually read, and let the user
+  /// point it somewhere else.
+  ///
+  /// The report names exactly the files it covers, so the honest default is
+  /// "compare those files" rather than "hash this whole folder".
+  Widget _buildScopeCard() {
+    final ThemeData theme = Theme.of(context);
+    final ReportModel? report = widget.state.report.value;
+    final int count = report?.entries.length ?? 0;
+    final String root = _diffDirectory.isNotEmpty
+        ? _diffDirectory
+        : (report?.root ?? '');
+    return Card(
+      key: const ValueKey<String>('compare-scope'),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              context.strings('compare.scopeTitle'),
+              style: theme.textTheme.labelLarge,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              context.strings(
+                'compare.scopeFiles',
+                args: <String, String>{'count': '$count'},
+              ),
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              root.isEmpty
+                  ? context.strings('common.notAvailable')
+                  : root,
+              style: theme.textTheme.bodySmall,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: <Widget>[
+                OutlinedButton.icon(
+                  key: const ValueKey<String>('compare-choose-directory'),
+                  onPressed: _loading ? null : _chooseDiffDirectory,
+                  icon: const Icon(Icons.folder_open_outlined),
+                  label: Text(context.strings('compare.chooseDirectory')),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Let the user pick the folder to compare against.
+  Future<void> _chooseDiffDirectory() async {
+    final ReportModel? report = widget.state.report.value;
+    if (report == null) {
+      return;
+    }
+    final String? picked = await PlatformPickers.directory(() async {
+      if (!mounted) {
+        return null;
+      }
+      return PathInputDialog.show(
+        context,
+        title: context.strings('compare.chooseDirectory'),
+        hintText: context.strings('path.hint.folder'),
+        helperText: context.strings('compare.scopeHint'),
+        initialValue: _diffDirectory.isEmpty ? report.root : _diffDirectory,
+        suggestions: widget.state.recentPaths.value,
+      );
+    });
+    if (!mounted || picked == null || picked.trim().isEmpty) {
+      return;
+    }
+    setState(() {
+      _diffDirectory = picked.trim();
+    });
+    widget.state.rememberPath(picked.trim());
+    await _startDirectoryDiff(report, _diffDirectory);
+  }
   Widget _buildDiffTable(
     List<DiffRowModel> rows, {
     required String leftKey,

@@ -368,7 +368,7 @@ class FakeBatchHashService implements BatchHashService {
   Future<List<DiffRowModel>> diffReportAgainstDirectory({
     required ReportModel report,
     required String directory,
-    bool recursive = true,
+    bool recursive = false,
   }) async {
     return _buildDiffRows();
   }
@@ -389,7 +389,7 @@ class FakeBatchHashService implements BatchHashService {
   Stream<DiffProgress> compareReportWithDirectory({
     required ReportModel report,
     required String directory,
-    bool recursive = true,
+    bool recursive = false,
   }) async* {
     // A new run starts uncancelled; a sticky flag would make the next
     // comparison abort immediately and mask a real regression.

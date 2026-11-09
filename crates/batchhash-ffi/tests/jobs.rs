@@ -158,6 +158,11 @@ fn directory_diff_job_completes_after_a_report() {
         directory: dir.to_string_lossy().into_owned(),
         case_sensitive: None,
         follow_links: false,
+        // Walk the tree here: the fixture files are nested and this test is
+        // about the job protocol, not about comparison scope.
+        recursive: Some(true),
+        restrict_paths: Vec::new(),
+        max_entries: None,
     })
     .expect("start the diff job");
     let diff_status = wait_for(&diff_id);

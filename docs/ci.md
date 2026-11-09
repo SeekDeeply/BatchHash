@@ -115,6 +115,11 @@ VCRUNTIME140_1D.dll / ucrtbased.dll，无法继续执行代码`。这四个名�
 **不等于**已经在真实 Windows 上跑过。首次发布前仍需人工在干净机器上启动一次（见
 [docs/release-checklist.md](release-checklist.md)）。
 
+**一个已经踩过的坑**：`VC\Redist\MSVC\<ver>\` 下同时存在桌面版 `x64\Microsoft.VC142.CRT`
+和 UWP 版 `onecore\x64\Microsoft.VC142.CRT`，两者都匹配 `x64` 路径模式。OneCore 是
+UWP/minimal API set 变体，打进桌面应用是错的运行时。选目录时显式排除 `onecore`，
+并按解析后的版本号排序（按字符串排会把 `14.9` 排在 `14.44` 之上，反而选到更旧的 CRT）。
+
 ## Android 签名（Release）
 
 仅在 secrets 存在时生效，缺失时构建照常成功但**仍是 debug 签名**（Flutter 默认）：

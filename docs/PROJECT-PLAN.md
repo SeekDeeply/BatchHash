@@ -34,7 +34,9 @@
 - **Flutter（全平台 UI）**：Material 3、dynamic_color、自适应布局。
 - **Rust 核心库**：Hash Engine、Batch Scheduler、Suffix、Rename Planner、Verify、Checksum、
   Report、Diff Engine、PathNormalizer、HardwareProbe、Log Store。
-- **桥接**：flutter_rust_bridge 2.x（P0.5 起）。
+- **桥接**：JSON C ABI + `dart:ffi`（P0.5 起）。规划阶段写的是 flutter_rust_bridge 2.x，
+  实际实现换成了手写 C ABI：不需要代码生成器，CI 能用真实 Rust 库直接跑桥接测试
+  （原因见 [docs/bridge.md](bridge.md)）。
 - **平台原生**：Android Kotlin SAF/renameDocument/权限；iOS Swift bookmark；
   Flutter isHardwareAccelerated / GPU 后端。
 

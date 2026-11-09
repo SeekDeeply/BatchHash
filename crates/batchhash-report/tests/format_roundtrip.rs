@@ -553,4 +553,3 @@ fn diff_reports_incomplete_hashes_as_unknown() {
     );
     assert_eq!(diff.summary.unchanged, 1);
 }
-

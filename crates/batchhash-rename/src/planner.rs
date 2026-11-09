@@ -387,7 +387,6 @@ fn linux_rename_noreplace(
     to: &Path,
 ) -> Result<Option<Result<(), RenameError>>, RenameError> {
     use std::os::raw::c_char;
-    use std::os::unix::ffi::OsStrExt;
 
     let from_c = path_to_cstring(from)?;
     let to_c = path_to_cstring(to)?;
@@ -431,6 +430,8 @@ fn is_rename_noreplace_unsupported(error: &std::io::Error) -> bool {
 /// cannot be represented as bytes.
 #[cfg(target_os = "linux")]
 fn path_to_cstring(path: &Path) -> Result<std::ffi::CString, RenameError> {
+    use std::os::unix::ffi::OsStrExt;
+
     std::ffi::CString::new(path.as_os_str().as_bytes())
         .map_err(|_| RenameError::InvalidPath(path.display().to_string()))
 }

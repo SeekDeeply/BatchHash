@@ -282,7 +282,9 @@ fn insert_pending(store: &mut LogStore, batch: &BatchRecord, from: &Path, to: &P
         "0123456789abcdef0123456789abcdef".to_string(),
         "ABCDEF12".to_string(),
     );
-    store.insert_operation(&operation).expect("insert operation")
+    store
+        .insert_operation(&operation)
+        .expect("insert operation")
 }
 
 fn new_batch(root: &Path) -> BatchRecord {
@@ -335,10 +337,15 @@ fn undo_never_restores_over_an_occupied_original_path() {
         .as_deref()
         .is_some_and(|error| error.contains("already occupied")));
     // Both files are intact: nothing was overwritten and nothing was moved.
-    assert_eq!(fs::read(&original).expect("read squatter"), b"squatter".to_vec());
+    assert_eq!(
+        fs::read(&original).expect("read squatter"),
+        b"squatter".to_vec()
+    );
     assert!(Path::new(&undo_from).exists(), "the renamed file must stay");
     assert_eq!(
-        store.operation_state(results[0].operation_id).expect("state"),
+        store
+            .operation_state(results[0].operation_id)
+            .expect("state"),
         Some(OperationState::Applied),
         "a skipped undo must stay applied"
     );
@@ -458,7 +465,10 @@ fn cancellation_raised_on_the_apply_event_renames_nothing() {
 
     let run = run_batch(&request, &cancel, &events).expect("run");
     assert!(run.cancelled, "the cancellation must be reported");
-    assert!(file.exists(), "cancelling on the apply event must not rename");
+    assert!(
+        file.exists(),
+        "cancelling on the apply event must not rename"
+    );
     assert!(
         run.rename_results.is_empty(),
         "no rename may be executed after cancellation: {:?}",
@@ -470,7 +480,11 @@ fn cancellation_raised_on_the_apply_event_renames_nothing() {
     let mut store = LogStore::open(&db).expect("open log");
     let batch_id = run.batch_id.clone().expect("batch id");
     let operations = store.operations_for_batch(&batch_id).expect("operations");
-    assert_eq!(operations.len(), 1, "the ready row was logged before the check");
+    assert_eq!(
+        operations.len(),
+        1,
+        "the ready row was logged before the check"
+    );
     assert_eq!(
         operations[0].state,
         OperationState::Conflict,

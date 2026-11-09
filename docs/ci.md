@@ -31,6 +31,18 @@
 （`subosito/flutter-action@v2` 的 `flutter-version`，**不再用 `channel: stable`**）。
 固定版本的意义是：同一份提交在任何时间重跑得到同一套编译器行为。
 
+**Rust 版本有两处声明，必须一致**：`rust-toolchain.toml` 的 `channel` 与各工作流的
+`dtolnay/rust-toolchain@<version>`。`rust-toolchain.toml` 优先级更高——rustup 在仓库目录内
+会强制切到它写的 channel，而**额外 target 是按 channel 安装的**。曾经这里写 `stable`、
+CI 装的却是 `1.82.0` + Android target，结果 `package-native` 报
+`` can't find crate for `core` ``（aarch64-linux-android）。现在
+`scripts/verify-versions.mjs` 会比对这两处并在不一致时直接失败，所以这种漂移不会再次
+悄悄发生。`Cargo.toml` 里的 `rust-version = "1.82"` 是 MSRV 下限，语义不同，不参与该比对。
+
+Android 打包用的 `cargo-ndk` 从 GitHub Release 下载**预编译二进制**（`4.1.2`，解包时用
+`--strip-components=1` 去掉版本目录）而不是 `cargo install`：仓库既然把工具链钉在 1.82.0，
+源码安装就会用 1.82.0 编译 cargo-ndk，可能撞上它自己的 MSRV。
+
 所有 checkout 都带 `persist-credentials: false`，job 也不持有 `contents: write`：
 CI 不需要写仓库。
 

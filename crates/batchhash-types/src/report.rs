@@ -50,7 +50,6 @@ impl Default for SuffixConfig {
         }
     }
 }
-
 impl SuffixConfig {
     pub const MIN_LENGTH: u8 = 4;
     pub const MAX_LENGTH: u8 = 16;
@@ -521,7 +520,10 @@ mod tests {
         assert!(report.validate().is_ok());
 
         report.recompute_summary();
-        assert!(report.summary.truncated, "recompute keeps the export decision");
+        assert!(
+            report.summary.truncated,
+            "recompute keeps the export decision"
+        );
         assert!(report.validate().is_ok());
     }
 
@@ -540,7 +542,9 @@ mod tests {
     #[test]
     fn summary_counters_saturate_instead_of_panicking() {
         let mut report = make_report(vec![entry("a.mkv", u64::MAX, EntryStatus::Ok, 'a')]);
-        report.entries.push(entry("b.mkv", u64::MAX, EntryStatus::Ok, 'b'));
+        report
+            .entries
+            .push(entry("b.mkv", u64::MAX, EntryStatus::Ok, 'b'));
         report.recompute_summary();
         assert_eq!(report.summary.total, 2);
         assert_eq!(report.summary.total_bytes, u64::MAX);

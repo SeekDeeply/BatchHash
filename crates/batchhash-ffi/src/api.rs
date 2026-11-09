@@ -1372,10 +1372,7 @@ mod tests {
         }
     }
 
-    fn suffix_request(
-        root: &std::path::Path,
-        log_db: Option<&std::path::Path>,
-    ) -> BatchRequestDto {
+    fn suffix_request(root: &std::path::Path, log_db: Option<&std::path::Path>) -> BatchRequestDto {
         let mut request = batch_request(root, vec!["md5"]);
         request.suffix = Some(SuffixDto {
             algorithm: "md5".to_string(),
@@ -1414,10 +1411,13 @@ mod tests {
 
         // Applying suffixes without a log path is an internally inconsistent
         // request, so the UI must be able to tell it apart from a pipeline bug.
-        let error =
-            run_batch_request(&suffix_request(temp.path(), None)).expect_err("must fail");
+        let error = run_batch_request(&suffix_request(temp.path(), None)).expect_err("must fail");
         assert_eq!(error.kind, "invalid_request");
-        assert!(error.message.contains("rename log path"), "{}", error.message);
+        assert!(
+            error.message.contains("rename log path"),
+            "{}",
+            error.message
+        );
 
         // The same request without apply_renames is a valid dry run.
         let mut dry_run = suffix_request(temp.path(), None);
@@ -1523,4 +1523,3 @@ mod tests {
         assert!(imported.contains("schema_version"), "{imported}");
     }
 }
-

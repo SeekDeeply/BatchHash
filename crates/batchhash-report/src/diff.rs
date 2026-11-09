@@ -762,18 +762,6 @@ fn compare_pair(
             changed_algorithms,
         );
     }
-    // Every declared algorithm must actually have been compared before a row
-    // may claim anything beyond "changed" (which the digests already prove).
-    // A digest missing on either side means that algorithm could still differ,
-    // so the honest verdict is Unknown; name what is missing and where.
-    if !missing.is_empty() {
-        return (
-            DiffStatus::Unknown,
-            format!("incomplete hashes: missing {}", missing.join(", ")),
-            algorithms_compared,
-            Vec::new(),
-        );
-    }
     if left.size != right.size {
         return (
             DiffStatus::Corrupt,
@@ -781,6 +769,18 @@ fn compare_pair(
                 "hashes match but size differs: left {}, right {}",
                 left.size, right.size
             ),
+            algorithms_compared,
+            Vec::new(),
+        );
+    }
+    // Only past the verdicts the digests already prove does "missing evidence"
+    // become the strongest honest claim: a digest absent on either side was
+    // never compared, so it could still differ and the row must not read as
+    // unchanged. Name the algorithm and the side it is absent from.
+    if !missing.is_empty() {
+        return (
+            DiffStatus::Unknown,
+            format!("incomplete hashes: missing {}", missing.join(", ")),
             algorithms_compared,
             Vec::new(),
         );
@@ -1023,7 +1023,10 @@ mod tests {
             vec![make_entry(
                 "a.mkv",
                 10,
-                &[(AlgorithmId::Md5, md5('a')), (AlgorithmId::Crc32, crc32('0'))],
+                &[
+                    (AlgorithmId::Md5, md5('a')),
+                    (AlgorithmId::Crc32, crc32('0')),
+                ],
             )],
         );
         let right = make_report(
@@ -1045,7 +1048,10 @@ mod tests {
             vec![make_entry(
                 "a.mkv",
                 10,
-                &[(AlgorithmId::Md5, md5('a')), (AlgorithmId::Crc32, crc32('0'))],
+                &[
+                    (AlgorithmId::Md5, md5('a')),
+                    (AlgorithmId::Crc32, crc32('0')),
+                ],
             )],
         );
         let right = make_report(
@@ -1054,7 +1060,10 @@ mod tests {
             vec![make_entry(
                 "a.mkv",
                 10,
-                &[(AlgorithmId::Md5, md5('a')), (AlgorithmId::Crc32, crc32('0'))],
+                &[
+                    (AlgorithmId::Md5, md5('a')),
+                    (AlgorithmId::Crc32, crc32('0')),
+                ],
             )],
         );
         let diff = diff_reports(&left, &right, &options()).expect("valid reports");

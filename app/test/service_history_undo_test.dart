@@ -13,8 +13,10 @@ void main() {
   // the channel call would throw an Error instead of MissingPluginException.
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  final String? libraryPath = Platform.environment['BATCHHASH_FFI_LIB'];
-  final bool available = libraryPath != null && libraryPath.isNotEmpty;
+  // Non-nullable so no test body needs a `!`: the groups below are skipped
+  // entirely when the variable is unset, so the empty value is never opened.
+  final String libraryPath = Platform.environment['BATCHHASH_FFI_LIB'] ?? '';
+  final bool available = libraryPath.isNotEmpty;
 
   group('RustBatchHashService history and undo', () {
     late Directory temp;
@@ -25,7 +27,7 @@ void main() {
     setUp(() {
       temp = Directory.systemTemp.createTempSync('batchhash_history');
       root = temp.path;
-      scannedRoot = '${root}/files';
+      scannedRoot = '$root/files';
       Directory(scannedRoot).createSync();
       support = Directory('${temp.path}/support')..createSync();
     });
@@ -38,8 +40,8 @@ void main() {
 
     RustBatchHashService build({AppConfigStore? store, String? logDb}) {
       return RustBatchHashService(
-        native: BatchHashNative.open(libraryPath!),
-        logDbPath: logDb ?? '${scannedRoot}/.batchhash-rename.db',
+        native: BatchHashNative.open(libraryPath),
+        logDbPath: logDb ?? '$scannedRoot/.batchhash-rename.db',
         configStore:
             store ??
             FileAppConfigStore(supportDirectory: () async => support),
@@ -51,7 +53,7 @@ void main() {
       required List<String> names,
     }) async {
       for (final String name in names) {
-        File('${scannedRoot}/${name}').writeAsStringSync(name);
+        File('$scannedRoot/$name').writeAsStringSync(name);
       }
       final List<BatchEntry> scanned = await service.scanDirectory(scannedRoot);
       final List<HashProgress> progress = await service
@@ -74,7 +76,7 @@ void main() {
       expect(store.roots.single.root, scannedRoot);
       expect(
         store.roots.single.resolvedLogDb,
-        '${scannedRoot}/.batchhash-rename.db',
+        '$scannedRoot/.batchhash-rename.db',
       );
     });
 
@@ -91,7 +93,7 @@ void main() {
 
       // A brand new service with no in-memory root is what a relaunch gets.
       final RustBatchHashService relaunched = RustBatchHashService(
-        native: BatchHashNative.open(libraryPath!),
+        native: BatchHashNative.open(libraryPath),
         configStore: store,
       );
       final List<HistoryBatchModel> history = await relaunched.loadHistory();
@@ -109,7 +111,7 @@ void main() {
       await applyOneBatch(first, names: <String>['a.txt']);
 
       final RustBatchHashService second = RustBatchHashService(
-        native: BatchHashNative.open(libraryPath!),
+        native: BatchHashNative.open(libraryPath),
         logDbPath: '${otherRoot.path}/.batchhash-rename.db',
         configStore: store,
       );
@@ -128,7 +130,7 @@ void main() {
       await second.executeRenames(plan);
 
       final RustBatchHashService relaunched = RustBatchHashService(
-        native: BatchHashNative.open(libraryPath!),
+        native: BatchHashNative.open(libraryPath),
         configStore: store,
       );
       final List<HistoryBatchModel> history = await relaunched.loadHistory();
@@ -161,7 +163,7 @@ void main() {
       await applyOneBatch(first, names: <String>['a.txt']);
 
       final RustBatchHashService relaunched = RustBatchHashService(
-        native: BatchHashNative.open(libraryPath!),
+        native: BatchHashNative.open(libraryPath),
         configStore: store,
       );
       final List<HistoryBatchModel> history = await relaunched.loadHistory();
@@ -199,12 +201,12 @@ void main() {
       // The user relaunches, opens history, and undoes from there: this service
       // was never given a log path, so the remembered root must supply it.
       final RustBatchHashService relaunched = RustBatchHashService(
-        native: BatchHashNative.open(libraryPath!),
+        native: BatchHashNative.open(libraryPath),
         configStore: store,
       );
       final bool undone = await relaunched.undoBatch(executed.batchId!);
       expect(undone, isTrue);
-      expect(File('${scannedRoot}/a.txt').existsSync(), isTrue);
+      expect(File('$scannedRoot/a.txt').existsSync(), isTrue);
     });
 
     test('a failed undo leaves the cached report alone', () async {
@@ -236,7 +238,7 @@ void main() {
       temp = Directory.systemTemp.createTempSync('batchhash_export');
       root = temp.path;
       support = Directory('${temp.path}/support')..createSync();
-      File('${root}/a.txt').writeAsStringSync('alpha');
+      File('$root/a.txt').writeAsStringSync('alpha');
     });
 
     tearDown(() {
@@ -261,7 +263,7 @@ void main() {
 
     test('defaults to the support directory, never the temp directory', () async {
       final RustBatchHashService service = RustBatchHashService(
-        native: BatchHashNative.open(libraryPath!),
+        native: BatchHashNative.open(libraryPath),
         supportDirectory: () async => support,
       );
       final List<ExportedReport> written = await service.exportReport(
@@ -281,7 +283,7 @@ void main() {
 
     test('a second export does not overwrite the first', () async {
       final RustBatchHashService service = RustBatchHashService(
-        native: BatchHashNative.open(libraryPath!),
+        native: BatchHashNative.open(libraryPath),
         supportDirectory: () async => support,
       );
       final ReportModel report = await realReport(service);
@@ -302,9 +304,9 @@ void main() {
     });
 
     test('an explicit directory still wins', () async {
-      final String explicit = '${root}/out';
+      final String explicit = '$root/out';
       final RustBatchHashService service = RustBatchHashService(
-        native: BatchHashNative.open(libraryPath!),
+        native: BatchHashNative.open(libraryPath),
         supportDirectory: () async => support,
       );
       final List<ExportedReport> written = await service.exportReport(
@@ -312,7 +314,7 @@ void main() {
         formats: <ReportFormat>{ReportFormat.csv},
         directory: explicit,
       );
-      expect(written.single.path, '${explicit}/batchhash-report.csv');
+      expect(written.single.path, '$explicit/batchhash-report.csv');
       expect(File(written.single.path).existsSync(), isTrue);
     });
   }, skip: available ? false : 'BATCHHASH_FFI_LIB is not set');

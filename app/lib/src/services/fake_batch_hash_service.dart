@@ -508,7 +508,7 @@ class FakeBatchHashService implements BatchHashService {
   /// The real service derives the same list from the plan; sharing the rule
   /// keeps the fake from accepting a plan the native layer would refuse.
   List<String> _readyPaths(RenamePlanModel plan) {
-    final String prefix = '$rootPath/';
+    const String prefix = '$rootPath/';
     final List<String> paths = <String>[];
     for (final RenamePlanRowModel row in plan.rows) {
       if (row.status != RenameRowStatus.ready) {

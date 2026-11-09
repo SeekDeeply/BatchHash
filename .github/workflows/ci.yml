@@ -169,10 +169,27 @@ jobs:
           flutter create --platforms=android,linux --project-name batchhash .
           flutter pub get
       - name: Install cargo-ndk
+        # The prebuilt release binary, not `cargo install`: the repository pins
+        # Rust 1.82.0 through rust-toolchain.toml, so a source install would
+        # compile cargo-ndk with that toolchain and could fail on its MSRV. The
+        # version is pinned because the asset name carries it.
+        env:
+          CARGO_NDK_VERSION: "4.1.2"
         run: |
+          set -euo pipefail
           if ! command -v cargo-ndk >/dev/null 2>&1; then
-            cargo install cargo-ndk --locked
+            asset="cargo-ndk-x86_64-unknown-linux-gnu-v$CARGO_NDK_VERSION.tgz"
+            curl --proto '=https' --tlsv1.2 --retry 5 -fsSL \
+              "https://github.com/bbqsrc/cargo-ndk/releases/download/v$CARGO_NDK_VERSION/$asset" \
+              -o "$RUNNER_TEMP/cargo-ndk.tgz"
+            # The archive wraps its binaries in a versioned directory.
+            mkdir -p "$RUNNER_TEMP/cargo-ndk"
+            tar -xzf "$RUNNER_TEMP/cargo-ndk.tgz" -C "$RUNNER_TEMP/cargo-ndk" --strip-components=1
+            for binary in cargo-ndk cargo-ndk-env cargo-ndk-runner cargo-ndk-test; do
+              install -m 0755 "$RUNNER_TEMP/cargo-ndk/$binary" "$HOME/.cargo/bin/$binary"
+            done
           fi
+          cargo ndk --version
       - name: Build Android native libraries
         run: |
           set -e

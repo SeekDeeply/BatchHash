@@ -18,7 +18,7 @@ String defaultLogDbFor(String root) {
     return '.batchhash-rename.db';
   }
   final bool separated = root.endsWith('/') || root.endsWith('\\');
-  return separated ? '${root}.batchhash-rename.db' : '$root/.batchhash-rename.db';
+  return separated ? '$root.batchhash-rename.db' : '$root/.batchhash-rename.db';
 }
 
 /// One batch root the app has used before.

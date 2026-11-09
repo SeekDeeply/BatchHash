@@ -30,8 +30,8 @@ use batchhash_rename::log_store::{
     ReconcileReport, RenameOperation,
 };
 use batchhash_rename::planner::{
-    execute_plan_with_policy_and_cancel, plan_renames, RenamePlan, RenamePlanOptions,
-    RenameResult, RenameResultStatus, RenameRowStatus, StdFsBackend, StdRenameFs,
+    execute_plan_with_policy_and_cancel, plan_renames, RenamePlan, RenamePlanOptions, RenameResult,
+    RenameResultStatus, RenameRowStatus, StdFsBackend, StdRenameFs,
 };
 use batchhash_rename::suffix::{parse_filename, SuffixError, SuffixFormat, SuffixParseResult};
 use batchhash_types::{
@@ -611,11 +611,7 @@ fn proposed_relative_path(
     }
 }
 
-fn apply_rename_annotations(
-    report: &mut Report,
-    plan: &RenamePlan,
-    results: &[RenameResult],
-) {
+fn apply_rename_annotations(report: &mut Report, plan: &RenamePlan, results: &[RenameResult]) {
     for result in results {
         if let Some(report_entry) = report.entries.get_mut(result.entry_index) {
             if result.status != RenameResultStatus::Renamed {
@@ -725,7 +721,10 @@ fn record_rename_results(
     // must not be left pending: a pending row cannot be told apart from a
     // crashed rename afterwards, so record the truth — the file was not renamed.
     for (entry_index, id) in ids {
-        if results.iter().any(|result| result.entry_index == *entry_index) {
+        if results
+            .iter()
+            .any(|result| result.entry_index == *entry_index)
+        {
             continue;
         }
         store.record_result(

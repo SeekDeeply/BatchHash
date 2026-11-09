@@ -420,16 +420,16 @@ mod tests {
     fn blake3_policy_variants_produce_identical_digests() {
         let data = vec![9u8; 4096];
         let auto = HashOptions::new(vec![AlgorithmId::Blake3]);
-        let disabled = HashOptions::new(vec![AlgorithmId::Blake3])
-            .with_blake3(Blake3Policy::Disabled);
+        let disabled =
+            HashOptions::new(vec![AlgorithmId::Blake3]).with_blake3(Blake3Policy::Disabled);
         let forced = HashOptions::new(vec![AlgorithmId::Blake3]).with_forced_soft(true);
         let mut auto_reader = Cursor::new(data.clone());
         let mut disabled_reader = Cursor::new(data.clone());
         let mut forced_reader = Cursor::new(data);
         let auto_hashes =
             compute_hashes(&mut auto_reader, &auto).expect("auto hashing must succeed");
-        let disabled_hashes = compute_hashes(&mut disabled_reader, &disabled)
-            .expect("disabled hashing must succeed");
+        let disabled_hashes =
+            compute_hashes(&mut disabled_reader, &disabled).expect("disabled hashing must succeed");
         let forced_hashes =
             compute_hashes(&mut forced_reader, &forced).expect("forced soft hashing must succeed");
         assert_eq!(auto_hashes, disabled_hashes);

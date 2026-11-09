@@ -153,8 +153,8 @@ fn chunks_are_hashed_before_the_sink_observes_them() {
     let data = patterned_data(SMALL_BUFFER * 2 + 11);
     fs::write(&path, data.as_slice()).expect("file must be written");
 
-    let options =
-        HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Md5]).with_buffer_size(SMALL_BUFFER);
+    let options = HashOptions::new(vec![AlgorithmId::Blake3, AlgorithmId::Md5])
+        .with_buffer_size(SMALL_BUFFER);
     let mut chunks = Vec::new();
     let mut sink = |chunk: &[u8]| chunks.push(chunk.len());
     let mut reader = Cursor::new(data.clone());

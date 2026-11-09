@@ -622,8 +622,7 @@ impl LogStore {
                     to: operation.original_path,
                     status: UndoStatus::Conflict,
                     reason: Some(
-                        "operation is still pending; its rename was never confirmed"
-                            .to_string(),
+                        "operation is still pending; its rename was never confirmed".to_string(),
                     ),
                 }),
             }

@@ -16,6 +16,17 @@
 | ambiguous_by_length | 该长度是否对应多个算法（推断歧义） |
 | default_suffix_algorithm | 是否默认写名算法（BLAKE3） |
 
+## 调用方必须使用 stable_id
+
+`stable_id` 是唯一的传输与序列化契约：FFI 的 `algorithms` 数组、报告 JSON、CSV 列头、
+后缀前缀全部按它匹配，`AlgorithmId::from_stable_id` 找不到就直接返回
+`invalid_request`，**整批请求失败**——一个名字写错不会退化成"少算一个算法"。
+
+因此界面里的算法列表不能自造别名。曾经界面写 `xxh3`、引擎只认 `xxh3-64`，
+结果整批计算报 `invalid_request`，看起来像"xxh3 不能用"。
+`app/lib/src/models/models.dart` 的 `kAvailableAlgorithms` / `kSuffixAlgorithms` 因此必须
+逐字等于本表的 `stable_id`；`app/test/bridge/rust_service_test.dart` 会用每个 ID
+真算一遍，把这个契约钉死。
 ## 注册表（规范顺序）
 
 报告算法数组与 CSV 算法列严格按此顺序序列化。顺序变更属于 schema 破坏性变更。

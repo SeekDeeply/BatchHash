@@ -88,7 +88,8 @@ scripts/              CI 构建辅助脚本（本地不执行构建）
 | [docs/internal-api-contracts.md](docs/internal-api-contracts.md) | Rust crate 间接口契约 |
 | [docs/report-schema-v1.md](docs/report-schema-v1.md) | 报告 JSON schema v1 与六种格式规范 |
 | [docs/diff-schema-v1.md](docs/diff-schema-v1.md) | Diff schema v1 与状态语义 |
-| [docs/algorithm-registry.md](docs/algorithm-registry.md) | 16 个算法注册表 |
+| [docs/algorithm-registry.md](docs/algorithm-registry.md) | 16 个算法注册表与 stable_id 契约 |
+| [docs/hash-workflow.md](docs/hash-workflow.md) | 哈希页四步操作流程与文件选择行为 |
 | [docs/path-normalization.md](docs/path-normalization.md) | 对比 key 归一化规范与全用例表 |
 | [docs/hardware-probe.md](docs/hardware-probe.md) | 硬件探测字段与 reported/unknown 语义 |
 | [docs/file-entry-root-spec.md](docs/file-entry-root-spec.md) | 文件条目与单根批处理规范 |

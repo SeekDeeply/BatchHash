@@ -563,6 +563,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -572,7 +575,17 @@ jobs:
           mkdir -p dist
           find artifacts -type f -exec cp {} dist/ \;
           ls -lh dist
+      # The release body comes from the CHANGELOG section for this tag, so it
+      # describes what actually shipped instead of listing commit subjects.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Build release notes from CHANGELOG
+        run: node scripts/release-notes.mjs "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+      - name: Show release notes
+        run: cat "$RUNNER_TEMP/notes.md"
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          generate_release_notes: true
+          body_path: ${{ runner.temp }}/notes.md
+          generate_release_notes: false

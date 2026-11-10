@@ -342,14 +342,30 @@ class FakeBatchHashService implements BatchHashService {
         (ReportFormat left, ReportFormat right) =>
             left.index.compareTo(right.index),
       );
-    return <ExportedReport>[
-      for (final ReportFormat format in ordered)
-        ExportedReport(
-          format: format,
-          path: '$targetDirectory/batchhash-report.${format.fileExtension}',
-        ),
-    ];
+    // Mirror the real service: an explicit folder never gets its existing
+    // reports overwritten, so repeated exports produce (1), (2) and so on.
+    // Tests that assert on collision behaviour would otherwise pass against
+    // a fake that happily reuses the same name.
+    final List<ExportedReport> written = <ExportedReport>[];
+    for (final ReportFormat format in ordered) {
+      final String extension = format.fileExtension;
+      String name = 'batchhash-report.$extension';
+      int index = 0;
+      while (_claimedExportPaths.contains('$targetDirectory/$name')) {
+        index += 1;
+        name = 'batchhash-report ($index).$extension';
+      }
+      _claimedExportPaths.add('$targetDirectory/$name');
+      written.add(
+        ExportedReport(format: format, path: '$targetDirectory/$name'),
+      );
+    }
+    return written;
   }
+
+  /// Paths this fake has already handed out, so a second export in the same
+  /// directory advances instead of pretending to overwrite.
+  final Set<String> _claimedExportPaths = <String>{};
 
   @override
   Future<ReportModel> importReport(String path) async {

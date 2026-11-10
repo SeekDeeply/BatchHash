@@ -111,7 +111,7 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 | `computeHashes` | `bh_job_start` + `bh_job_poll`（原生线程执行，流式阶段/字节进度） |
 | `planRenames` | `bh_plan_renames`（纯计划，不落盘，复用已算好的哈希） |
 | `executeRenames` | `bh_run_batch` + `apply_renames`（写 SQLite 日志） |
-| `exportReport` | `bh_build_report` + `bh_export_report`，Dart 负责落盘 |
+| `exportReport` | `bh_build_report` + `bh_export_report`，Dart 负责落盘；显式目录下不覆盖同名报告，自动改用 `batchhash-report (n).ext` |
 | `importReport` | `bh_import_report` |
 | `diffReports` / `diffReportAgainstDirectory` | `bh_diff_reports` / `bh_diff_directory`（目录对比走任务协议，范围见下） |
 

@@ -317,5 +317,38 @@ void main() {
       expect(written.single.path, '$explicit/batchhash-report.csv');
       expect(File(written.single.path).existsSync(), isTrue);
     });
+
+    test('an existing report is never overwritten', () async {
+      final String explicit = '$root/dup';
+      final Directory out = Directory(explicit)..createSync(recursive: true);
+      addTearDown(() {
+        if (out.existsSync()) {
+          out.deleteSync(recursive: true);
+        }
+      });
+      // A report from an earlier export sits where the next one would land.
+      final File first = File('$explicit/batchhash-report.json')
+        ..writeAsStringSync('{"earlier":true}');
+      File('$explicit/batchhash-report (1).json').writeAsStringSync('taken');
+
+      final RustBatchHashService service = RustBatchHashService(
+        native: BatchHashNative.open(libraryPath),
+        supportDirectory: () async => support,
+      );
+      final List<ExportedReport> written = await service.exportReport(
+        report: await realReport(service),
+        formats: <ReportFormat>{ReportFormat.json},
+        directory: explicit,
+      );
+
+      // (0) and (1) are taken, so the export must use (2).
+      expect(written.single.path, '$explicit/batchhash-report (2).json');
+      expect(File(written.single.path).existsSync(), isTrue);
+      expect(
+        first.readAsStringSync(),
+        '{"earlier":true}',
+        reason: 'the existing report must survive unchanged',
+      );
+    });
   }, skip: available ? false : 'BATCHHASH_FFI_LIB is not set');
 }

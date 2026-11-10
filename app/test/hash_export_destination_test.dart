@@ -28,7 +28,72 @@ class _RecordingService extends FakeBatchHashService {
   }
 }
 
+
+/// Counts export calls so a test can prove a second tap did nothing.
+class _BlockingExportService extends FakeBatchHashService {
+  int exportCalls = 0;
+
+  @override
+  Future<List<ExportedReport>> exportReport({
+    required ReportModel report,
+    required Set<ReportFormat> formats,
+    String? directory,
+  }) async {
+    exportCalls += 1;
+    return super.exportReport(
+      report: report,
+      formats: formats,
+      directory: directory,
+    );
+  }
+}
+
 void main() {
+  testWidgets('a second tap while exporting is ignored', (
+    WidgetTester tester,
+  ) async {
+    setViewSize(tester, const Size(1000, 1600));
+    final _BlockingExportService service = _BlockingExportService();
+    final BatchHashAppState state = BatchHashAppState(service: service);
+    state.report.value = service.sampleReport;
+    state.entries.value = service.sampleReport.entries;
+    await tester.pumpWidget(wrapInApp(HashPage(state: state)));
+    await tester.pumpAndSettle();
+
+    final Finder json = find.byKey(const ValueKey<String>('hash-export-json'));
+    await tester.ensureVisible(json);
+    await tester.tap(json);
+    await tester.pumpAndSettle();
+
+    // The destination chooser is still open and the export has not finished:
+    // both buttons must be disabled so a second tap cannot open another
+    // chooser or start a concurrent write.
+    expect(
+      tester.widget<OutlinedButton>(json).onPressed,
+      isNull,
+      reason: 'the JSON button must be disabled while exporting',
+    );
+    final Finder csv = find.byKey(const ValueKey<String>('hash-export-csv'));
+    expect(
+      tester.widget<OutlinedButton>(csv).onPressed,
+      isNull,
+      reason: 'the CSV button must be disabled while exporting',
+    );
+    expect(
+      find.byKey(const ValueKey<String>('path-input-field')),
+      findsOneWidget,
+      reason: 'only one chooser may be open at a time',
+    );
+
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('path-input-field')),
+      '/tmp/batchhash-single',
+    );
+    await tester.tap(find.byKey(const ValueKey<String>('path-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(service.exportCalls, 1);
+  });
   testWidgets('export asks for a directory and passes it to the service', (
     WidgetTester tester,
   ) async {

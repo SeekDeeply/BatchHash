@@ -36,6 +36,12 @@ class _HashPageState extends State<HashPage> {
   late bool _cancelled;
   bool _scanning = false;
   bool _computing = false;
+
+  /// True from the moment an export starts until it finishes or fails.
+  ///
+  /// The export awaits the folder picker, so without this the buttons stay
+  /// live while the dialog is open and every extra tap opens another dialog.
+  bool _exporting = false;
   StreamSubscription<HashProgress>? _subscription;
 
   @override
@@ -312,7 +318,23 @@ class _HashPageState extends State<HashPage> {
 
   Future<void> _exportQuick(ReportFormat format) async {
     final ReportModel? report = widget.state.report.value;
-    if (report == null) return;
+    if (report == null || _exporting) return;
+    setState(() {
+      _exporting = true;
+    });
+    try {
+      await _runExport(format, report);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _exporting = false;
+        });
+      }
+    }
+  }
+
+  /// Choose a destination and write one format, reporting either outcome.
+  Future<void> _runExport(ReportFormat format, ReportModel report) async {
     final String? directory = await _chooseExportDirectory();
     if (directory == null) {
       if (!mounted) return;
@@ -749,13 +771,17 @@ class _HashPageState extends State<HashPage> {
                 children: <Widget>[
                   OutlinedButton.icon(
                     key: const ValueKey<String>('hash-export-json'),
-                    onPressed: _computing ? null : () => _exportQuick(ReportFormat.json),
+                    onPressed: _computing || _exporting
+                        ? null
+                        : () => _exportQuick(ReportFormat.json),
                     icon: const Icon(Icons.data_object),
                     label: Text(context.strings('hash.exportJson')),
                   ),
                   OutlinedButton.icon(
                     key: const ValueKey<String>('hash-export-csv'),
-                    onPressed: _computing ? null : () => _exportQuick(ReportFormat.csv),
+                    onPressed: _computing || _exporting
+                        ? null
+                        : () => _exportQuick(ReportFormat.csv),
                     icon: const Icon(Icons.table_chart_outlined),
                     label: Text(context.strings('hash.exportCsv')),
                   ),

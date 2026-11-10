@@ -535,13 +535,49 @@ class RustBatchHashService implements BatchHashService {
         reportJson: reportJson,
         format: format.name,
       );
-      final extension = format.fileExtension;
-      final file = File('$dirPath/batchhash-report.$extension');
-      file.writeAsStringSync(text);
+      final File file = _claimExportFile(dirPath, format.fileExtension, text);
       written.add(ExportedReport(format: format, path: file.path));
     }
     return written;
   }
+
+  /// Write [text] to the first free name, never replacing an existing report.
+  ///
+  /// A user-chosen folder can already hold a report from an earlier export;
+  /// overwriting it would destroy that file without asking. The first attempt
+  /// uses the plain name, then the usual (1), (2) suffixes. Creation is
+  /// exclusive so a file appearing between the check and the write cannot be
+  /// clobbered by a race.
+  File _claimExportFile(String dirPath, String extension, String text) {
+    for (int index = 0; index < _exportNameAttempts; index += 1) {
+      final String suffix = index == 0 ? '' : ' ($index)';
+      final File candidate = File(
+        '$dirPath/batchhash-report$suffix.$extension',
+      );
+      try {
+        candidate.createSync(exclusive: true);
+      } on FileSystemException {
+        // The name is taken: try the next suffix instead of overwriting it.
+        continue;
+      }
+      try {
+        candidate.writeAsStringSync(text, flush: true);
+      } catch (_) {
+        // Leave no truncated file behind if the write itself fails.
+        if (candidate.existsSync()) {
+          candidate.deleteSync();
+        }
+        rethrow;
+      }
+      return candidate;
+    }
+    throw StateError(
+      'no free report filename in $dirPath after $_exportNameAttempts attempts',
+    );
+  }
+
+  /// How many numbered names an export may try before giving up.
+  static const int _exportNameAttempts = 1000;
 
   @override
   Future<ReportModel> importReport(String path) async {

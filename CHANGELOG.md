@@ -2,6 +2,20 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.0.1] - 2026-11-10
+
+### 修复
+
+- **macOS 包内残留 `com.example` 版权串**：1.0.0 的 `BatchHash.app` 里
+  `NSHumanReadableCopyright` 仍是 `Copyright © 2026 com.example`，来源是
+  `flutter create` 把 `{{organization}}` 填进 `AppInfo.xcconfig` 的 `PRODUCT_COPYRIGHT`。
+  `apply-app-id.mjs` 的 macOS 分支现在一并改写 `PRODUCT_COPYRIGHT` 与 `PRODUCT_NAME`，
+  包内不再出现模板组织名。
+- **发布说明没有实际内容**：`publish` job 原先用 `generate_release_notes`，
+  正文只有 commit 标题拼成的 What's Changed。现在由 `scripts/release-notes.mjs`
+  按 tag 从本文件取出对应版本段落作为正文，并附产物清单与签名提醒；
+  找不到对应段落会直接失败，不会发布空说明。
+
 ## [1.0.0] - 2026-11-10
 
 首个正式版本。自此版本起，发布产物的应用标识固定为 `io.github.seekdeeply.batchhash`，

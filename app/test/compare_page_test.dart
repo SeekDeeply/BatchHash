@@ -23,6 +23,49 @@ Future<FakeBatchHashService> pumpCompare(WidgetTester tester, Size size) async {
 }
 
 void main() {
+  testWidgets('loading two reports does not compare them until asked', (
+    WidgetTester tester,
+  ) async {
+    setViewSize(tester, const Size(1000, 1400));
+    final FakeBatchHashService fake = FakeBatchHashService();
+    final BatchHashAppState state = BatchHashAppState(service: fake);
+    await tester.pumpWidget(wrapInApp(ComparePage(state: state)));
+    await tester.pumpAndSettle();
+
+    // Without a hashing run the page opens on the importable pair, so the tab
+    // is usable without first hashing anything.
+    expect(
+      find.byKey(const ValueKey<String>('compare-reports-start')),
+      findsOneWidget,
+    );
+    expect(fake.reportCompareCalls, 0);
+
+    Future<void> importSlot(String slot) async {
+      await tester.tap(find.byKey(ValueKey<String>('compare-import-$slot-button')));
+      await tester.pumpAndSettle();
+      // No platform picker under test, so the in-app chooser appears.
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('path-input-field')),
+        '/tmp/$slot.json',
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('path-confirm')));
+      await tester.pumpAndSettle();
+    }
+
+    await importSlot('left');
+    await importSlot('right');
+
+    // Importing loads the files; it must not start the comparison.
+    expect(fake.reportCompareCalls, 0);
+    expect(find.byType(DiffRowTile), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey<String>('compare-reports-start')));
+    await tester.pumpAndSettle();
+
+    expect(fake.reportCompareCalls, 1);
+    expect(find.byType(DiffRowTile), findsNWidgets(12));
+  });
+
   testWidgets('opening the tab does not start a verification on its own', (
     WidgetTester tester,
   ) async {

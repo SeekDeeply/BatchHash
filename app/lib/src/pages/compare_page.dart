@@ -79,7 +79,12 @@ class _ComparePageState extends State<ComparePage> {
   String? _loadedReportKey;
   CompareFilter _filter = CompareFilter.all;
   ComparePane _pane = ComparePane.differences;
-  CompareMode _mode = CompareMode.directory;
+  /// Mode currently shown; finalised in [initState].
+  ///
+  /// Comparison does not require a hashing run: with no report in memory the
+  /// only meaningful mode is the one that imports two report files, so opening
+  /// the tab after a fresh start does not land on an empty directory panel.
+  CompareMode _mode = CompareMode.reports;
   ReportModel? _leftReport;
   ReportModel? _rightReport;
   String _leftPath = '';
@@ -92,6 +97,7 @@ class _ComparePageState extends State<ComparePage> {
     widget.state.report.addListener(_handleReportChanged);
     final ReportModel? report = widget.state.report.value;
     if (report != null) {
+      _mode = CompareMode.directory;
       // Remember which report is loaded, but do not hash anything yet.
       // That report was produced by hashing these very files moments ago;
       // re-reading them because the user opened this tab doubles the IO and
@@ -252,14 +258,9 @@ class _ComparePageState extends State<ComparePage> {
       _loadedReportKey = null;
       _diffProgress = null;
     });
-    // Two imported reports are already in memory, so comparing them costs no
-    // disk IO and needs no confirmation. A directory comparison does read the
-    // files, so it waits for the user to ask for it.
-    if (mode == CompareMode.reports &&
-        _leftReport != null &&
-        _rightReport != null) {
-      unawaited(_diffImported());
-    }
+    // Switching modes only changes which inputs are shown. Neither side
+    // starts comparing here: the user presses the button for the mode they
+    // want, so a mode switch never costs CPU or disk on its own.
   }
 
   Future<void> _importReport({required bool left}) async {
@@ -306,7 +307,9 @@ class _ComparePageState extends State<ComparePage> {
           _rightPath = path;
         }
       });
-      await _diffImported();
+      // Importing a file only loads it. Comparing is a separate step the user
+      // starts, so loading the second report does not silently consume CPU
+      // before the pairs are confirmed.
     } catch (error) {
       if (!mounted) {
         return;
@@ -726,8 +729,30 @@ class _ComparePageState extends State<ComparePage> {
           chooseLabel: context.strings('compare.importRight'),
           onPressed: _importing ? null : () => _importReport(left: false),
         ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.icon(
+            key: const ValueKey<String>('compare-reports-start'),
+            onPressed: _canCompareReports ? _startReportCompare : null,
+            icon: const Icon(Icons.play_arrow_outlined),
+            label: Text(context.strings('compare.startCompare')),
+          ),
+        ),
       ],
     );
+  }
+
+  /// Both sides must be loaded before a report comparison can run.
+  bool get _canCompareReports =>
+      !_importing && _leftReport != null && _rightReport != null;
+
+  /// Compare the two imported reports because the user asked for it.
+  Future<void> _startReportCompare() async {
+    if (!_canCompareReports) {
+      return;
+    }
+    await _diffImported();
   }
 
   Widget _buildPaneSelector() {

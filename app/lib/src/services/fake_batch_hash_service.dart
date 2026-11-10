@@ -356,11 +356,18 @@ class FakeBatchHashService implements BatchHashService {
     return sampleReport;
   }
 
+  /// How many report-to-report comparisons have run.
+  ///
+  /// Lets a test prove that loading a report file does not compare it behind
+  /// the user's back.
+  int reportCompareCalls = 0;
+
   @override
   Future<List<DiffRowModel>> diffReports({
     required ReportModel left,
     required ReportModel right,
   }) async {
+    reportCompareCalls += 1;
     return _buildDiffRows();
   }
 

@@ -45,9 +45,59 @@ fn algorithms_cover_the_registry() {
         .find(|item| item.id == "sha256")
         .expect("sha256");
     assert_eq!(sha256.hex_len, 64);
+    assert_eq!(sha256.digest_len, 32);
     assert!(sha256.suffix_usable);
+    assert_eq!(sha256.category, "crypto");
+    assert!(!sha256.default_suffix_algorithm);
     let crc32 = list.iter().find(|item| item.id == "crc32").expect("crc32");
     assert!(!crc32.cryptographic);
+    assert_eq!(crc32.category, "checksum");
+}
+
+#[test]
+fn algorithms_expose_the_whole_catalogue_with_categories() {
+    let list = algorithms();
+    // The UI groups by this field, so it must always be one of the four known
+    // values and never an empty string left over from a missing registry entry.
+    for item in &list {
+        assert!(
+            matches!(
+                item.category.as_str(),
+                "crypto" | "checksum" | "fast" | "legacy"
+            ),
+            "{} has an unknown category {:?}",
+            item.id,
+            item.category
+        );
+        assert!(!item.id.is_empty());
+        assert!(!item.display_name.is_empty());
+        assert_eq!(item.hex_len, item.digest_len * 2, "{}", item.id);
+    }
+    // Categories are a real partition, not a single bucket.
+    let mut categories: Vec<&str> = list.iter().map(|item| item.category.as_str()).collect();
+    categories.sort_unstable();
+    categories.dedup();
+    assert!(categories.len() >= 3, "categories: {categories:?}");
+    // Exactly one algorithm is marked as the suffix default, and it is BLAKE3.
+    let defaults: Vec<&str> = list
+        .iter()
+        .filter(|item| item.default_suffix_algorithm)
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(defaults, vec!["blake3"]);
+    // Broken digests carry a warning and sit under legacy, never under crypto.
+    for id in ["md5", "sha1", "md2", "md4"] {
+        let item = list.iter().find(|item| item.id == id).expect(id);
+        assert_eq!(item.category, "legacy", "{id}");
+        assert!(item.suffix_warning.is_some(), "{id} needs a warning");
+    }
+    // Every registry entry appears exactly once, in canonical order.
+    let ids: Vec<&str> = list.iter().map(|item| item.id.as_str()).collect();
+    let expected: Vec<&str> = batchhash_types::REGISTRY
+        .iter()
+        .map(|spec| spec.stable_id)
+        .collect();
+    assert_eq!(ids, expected);
 }
 
 #[test]
@@ -284,10 +334,28 @@ fn c_abi_version_and_algorithms() {
     assert_eq!(version["tool"], "BatchHash");
 
     let list = call_ok(unsafe { c_api::bh_algorithms() });
-    assert_eq!(
-        list.as_array().expect("array").len(),
-        batchhash_types::REGISTRY.len()
-    );
+    let entries = list.as_array().expect("array");
+    assert_eq!(entries.len(), batchhash_types::REGISTRY.len());
+    // The JSON contract the Dart decoder reads: every entry carries the
+    // category string and the suffix metadata, not just the digest length.
+    for entry in entries {
+        assert!(entry["id"].is_string());
+        assert!(entry["display_name"].is_string());
+        assert!(entry["category"].is_string());
+        assert!(entry["hex_len"].is_u64());
+        assert!(entry["digest_len"].is_u64());
+        assert!(entry["cryptographic"].is_boolean());
+        assert!(entry["suffix_usable"].is_boolean());
+        assert!(entry["default_suffix_algorithm"].is_boolean());
+        // null or a string, never absent: `suffix_warning` is Optional.
+        assert!(entry["suffix_warning"].is_string() || entry["suffix_warning"].is_null());
+    }
+    let blake3 = entries
+        .iter()
+        .find(|entry| entry["id"] == "blake3")
+        .expect("blake3");
+    assert_eq!(blake3["category"], "crypto");
+    assert_eq!(blake3["default_suffix_algorithm"], true);
 }
 
 #[test]

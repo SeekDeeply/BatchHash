@@ -1507,11 +1507,21 @@ mod tests {
 
     #[test]
     fn checksum_inference_reports_ambiguity() {
-        assert_eq!(infer_algorithm(40).unwrap(), AlgorithmId::Sha1);
-        assert!(matches!(
-            infer_algorithm(32),
-            Err(ImportError::AmbiguousAlgorithm { .. })
-        ));
+        // 48 hex characters are unique to Tiger, 80 to RIPEMD-320, so they infer.
+        assert_eq!(infer_algorithm(48).unwrap(), AlgorithmId::Tiger);
+        assert_eq!(infer_algorithm(80).unwrap(), AlgorithmId::Ripemd320);
+        // 40 is now shared by SHA-1 and RIPEMD-160, 32 by MD2/MD4/MD5/XXH3-128 and
+        // more: a bare checksum of those widths cannot be attributed to one
+        // algorithm and must be reported as ambiguous.
+        for ambiguous in [32usize, 40, 56, 64, 128] {
+            assert!(
+                matches!(
+                    infer_algorithm(ambiguous),
+                    Err(ImportError::AmbiguousAlgorithm { .. })
+                ),
+                "{ambiguous} hex characters must be ambiguous"
+            );
+        }
         assert!(matches!(
             infer_algorithm(63),
             Err(ImportError::UnknownAlgorithm { .. })

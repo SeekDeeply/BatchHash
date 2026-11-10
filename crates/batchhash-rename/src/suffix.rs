@@ -341,7 +341,9 @@ fn parse_suffix_token(content: &str) -> Option<ParsedSuffix> {
     if !is_hex_token(content) {
         return None;
     }
-    let inferred = AlgorithmId::infer_by_hex_len(content.len());
+    // Only suffix-capable algorithms can have produced this token, so infer
+    // within that subset; otherwise shared widths report false ambiguity.
+    let inferred = AlgorithmId::infer_suffix_by_hex_len(content.len());
     let algorithm = if inferred.len() == 1 {
         inferred.first().copied()
     } else {
@@ -641,12 +643,23 @@ mod tests {
         for length in MIN_SUFFIX_LENGTH..=MAX_SUFFIX_LENGTH {
             assert!(upper_format(length).validate().is_ok(), "length {length}");
         }
+        // Only suffix-capable algorithms may be written into a filename; the
+        // rest must be rejected so a filename never carries an unidentifiable
+        // digest (e.g. a variable-length or non-hex-safe encoding).
         for algorithm in AlgorithmId::ALL {
             let format = SuffixFormat {
                 algorithm,
                 ..upper_format(8)
             };
-            assert!(format.validate().is_ok(), "algorithm {algorithm}");
+            if algorithm.spec().suffix_usable {
+                assert!(format.validate().is_ok(), "algorithm {algorithm}");
+            } else {
+                assert_eq!(
+                    format.validate(),
+                    Err(SuffixError::AlgorithmNotSuffixUsable(algorithm)),
+                    "{algorithm} must not be usable in a filename suffix"
+                );
+            }
         }
     }
 

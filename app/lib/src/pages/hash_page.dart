@@ -9,6 +9,7 @@ import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../util/formatting.dart';
 import '../util/platform_pickers.dart';
+import '../widgets/algorithm_picker_dialog.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/entry_list.dart';
 import '../widgets/path_input_dialog.dart';
@@ -35,6 +36,13 @@ class _HashPageState extends State<HashPage> {
   late String? _error;
   late bool _cancelled;
   bool _scanning = false;
+
+  /// Algorithms shown as one-tap chips on the home step.
+  ///
+  /// A fixed, small set keeps the primary flow fast; everything else is one
+  /// tap away through the picker. Chips reflect these ids, and picking an
+  /// algorithm that is not pinned replaces the last pin.
+  List<String> _pinned = <String>[...kDefaultPinnedAlgorithms];
   bool _computing = false;
 
   /// True from the moment an export starts until it finishes or fails.
@@ -273,6 +281,52 @@ class _HashPageState extends State<HashPage> {
     app.cancelled.value = false;
     app.scanRoot.value = '';
     app.pickedFiles.value = const <String>[];
+  }
+
+  /// Display name for an algorithm id, falling back to the bare id.
+  ///
+  /// The catalogue is the single source of truth for names; a id the catalogue
+  /// does not know still renders so a stale saved selection is not invisible.
+  String _labelFor(String id) {
+    for (final AlgorithmInfo info in kAlgorithmCatalogue) {
+      if (info.id == id) {
+        return info.displayName;
+      }
+    }
+    return id;
+  }
+
+  /// Open the full picker; selections outside the pinned set replace a pin.
+  Future<void> _openAlgorithmPicker() async {
+    final Set<String>? chosen = await AlgorithmPickerDialog.show(
+      context,
+      catalogue: kAlgorithmCatalogue,
+      selected: _algorithms,
+    );
+    if (chosen == null || chosen.isEmpty) {
+      return;
+    }
+    setState(() {
+      _algorithms = <String>{...chosen};
+      // Keep the home chips useful: pin up to five of the chosen algorithms so
+      // the common case needs no second trip through the picker.
+      final List<String> next = <String>[
+        for (final String id in chosen)
+          if (_pinned.contains(id)) id,
+      ];
+      for (final String id in chosen) {
+        if (next.length >= kDefaultPinnedAlgorithms.length) {
+          break;
+        }
+        if (!next.contains(id)) {
+          next.add(id);
+        }
+      }
+      if (next.isNotEmpty) {
+        _pinned = next;
+      }
+    });
+    widget.state.algorithms.value = <String>{..._algorithms};
   }
 
   void _toggleAlgorithm(String algorithm, bool selected) {
@@ -596,17 +650,23 @@ class _HashPageState extends State<HashPage> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
-              for (final String algorithm in kAvailableAlgorithms)
+              for (final String algorithm in _pinned)
                 FilterChip(
                   key: ValueKey<String>('hash-algorithm-$algorithm'),
-                  label: Text(algorithm),
+                  label: Text(_labelFor(algorithm)),
                   selected: _algorithms.contains(algorithm),
                   onSelected: _computing
                       ? null
-                      : (bool selected) =>
-                            _toggleAlgorithm(algorithm, selected),
+                      : (bool selected) => _toggleAlgorithm(algorithm, selected),
                 ),
+              ActionChip(
+                key: const ValueKey<String>('hash-algorithm-manage'),
+                avatar: const Icon(Icons.tune, size: 18),
+                label: Text(context.strings('algorithm.manage')),
+                onPressed: _computing ? null : _openAlgorithmPicker,
+              ),
             ],
           ),
           const SizedBox(height: 20),

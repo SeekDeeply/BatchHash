@@ -205,16 +205,19 @@ fn csv_preserves_status_and_suffix_metadata() {
 
 #[test]
 fn md5sum_round_trips_in_both_directions() {
-    let report = checksum_report(AlgorithmId::Sha1, &[("a.mkv", 'a'), ("b.mkv", 'b')]);
+    // Tiger is the only registered algorithm whose hex digest is 48 characters,
+    // so a bare checksum of that width is unambiguous. Widths shared by several
+    // algorithms (32, 40, 64, ...) are covered by the ambiguity tests instead.
+    let report = checksum_report(AlgorithmId::Tiger, &[("a.mkv", 'a'), ("b.mkv", 'b')]);
     let exported = export_report(&report, ReportFormat::Md5sum).expect("md5sum export");
     assert!(exported.ends_with('\n'));
     let imported = import_report(exported.as_bytes(), ReportFormat::Md5sum).expect("md5sum import");
-    assert_eq!(imported.algorithms, vec![AlgorithmId::Sha1]);
+    assert_eq!(imported.algorithms, vec![AlgorithmId::Tiger]);
     assert_eq!(imported.entries.len(), 2);
     assert_eq!(imported.entries[0].path, "a.mkv");
     assert_eq!(
-        imported.entries[0].hashes.get(&AlgorithmId::Sha1),
-        Some(&digest(AlgorithmId::Sha1, 'a'))
+        imported.entries[0].hashes.get(&AlgorithmId::Tiger),
+        Some(&digest(AlgorithmId::Tiger, 'a'))
     );
     let again = export_report(&imported, ReportFormat::Md5sum).expect("md5sum re-export");
     assert_eq!(exported, again);
@@ -464,9 +467,9 @@ fn imports_reject_rows_a_later_export_would_refuse() {
         ImportError::InvalidReport(ReportValidationError::DuplicatePath(_))
     ));
 
-    // Checksum imports go through the same final validation step. 40 hex chars
-    // maps to sha1 unambiguously, so only the duplicate path can fail here.
-    let checksum_duplicate = format!("{}  x.mkv\n{}  x.mkv\n", "a".repeat(40), "b".repeat(40));
+    // Checksum imports go through the same final validation step. 48 hex chars
+    // are unique to Tiger, so only the duplicate path can fail here.
+    let checksum_duplicate = format!("{}  x.mkv\n{}  x.mkv\n", "a".repeat(48), "b".repeat(48));
     let error = import_report(checksum_duplicate.as_bytes(), ReportFormat::Md5sum).unwrap_err();
     assert!(matches!(
         error,

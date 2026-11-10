@@ -42,7 +42,7 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 | 函数 | 请求 | 说明 |
 |---|---|---|
 | `bh_api_version` | 无 | 契约版本、C ABI 版本、工具名与版本 |
-| `bh_algorithms` | 无 | 16 个注册算法（id / 显示名 / hex 长度 / 加密属性 / 可否写名） |
+| `bh_algorithms` | 无 | 全部注册算法（当前 44 个）：id / 显示名 / hex 长度 / 字节长度 / 加密属性 / 可否写名 / 分类 / 后缀警告 / 是否默认后缀算法 |
 | `bh_probe` | `{"forced_soft": bool}` | 硬件可观测信息，后端未知时如实返回 `unknown` |
 | `bh_scan` | `{"root": "...", "follow_links": bool}` | 只扫描不哈希 |
 | `bh_run_batch` | `BatchRequestDto` | 扫描 → 哈希 → 可选写名 → 报告 → SQLite 日志 |
@@ -73,6 +73,28 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 `bh_run_batch` 的响应包含：汇总计数、条目（相对路径、显示路径、大小、mtime、状态、错误类型、哈希数组）、
 扫描跳过的路径、写名计划行与汇总、`batch_id`、重命名成功/失败数、是否取消、耗时，
 以及 **canonical report JSON**（`report_json`），UI 可以直接拿去做导出或对比。
+
+### 算法清单与分类
+
+`bh_algorithms` 返回注册表的每一次条目，顺序即 canonical 顺序（报告与 CSV 列序依赖它）：
+
+```json
+{
+  "id": "blake3",
+  "display_name": "BLAKE3",
+  "hex_len": 64,
+  "digest_len": 32,
+  "cryptographic": true,
+  "suffix_usable": true,
+  "category": "crypto",
+  "suffix_warning": null,
+  "default_suffix_algorithm": true
+}
+```
+
+`category` 取值为 `crypto` | `checksum` | `fast` | `legacy`，由
+`batchhash_types::AlgorithmSpec` 定义——FFI 只做透传，不在这一层做任何分类判断。
+Dart 侧不要硬编码算法清单，一律用服务下发的这份数据（含分类，供 UI 分组）。
 
 `BatchRequestDto` 的两个可选字段决定「这次到底处理哪些文件」，UI 必须显式传：
 

@@ -18,7 +18,8 @@ pub mod report;
 
 pub use algorithm::{
     default_suffix_algorithm, is_hex, is_hex_digest_of_len, normalize_hex, spec_by_stable_id,
-    spec_by_suffix_prefix, AlgorithmId, AlgorithmParseError, AlgorithmSpec, REGISTRY,
+    spec_by_suffix_prefix, AlgorithmCategory, AlgorithmId, AlgorithmParseError, AlgorithmSpec,
+    REGISTRY,
 };
 pub use diff::{
     DiffEntry, DiffMode, DiffReport, DiffRow, DiffSource, DiffSourceKind, DiffStatus, DiffStrategy,

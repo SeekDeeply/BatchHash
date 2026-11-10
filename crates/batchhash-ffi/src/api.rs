@@ -140,6 +140,10 @@ impl ProgressDto {
     }
 }
 /// One algorithm as exposed to the UI.
+///
+/// Every field is copied straight from `batchhash_types::AlgorithmSpec`; this
+/// DTO adds no policy of its own, so the registry stays the single source of
+/// truth. `category` is one of crypto | checksum | fast | legacy.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AlgorithmDto {
     /// Stable identifier used in requests, reports and filenames.
@@ -148,10 +152,19 @@ pub struct AlgorithmDto {
     pub display_name: String,
     /// Digest length in hex characters.
     pub hex_len: u32,
+    /// Digest length in bytes.
+    pub digest_len: u32,
     /// Whether the algorithm is cryptographically broken (MD5, SHA-1).
     pub cryptographic: bool,
     /// Whether the algorithm may be used for filename suffixes.
     pub suffix_usable: bool,
+    /// Grouping shown by the algorithm picker:
+    /// crypto | checksum | fast | legacy.
+    pub category: String,
+    /// Warning shown when the algorithm is picked for a filename suffix.
+    pub suffix_warning: Option<String>,
+    /// Marked as the product default for filename suffixes.
+    pub default_suffix_algorithm: bool,
 }
 
 /// Hardware capability report.
@@ -442,6 +455,9 @@ pub struct UndoResultDto {
 }
 
 /// All registered algorithms in canonical order.
+///
+/// Returns every registry entry, so the count tracks the single source of truth
+/// and the UI never needs a hardcoded algorithm list of its own.
 pub fn algorithms() -> Vec<AlgorithmDto> {
     batchhash_types::REGISTRY
         .iter()
@@ -449,8 +465,12 @@ pub fn algorithms() -> Vec<AlgorithmDto> {
             id: spec.stable_id.to_string(),
             display_name: spec.display_name.to_string(),
             hex_len: u32::try_from(spec.hex_len).unwrap_or(u32::MAX),
+            digest_len: u32::try_from(spec.digest_len).unwrap_or(u32::MAX),
             cryptographic: spec.cryptographic,
             suffix_usable: spec.suffix_usable,
+            category: spec.category.as_str().to_string(),
+            suffix_warning: spec.suffix_warning.map(str::to_string),
+            default_suffix_algorithm: spec.default_suffix_algorithm,
         })
         .collect()
 }

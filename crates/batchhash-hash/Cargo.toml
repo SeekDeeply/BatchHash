@@ -20,6 +20,19 @@ xxhash-rust = { workspace = true }
 crc32fast = { workspace = true }
 crc32c = { workspace = true }
 indexmap = { workspace = true }
+crc = { workspace = true }
+md2 = { workspace = true }
+md4 = { workspace = true }
+sm3 = { workspace = true }
+ripemd = { workspace = true }
+whirlpool = { workspace = true }
+tiger = { workspace = true }
+skein = { workspace = true }
+gost94 = { workspace = true }
+streebog = { workspace = true }
+groestl = { workspace = true }
+jh = { workspace = true }
+k12 = { workspace = true }
 thiserror = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]

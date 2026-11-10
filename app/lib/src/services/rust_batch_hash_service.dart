@@ -101,6 +101,8 @@ class RustBatchHashService implements BatchHashService {
   String? _lastRoot;
   bool _lastScanRecursive = false;
   List<String>? _explicitPaths;
+  /// Cached result of [listAlgorithms]; the registry is static per process.
+  List<AlgorithmInfo>? _algorithms;
   String? _lastReportJson;
   /// Root the batch behind [_lastReportJson] worked on, or null when the cached
   /// JSON does not describe the report the caller is asking about.
@@ -160,6 +162,27 @@ class RustBatchHashService implements BatchHashService {
   @override
   Future<RenderingHardwareModel> probeRenderingHardware() {
     return _renderingProvider.probe();
+  }
+
+  @override
+  Future<List<AlgorithmInfo>> listAlgorithms() async {
+    final List<AlgorithmInfo>? cached = _algorithms;
+    if (cached != null) {
+      return cached;
+    }
+    // The core owns both the catalogue and the classification, so this layer
+    // only decodes the DTOs; a new algorithm needs no Dart change here.
+    final List<AlgorithmInfo> decoded = <AlgorithmInfo>[
+      for (final Map<String, Object?> row in native.algorithms())
+        AlgorithmInfo.fromJson(row),
+    ];
+    // An older native library that answered with nothing must not leave the
+    // picker empty; the bundled catalogue is the documented fallback.
+    final List<AlgorithmInfo> resolved = decoded.isEmpty
+        ? kAlgorithmCatalogue
+        : List<AlgorithmInfo>.unmodifiable(decoded);
+    _algorithms = resolved;
+    return resolved;
   }
 
   @override

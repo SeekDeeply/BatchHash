@@ -25,6 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use batchhash_types::AlgorithmId;
 use indexmap::IndexMap;
 use sha2::Digest;
+use sha3::digest::{ExtendableOutput, Update as XofUpdate, XofReader};
 
 /// Default read buffer size: 4 MiB.
 pub const DEFAULT_BUFFER_SIZE: usize = 4 * 1024 * 1024;
@@ -152,8 +153,8 @@ pub enum HashError {
     Cancelled,
 }
 
-// The BLAKE3 state is an order of magnitude larger than the digest states, so all
-// variants are boxed to keep every HasherImpl the same small size.
+// The digest states vary in size (BLAKE3 is the largest), so every variant is
+// boxed to keep HasherImpl small and uniformly sized.
 enum HasherImpl {
     Md5(Box<md5::Md5>),
     Sha1(Box<sha1::Sha1>),
@@ -171,6 +172,34 @@ enum HasherImpl {
     Xxh64(Box<xxhash_rust::xxh64::Xxh64>),
     Crc32(Box<crc32fast::Hasher>),
     Crc32c(Box<crc32c::Crc32cHasher>),
+    Md2(Box<md2::Md2>),
+    Md4(Box<md4::Md4>),
+    Sha512_224(Box<sha2::Sha512_224>),
+    Sha512_256(Box<sha2::Sha512_256>),
+    Sha3_224(Box<sha3::Sha3_224>),
+    Sha3_384(Box<sha3::Sha3_384>),
+    Keccak224(Box<sha3::Keccak224>),
+    Keccak256(Box<sha3::Keccak256>),
+    Keccak384(Box<sha3::Keccak384>),
+    Keccak512(Box<sha3::Keccak512>),
+    Shake128(Box<sha3::Shake128>),
+    Shake256(Box<sha3::Shake256>),
+    Ripemd128(Box<ripemd::Ripemd128>),
+    Ripemd160(Box<ripemd::Ripemd160>),
+    Ripemd256(Box<ripemd::Ripemd256>),
+    Ripemd320(Box<ripemd::Ripemd320>),
+    Sm3(Box<sm3::Sm3>),
+    Gost94(Box<gost94::Gost94CryptoPro>),
+    Streebog256(Box<streebog::Streebog256>),
+    Streebog512(Box<streebog::Streebog512>),
+    Whirlpool(Box<whirlpool::Whirlpool>),
+    Tiger(Box<tiger::Tiger>),
+    Skein256(Box<skein::Skein256>),
+    Skein512(Box<skein::Skein512>),
+    Groestl256(Box<groestl::Groestl256>),
+    Groestl512(Box<groestl::Groestl512>),
+    Jh256(Box<jh::Jh256>),
+    Jh512(Box<jh::Jh512>),
 }
 
 impl HasherImpl {
@@ -192,29 +221,169 @@ impl HasherImpl {
             AlgorithmId::Xxh64 => Self::Xxh64(Box::new(xxhash_rust::xxh64::Xxh64::new(0))),
             AlgorithmId::Crc32 => Self::Crc32(Box::new(crc32fast::Hasher::new())),
             AlgorithmId::Crc32c => Self::Crc32c(Box::<crc32c::Crc32cHasher>::default()),
+            AlgorithmId::Md2 => Self::Md2(Box::new(md2::Md2::new())),
+            AlgorithmId::Md4 => Self::Md4(Box::new(md4::Md4::new())),
+            AlgorithmId::Sha512_224 => Self::Sha512_224(Box::new(sha2::Sha512_224::new())),
+            AlgorithmId::Sha512_256 => Self::Sha512_256(Box::new(sha2::Sha512_256::new())),
+            AlgorithmId::Sha3_224 => Self::Sha3_224(Box::new(sha3::Sha3_224::new())),
+            AlgorithmId::Sha3_384 => Self::Sha3_384(Box::new(sha3::Sha3_384::new())),
+            AlgorithmId::Keccak224 => Self::Keccak224(Box::new(sha3::Keccak224::new())),
+            AlgorithmId::Keccak256 => Self::Keccak256(Box::new(sha3::Keccak256::new())),
+            AlgorithmId::Keccak384 => Self::Keccak384(Box::new(sha3::Keccak384::new())),
+            AlgorithmId::Keccak512 => Self::Keccak512(Box::new(sha3::Keccak512::new())),
+            AlgorithmId::Shake128 => Self::Shake128(Box::default()),
+            AlgorithmId::Shake256 => Self::Shake256(Box::default()),
+            AlgorithmId::Ripemd128 => Self::Ripemd128(Box::new(ripemd::Ripemd128::new())),
+            AlgorithmId::Ripemd160 => Self::Ripemd160(Box::new(ripemd::Ripemd160::new())),
+            AlgorithmId::Ripemd256 => Self::Ripemd256(Box::new(ripemd::Ripemd256::new())),
+            AlgorithmId::Ripemd320 => Self::Ripemd320(Box::new(ripemd::Ripemd320::new())),
+            AlgorithmId::Sm3 => Self::Sm3(Box::new(sm3::Sm3::new())),
+            AlgorithmId::Gost94 => Self::Gost94(Box::new(gost94::Gost94CryptoPro::new())),
+            AlgorithmId::Streebog256 => Self::Streebog256(Box::new(streebog::Streebog256::new())),
+            AlgorithmId::Streebog512 => Self::Streebog512(Box::new(streebog::Streebog512::new())),
+            AlgorithmId::Whirlpool => Self::Whirlpool(Box::new(whirlpool::Whirlpool::new())),
+            AlgorithmId::Tiger => Self::Tiger(Box::new(tiger::Tiger::new())),
+            AlgorithmId::Skein256 => Self::Skein256(Box::new(skein::Skein256::new())),
+            AlgorithmId::Skein512 => Self::Skein512(Box::new(skein::Skein512::new())),
+            AlgorithmId::Groestl256 => Self::Groestl256(Box::new(groestl::Groestl256::new())),
+            AlgorithmId::Groestl512 => Self::Groestl512(Box::new(groestl::Groestl512::new())),
+            AlgorithmId::Jh256 => Self::Jh256(Box::new(jh::Jh256::new())),
+            AlgorithmId::Jh512 => Self::Jh512(Box::new(jh::Jh512::new())),
         }
     }
 
     fn update(&mut self, chunk: &[u8]) {
         match self {
-            Self::Md5(hasher) => hasher.update(chunk),
-            Self::Sha1(hasher) => hasher.update(chunk),
-            Self::Sha224(hasher) => hasher.update(chunk),
-            Self::Sha256(hasher) => hasher.update(chunk),
-            Self::Sha384(hasher) => hasher.update(chunk),
-            Self::Sha512(hasher) => hasher.update(chunk),
-            Self::Sha3_256(hasher) => hasher.update(chunk),
-            Self::Sha3_512(hasher) => hasher.update(chunk),
-            Self::Blake2b(hasher) => hasher.update(chunk),
-            Self::Blake2s(hasher) => hasher.update(chunk),
+            Self::Md5(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha1(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha224(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha256(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha384(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha512(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha3_256(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha3_512(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Blake2b(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Blake2s(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
             Self::Blake3(hasher) => {
                 hasher.update(chunk);
             }
-            Self::Xxh3_64(hasher) => hasher.update(chunk),
-            Self::Xxh3_128(hasher) => hasher.update(chunk),
-            Self::Xxh64(hasher) => hasher.update(chunk),
-            Self::Crc32(hasher) => hasher.update(chunk),
+            Self::Xxh3_64(hasher) => {
+                hasher.update(chunk);
+            }
+            Self::Xxh3_128(hasher) => {
+                hasher.update(chunk);
+            }
+            Self::Xxh64(hasher) => {
+                hasher.update(chunk);
+            }
+            Self::Crc32(hasher) => {
+                hasher.update(chunk);
+            }
             Self::Crc32c(hasher) => std::hash::Hasher::write(&mut **hasher, chunk),
+            Self::Md2(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Md4(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha512_224(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha512_256(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha3_224(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sha3_384(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Keccak224(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Keccak256(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Keccak384(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Keccak512(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Shake128(hasher) => {
+                XofUpdate::update(&mut **hasher, chunk);
+            }
+            Self::Shake256(hasher) => {
+                XofUpdate::update(&mut **hasher, chunk);
+            }
+            Self::Ripemd128(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Ripemd160(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Ripemd256(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Ripemd320(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Sm3(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Gost94(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Streebog256(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Streebog512(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Whirlpool(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Tiger(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Skein256(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Skein512(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Groestl256(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Groestl512(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Jh256(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
+            Self::Jh512(hasher) => {
+                Digest::update(&mut **hasher, chunk);
+            }
         }
     }
 
@@ -255,6 +424,46 @@ impl HasherImpl {
                 let checksum = std::hash::Hasher::finish(&hasher);
                 format!("{:08x}", checksum as u32)
             }
+            Self::Md2(hasher) => finalize_digest(*hasher),
+            Self::Md4(hasher) => finalize_digest(*hasher),
+            Self::Sha512_224(hasher) => finalize_digest(*hasher),
+            Self::Sha512_256(hasher) => finalize_digest(*hasher),
+            Self::Sha3_224(hasher) => finalize_digest(*hasher),
+            Self::Sha3_384(hasher) => finalize_digest(*hasher),
+            Self::Keccak224(hasher) => finalize_digest(*hasher),
+            Self::Keccak256(hasher) => finalize_digest(*hasher),
+            Self::Keccak384(hasher) => finalize_digest(*hasher),
+            Self::Keccak512(hasher) => finalize_digest(*hasher),
+            Self::Shake128(hasher) => {
+                let hasher = *hasher;
+                let mut reader = hasher.finalize_xof();
+                let mut out = [0u8; 16];
+                XofReader::read(&mut reader, &mut out);
+                digest_to_hex(&out)
+            }
+            Self::Shake256(hasher) => {
+                let hasher = *hasher;
+                let mut reader = hasher.finalize_xof();
+                let mut out = [0u8; 32];
+                XofReader::read(&mut reader, &mut out);
+                digest_to_hex(&out)
+            }
+            Self::Ripemd128(hasher) => finalize_digest(*hasher),
+            Self::Ripemd160(hasher) => finalize_digest(*hasher),
+            Self::Ripemd256(hasher) => finalize_digest(*hasher),
+            Self::Ripemd320(hasher) => finalize_digest(*hasher),
+            Self::Sm3(hasher) => finalize_digest(*hasher),
+            Self::Gost94(hasher) => finalize_digest(*hasher),
+            Self::Streebog256(hasher) => finalize_digest(*hasher),
+            Self::Streebog512(hasher) => finalize_digest(*hasher),
+            Self::Whirlpool(hasher) => finalize_digest(*hasher),
+            Self::Tiger(hasher) => finalize_digest(*hasher),
+            Self::Skein256(hasher) => finalize_digest(*hasher),
+            Self::Skein512(hasher) => finalize_digest(*hasher),
+            Self::Groestl256(hasher) => finalize_digest(*hasher),
+            Self::Groestl512(hasher) => finalize_digest(*hasher),
+            Self::Jh256(hasher) => finalize_digest(*hasher),
+            Self::Jh512(hasher) => finalize_digest(*hasher),
         }
     }
 }

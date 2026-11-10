@@ -86,23 +86,76 @@ void main() {
       expect(hashed.map((entry) => entry.path), isNot(contains('unpicked.txt')));
     });
 
-    test('every algorithm offered in the UI is accepted by the engine', () async {
+    test('every advertised algorithm is accepted by the engine',
+        () async {
       // The xxh3 bug was a name mismatch: the UI sent 'xxh3' while the engine
       // only knows 'xxh3-64', so the whole request failed as invalid_request.
-      // Hashing one file with each offered id pins the contract.
+      // Hashing one file with each advertised id pins the contract.
       File('$root/probe.txt').writeAsStringSync('batchhash');
       final scanned = await service.scanFiles(<String>['$root/probe.txt']);
-      for (final String algorithm in kAvailableAlgorithms) {
+      final algorithms = await service.listAlgorithms();
+      expect(algorithms, hasLength(44));
+      for (final AlgorithmInfo algorithm in algorithms) {
         final progress = await service
-            .computeHashes(entries: scanned, algorithms: <String>[algorithm])
+            .computeHashes(
+              entries: scanned,
+              algorithms: <String>[algorithm.id],
+            )
             .toList();
         final entry = progress.last.entries.single;
         expect(
-          entry.hashes[algorithm],
+          entry.hashes[algorithm.id],
           isNotNull,
-          reason: 'algorithm $algorithm was rejected by the engine',
+          reason: 'algorithm ${algorithm.id} was rejected by the engine',
+        );
+        expect(
+          entry.hashes[algorithm.id],
+          hasLength(algorithm.hexLength),
+          reason: '${algorithm.id} produced the wrong digest length',
         );
       }
+    });
+
+    test('the engine reports the full catalogue with categories', () async {
+      // The picker is built from this call, so a broken answer here silently
+      // empties the UI. Every entry has to be usable and carry a known group.
+      final algorithms = await service.listAlgorithms();
+      expect(algorithms, hasLength(44));
+      expect(
+        algorithms.map((algorithm) => algorithm.id).toSet(),
+        hasLength(44),
+        reason: 'algorithm ids must be unique',
+      );
+      for (final AlgorithmInfo algorithm in algorithms) {
+        expect(algorithm.id, isNotEmpty);
+        expect(algorithm.displayName, isNotEmpty);
+        expect(algorithm.hexLength, algorithm.digestLength * 2);
+      }
+      expect(
+        algorithms.map((algorithm) => algorithm.category).toSet().length,
+        greaterThanOrEqualTo(3),
+        reason: 'categories must actually partition the catalogue',
+      );
+      // The classification the UI groups by, pinned for the four best known.
+      final byId = <String, AlgorithmInfo>{
+        for (final AlgorithmInfo algorithm in algorithms)
+          algorithm.id: algorithm,
+      };
+      expect(byId['sha256']!.category, AlgorithmCategory.crypto);
+      expect(byId['blake3']!.category, AlgorithmCategory.crypto);
+      expect(byId['crc32']!.category, AlgorithmCategory.checksum);
+      expect(byId['xxh3-64']!.category, AlgorithmCategory.fast);
+      expect(byId['md5']!.category, AlgorithmCategory.legacy);
+      expect(byId['md5']!.cryptographic, isFalse);
+      expect(byId['md5']!.suffixWarning, isNotNull);
+      expect(byId['blake3']!.defaultSuffixAlgorithm, isTrue);
+      // Grouping keeps registry order inside a group and drops empty groups.
+      final grouped = groupAlgorithmsByCategory(algorithms);
+      expect(grouped.keys.toList(), isNotEmpty);
+      expect(
+        grouped.values.expand((group) => group).length,
+        algorithms.length,
+      );
     });
     test('tryCreate returns a service when the library loads', () {
       final created = RustBatchHashService.tryCreate(overridePath: libraryPath);

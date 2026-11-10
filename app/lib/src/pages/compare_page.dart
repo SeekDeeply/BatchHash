@@ -12,6 +12,7 @@ import '../widgets/empty_state.dart';
 import '../widgets/entry_list.dart';
 import '../widgets/path_input_dialog.dart';
 import '../widgets/summary_card.dart';
+import '../widgets/text_compare_panel.dart';
 
 /// Filter applied to comparison rows.
 ///
@@ -60,6 +61,20 @@ enum CompareMode {
 ///
 /// Every user-visible string, including the diff table headers, comes from the
 /// locale string table.
+/// Top-level view inside the compare tab.
+///
+/// Report comparison needs a live folder or two report files, while text
+/// comparison is pure pasted input. They are separate views rather than one
+/// page of mixed controls so each keeps a single, obvious job.
+enum CompareView {
+  reports('compare.textTab.reports'),
+  text('compare.textTab');
+
+  const CompareView(this.label);
+
+  /// Translation key of the tab label.
+  final String label;
+}
 class ComparePage extends StatefulWidget {
   const ComparePage({super.key, required this.state});
 
@@ -78,6 +93,7 @@ class _ComparePageState extends State<ComparePage> {
   String? _error;
   String? _loadedReportKey;
   CompareFilter _filter = CompareFilter.all;
+  CompareView _view = CompareView.reports;
   ComparePane _pane = ComparePane.differences;
   /// Mode currently shown; finalised in [initState].
   ///
@@ -399,11 +415,53 @@ class _ComparePageState extends State<ComparePage> {
     final int ambiguousCount = _rows
         .where((DiffRowModel row) => row.status == DiffStatus.ambiguous)
         .length;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+    final Widget tabs = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
+          SegmentedButton<CompareView>(
+            key: const ValueKey<String>('compare-view-tabs'),
+            segments: <ButtonSegment<CompareView>>[
+              for (final CompareView view in CompareView.values)
+                ButtonSegment<CompareView>(
+                  value: view,
+                  label: Text(context.strings(view.label)),
+                ),
+            ],
+            selected: <CompareView>{_view},
+            showSelectedIcon: false,
+            onSelectionChanged: (Set<CompareView> selection) => setState(
+              () => _view = selection.first,
+            ),
+          ),
+        ],
+      ),
+    );
+    if (_view == CompareView.text) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          tabs,
+          const Expanded(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: const TextComparePanel(),
+            ),
+          ),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        tabs,
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
           Text(
             context.strings('compare.title'),
             style: theme.textTheme.headlineSmall,
@@ -493,8 +551,11 @@ class _ComparePageState extends State<ComparePage> {
             _buildNarrowContent(visibleRows)
           else
             _buildDiffTable(visibleRows, leftKey: 'compare.baseline'),
-        ],
-      ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 

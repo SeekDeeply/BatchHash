@@ -1,20 +1,546 @@
 import 'dart:math' as math;
 
-/// Algorithms exposed in the P0 user interface.
-const List<String> kAvailableAlgorithms = <String>[
-  'md5',
-  'sha1',
-  'sha256',
-  'sha512',
-  'sha3-256',
-  'blake2b',
-  'blake2s',
-  'blake3',
-  'xxh3-64',
-  'crc32',
-  'crc32c',
+/// Grouping an algorithm belongs to, as reported by the core.
+///
+/// The wire values are stable identifiers; the core owns the classification and
+/// this enum only mirrors it. [AlgorithmCategory.legacy] is also the fallback
+/// for a value this build does not know, so a newer native library can add a
+/// category without making the picker throw.
+enum AlgorithmCategory {
+  crypto('crypto'),
+  checksum('checksum'),
+  fast('fast'),
+  legacy('legacy');
+
+  const AlgorithmCategory(this.wireName);
+
+  /// Identifier used by the native layer.
+  final String wireName;
+
+  /// Map a native category string; unknown values fall back to [legacy].
+  static AlgorithmCategory fromWire(String? value) {
+    for (final AlgorithmCategory category in AlgorithmCategory.values) {
+      if (category.wireName == value) {
+        return category;
+      }
+    }
+    return AlgorithmCategory.legacy;
+  }
+
+  /// Every category, in the order the picker presents them.
+  static const List<AlgorithmCategory> ordered = <AlgorithmCategory>[
+    AlgorithmCategory.crypto,
+    AlgorithmCategory.checksum,
+    AlgorithmCategory.fast,
+    AlgorithmCategory.legacy,
+  ];
+}
+
+/// One algorithm as advertised by the core.
+///
+/// The UI must build its picker from `BatchHashService.listAlgorithms()` rather
+/// than a hardcoded list: the core is the single source of truth for which
+/// algorithms exist and how they are classified.
+class AlgorithmInfo {
+  const AlgorithmInfo({
+    required this.id,
+    required this.displayName,
+    required this.hexLength,
+    required this.digestLength,
+    this.cryptographic = false,
+    this.suffixUsable = false,
+    this.category = AlgorithmCategory.legacy,
+    this.suffixWarning,
+    this.defaultSuffixAlgorithm = false,
+  });
+
+  /// Stable identifier used in requests, reports and filenames.
+  final String id;
+
+  /// Human readable name shown in the picker.
+  final String displayName;
+
+  /// Digest length in hex characters.
+  final int hexLength;
+
+  /// Digest length in bytes.
+  final int digestLength;
+
+  /// Whether the algorithm is considered cryptographically secure.
+  final bool cryptographic;
+
+  /// Whether the digest may be written into a filename suffix.
+  final bool suffixUsable;
+
+  /// Group this algorithm belongs to.
+  final AlgorithmCategory category;
+
+  /// Warning to show when the algorithm is picked for a suffix.
+  final String? suffixWarning;
+
+  /// Whether the core picks this algorithm for suffixes by default.
+  final bool defaultSuffixAlgorithm;
+
+  /// Decode one entry of the `bh_algorithms` payload.
+  factory AlgorithmInfo.fromJson(Map<String, Object?> json) {
+    final Object? warning = json['suffix_warning'];
+    return AlgorithmInfo(
+      id: json['id'] as String? ?? '',
+      displayName: json['display_name'] as String? ?? '',
+      hexLength: (json['hex_len'] as num?)?.toInt() ?? 0,
+      digestLength: (json['digest_len'] as num?)?.toInt() ?? 0,
+      cryptographic: json['cryptographic'] as bool? ?? false,
+      suffixUsable: json['suffix_usable'] as bool? ?? false,
+      category: AlgorithmCategory.fromWire(json['category'] as String?),
+      suffixWarning: warning is String && warning.isNotEmpty ? warning : null,
+      defaultSuffixAlgorithm:
+          json['default_suffix_algorithm'] as bool? ?? false,
+    );
+  }
+
+  @override
+  String toString() => 'AlgorithmInfo($id, $category)';
+}
+
+/// Algorithms the core is known to ship, in canonical order.
+///
+/// This is the demo/fallback catalogue: it is what the fake service returns and
+/// what the UI keeps as a last resort if a native build ever answers with an
+/// empty list. A real build reads the list from the core through
+/// `BatchHashService.listAlgorithms`; nothing in the app may treat this
+/// constant as the authority on what is supported.
+const List<AlgorithmInfo> kAlgorithmCatalogue = <AlgorithmInfo>[
+  AlgorithmInfo(
+    id: 'md5',
+    displayName: 'MD5',
+    hexLength: 32,
+    digestLength: 16,
+    suffixUsable: true,
+    category: AlgorithmCategory.legacy,
+    suffixWarning:
+        'MD5 is cryptographically broken; a truncated suffix is not a '
+        'security digest.',
+  ),
+  AlgorithmInfo(
+    id: 'sha1',
+    displayName: 'SHA-1',
+    hexLength: 40,
+    digestLength: 20,
+    suffixUsable: true,
+    category: AlgorithmCategory.legacy,
+    suffixWarning:
+        'SHA-1 is cryptographically broken; a truncated suffix is not a '
+        'security digest.',
+  ),
+  AlgorithmInfo(
+    id: 'sha224',
+    displayName: 'SHA-224',
+    hexLength: 56,
+    digestLength: 28,
+    cryptographic: true,
+    suffixUsable: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'sha256',
+    displayName: 'SHA-256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    suffixUsable: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'sha384',
+    displayName: 'SHA-384',
+    hexLength: 96,
+    digestLength: 48,
+    cryptographic: true,
+    suffixUsable: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'sha512',
+    displayName: 'SHA-512',
+    hexLength: 128,
+    digestLength: 64,
+    cryptographic: true,
+    suffixUsable: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'sha3-256',
+    displayName: 'SHA3-256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    suffixUsable: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'sha3-512',
+    displayName: 'SHA3-512',
+    hexLength: 128,
+    digestLength: 64,
+    cryptographic: true,
+    suffixUsable: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'blake2b',
+    displayName: 'BLAKE2b-512',
+    hexLength: 128,
+    digestLength: 64,
+    cryptographic: true,
+    suffixUsable: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'blake2s',
+    displayName: 'BLAKE2s-256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    suffixUsable: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'blake3',
+    displayName: 'BLAKE3',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    suffixUsable: true,
+    category: AlgorithmCategory.crypto,
+    defaultSuffixAlgorithm: true,
+  ),
+  AlgorithmInfo(
+    id: 'xxh3-64',
+    displayName: 'XXH3-64',
+    hexLength: 16,
+    digestLength: 8,
+    suffixUsable: true,
+    category: AlgorithmCategory.fast,
+    suffixWarning:
+        'XXH3 is non-cryptographic; a suffix is a convenience token, not a '
+        'security digest.',
+  ),
+  AlgorithmInfo(
+    id: 'xxh3-128',
+    displayName: 'XXH3-128',
+    hexLength: 32,
+    digestLength: 16,
+    suffixUsable: true,
+    category: AlgorithmCategory.fast,
+    suffixWarning:
+        'XXH3 is non-cryptographic; a suffix is a convenience token, not a '
+        'security digest.',
+  ),
+  AlgorithmInfo(
+    id: 'xxh64',
+    displayName: 'XXH64',
+    hexLength: 16,
+    digestLength: 8,
+    suffixUsable: true,
+    category: AlgorithmCategory.fast,
+    suffixWarning:
+        'XXH64 is non-cryptographic; a suffix is a convenience token, not a '
+        'security digest.',
+  ),
+  AlgorithmInfo(
+    id: 'crc32',
+    displayName: 'CRC32',
+    hexLength: 8,
+    digestLength: 4,
+    suffixUsable: true,
+    category: AlgorithmCategory.checksum,
+    suffixWarning:
+        'CRC32 is an error-detection checksum, not a content digest; a suffix '
+        'is convenience only.',
+  ),
+  AlgorithmInfo(
+    id: 'crc32c',
+    displayName: 'CRC32C',
+    hexLength: 8,
+    digestLength: 4,
+    suffixUsable: true,
+    category: AlgorithmCategory.checksum,
+    suffixWarning:
+        'CRC32C is an error-detection checksum, not a content digest; a '
+        'suffix is convenience only.',
+  ),
+  AlgorithmInfo(
+    id: 'md2',
+    displayName: 'MD2',
+    hexLength: 32,
+    digestLength: 16,
+    suffixUsable: true,
+    category: AlgorithmCategory.legacy,
+    suffixWarning: 'MD2 is obsolete and cryptographically broken.',
+  ),
+  AlgorithmInfo(
+    id: 'md4',
+    displayName: 'MD4',
+    hexLength: 32,
+    digestLength: 16,
+    suffixUsable: true,
+    category: AlgorithmCategory.legacy,
+    suffixWarning: 'MD4 is cryptographically broken.',
+  ),
+  AlgorithmInfo(
+    id: 'sha512-224',
+    displayName: 'SHA-512/224',
+    hexLength: 56,
+    digestLength: 28,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'sha512-256',
+    displayName: 'SHA-512/256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'sha3-224',
+    displayName: 'SHA3-224',
+    hexLength: 56,
+    digestLength: 28,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'sha3-384',
+    displayName: 'SHA3-384',
+    hexLength: 96,
+    digestLength: 48,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'keccak224',
+    displayName: 'Keccak-224',
+    hexLength: 56,
+    digestLength: 28,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'keccak256',
+    displayName: 'Keccak-256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'keccak384',
+    displayName: 'Keccak-384',
+    hexLength: 96,
+    digestLength: 48,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'keccak512',
+    displayName: 'Keccak-512',
+    hexLength: 128,
+    digestLength: 64,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'shake128',
+    displayName: 'SHAKE128',
+    hexLength: 32,
+    digestLength: 16,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'shake256',
+    displayName: 'SHAKE256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'ripemd128',
+    displayName: 'RIPEMD-128',
+    hexLength: 32,
+    digestLength: 16,
+    suffixUsable: true,
+    category: AlgorithmCategory.legacy,
+    suffixWarning: 'RIPEMD-128 is not collision resistant.',
+  ),
+  AlgorithmInfo(
+    id: 'ripemd160',
+    displayName: 'RIPEMD-160',
+    hexLength: 40,
+    digestLength: 20,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'ripemd256',
+    displayName: 'RIPEMD-256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'ripemd320',
+    displayName: 'RIPEMD-320',
+    hexLength: 80,
+    digestLength: 40,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'sm3',
+    displayName: 'SM3',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'gost94',
+    displayName: 'GOST R 34.11-94',
+    hexLength: 64,
+    digestLength: 32,
+    suffixUsable: true,
+    category: AlgorithmCategory.legacy,
+    suffixWarning: 'GOST R 34.11-94 is superseded by Streebog.',
+  ),
+  AlgorithmInfo(
+    id: 'streebog256',
+    displayName: 'Streebog-256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'streebog512',
+    displayName: 'Streebog-512',
+    hexLength: 128,
+    digestLength: 64,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'whirlpool',
+    displayName: 'Whirlpool',
+    hexLength: 128,
+    digestLength: 64,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'tiger',
+    displayName: 'Tiger',
+    hexLength: 48,
+    digestLength: 24,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'skein256',
+    displayName: 'Skein-256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'skein512',
+    displayName: 'Skein-512',
+    hexLength: 128,
+    digestLength: 64,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'groestl256',
+    displayName: 'Grøstl-256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'groestl512',
+    displayName: 'Grøstl-512',
+    hexLength: 128,
+    digestLength: 64,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'jh256',
+    displayName: 'JH-256',
+    hexLength: 64,
+    digestLength: 32,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
+  AlgorithmInfo(
+    id: 'jh512',
+    displayName: 'JH-512',
+    hexLength: 128,
+    digestLength: 64,
+    cryptographic: true,
+    category: AlgorithmCategory.crypto,
+  ),
 ];
 
+/// Algorithm IDs of [kAlgorithmCatalogue], in canonical order.
+///
+/// A convenience for code that only needs the identifiers. Anything that
+/// groups or labels algorithms must read [AlgorithmInfo] instead.
+final List<String> kAvailableAlgorithms = List<String>.unmodifiable(
+  <String>[for (final AlgorithmInfo info in kAlgorithmCatalogue) info.id],
+);
+
+/// Group [algorithms] by category, keeping the registry order inside a group.
+///
+/// Groups with no members are omitted, so the UI can render the result directly
+/// instead of filtering empty headings.
+Map<AlgorithmCategory, List<AlgorithmInfo>> groupAlgorithmsByCategory(
+  List<AlgorithmInfo> algorithms,
+) {
+  final Map<AlgorithmCategory, List<AlgorithmInfo>> grouped =
+      <AlgorithmCategory, List<AlgorithmInfo>>{};
+  for (final AlgorithmCategory category in AlgorithmCategory.ordered) {
+    final List<AlgorithmInfo> members = <AlgorithmInfo>[
+      for (final AlgorithmInfo info in algorithms)
+        if (info.category == category) info,
+    ];
+    if (members.isNotEmpty) {
+      grouped[category] = List<AlgorithmInfo>.unmodifiable(members);
+    }
+  }
+  return grouped;
+}
+
+/// Algorithms pinned as one-tap chips on the hash step.
+///
+/// Deliberately a short list of common, distinct-purpose algorithms: one legacy
+/// checksum, the two SHA-2 staples, the modern default and a fast checksum. The
+/// full catalogue stays reachable through the picker, so this list is a
+/// convenience and not a limit on what can be computed.
+const List<String> kDefaultPinnedAlgorithms = <String>[
+  'md5',
+  'sha256',
+  'sha512',
+  'blake3',
+  'crc32',
+];
 /// Algorithms offered for suffix based renaming.
 const List<String> kSuffixAlgorithms = <String>[
   'blake3',

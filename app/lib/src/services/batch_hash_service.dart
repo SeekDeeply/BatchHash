@@ -12,6 +12,15 @@ abstract class BatchHashService {
 
   Future<RenderingHardwareModel> probeRenderingHardware();
 
+  /// Every algorithm this build can compute, in the core's canonical order.
+  ///
+  /// The UI builds its picker from this list, including
+  /// [AlgorithmInfo.displayName] and [AlgorithmInfo.category]; it must not
+  /// hardcode algorithm IDs. The returned list is never empty: an
+  /// implementation
+  /// without a native core falls back to [kAlgorithmCatalogue].
+  Future<List<AlgorithmInfo>> listAlgorithms();
+
   /// List the files under [path].
   ///
   /// [recursive] must be honoured: a folder the user picked as "only this

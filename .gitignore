@@ -28,3 +28,9 @@ Thumbs.db
 # Local tooling / agent state
 .mnemon/
 .tmp/
+
+# Local-only Rust/zig toolchain used for pre-CI checks
+.bhtmp/
+.cargo/
+.rustup/
+.insp/

@@ -38,12 +38,31 @@ void main() {
 
     test('lists the registered algorithms', () {
       final algorithms = bridge.algorithms();
-      expect(algorithms, hasLength(16));
+      // The whole registry, not a curated subset: the UI builds its picker
+      // from this list and would silently hide algorithms otherwise.
+      expect(algorithms, hasLength(44));
       final ids = algorithms.map((item) => item['id']).toList();
       expect(ids, contains('sha256'));
       expect(ids, contains('blake3'));
+      expect(ids.toSet(), hasLength(44), reason: 'ids must be unique');
       final sha256 = algorithms.firstWhere((item) => item['id'] == 'sha256');
       expect(sha256['hex_len'], 64);
+      expect(sha256['category'], 'crypto');
+      // Every entry carries the grouping the UI needs, and the JSON shape the
+      // Dart decoder reads must stay exactly these keys.
+      for (final item in algorithms) {
+        expect(item['category'], isA<String>());
+        expect(item['display_name'], isA<String>());
+        expect(item['digest_len'], isA<int>());
+        expect(item['cryptographic'], isA<bool>());
+        expect(item['suffix_usable'], isA<bool>());
+        expect(item['default_suffix_algorithm'], isA<bool>());
+      }
+      final crc32 = algorithms.firstWhere((item) => item['id'] == 'crc32');
+      expect(crc32['category'], 'checksum');
+      final md5 = algorithms.firstWhere((item) => item['id'] == 'md5');
+      expect(md5['category'], 'legacy');
+      expect(md5['suffix_warning'], isA<String>());
     });
 
     test('scans a directory without hashing', () {

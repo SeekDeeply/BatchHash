@@ -134,6 +134,9 @@ class FakeBatchHashService implements BatchHashService {
       _renderingProvider.probe();
 
   @override
+  Future<List<AlgorithmInfo>> listAlgorithms() async => kAlgorithmCatalogue;
+
+  @override
   Future<List<BatchEntry>> scanDirectory(
     String path, {
     bool recursive = false,
@@ -697,20 +700,19 @@ class FakeBatchHashService implements BatchHashService {
     return '$path[$suffix]';
   }
 
-  int _hexLength(String algorithm) => switch (algorithm) {
-    'md5' => 32,
-    'sha1' => 40,
-    'sha512' => 128,
-    'sha3-256' => 64,
-    'blake2b' => 128,
-    'blake2s' => 64,
-    'sha256' => 64,
-    'blake3' => 64,
-    'xxh3-64' => 16,
-    'crc32' => 8,
-    'crc32c' => 8,
-    _ => 64,
-  };
+  /// Hex length the demo digest must have for [algorithm].
+  ///
+  /// Read from the shared catalogue instead of a private switch, so a demo
+  /// digest is always the length the real engine would produce for that
+  /// algorithm (a wrong length here would look like a decoder bug further up).
+  int _hexLength(String algorithm) {
+    for (final AlgorithmInfo info in kAlgorithmCatalogue) {
+      if (info.id == algorithm) {
+        return info.hexLength;
+      }
+    }
+    return 64;
+  }
 
   String _digest(String seed, int hexChars) {
     final StringBuffer buffer = StringBuffer();

@@ -160,10 +160,15 @@ function macos() {
   if (!/^PRODUCT_BUNDLE_IDENTIFIER\s*=/m.test(body)) {
     fail('no PRODUCT_BUNDLE_IDENTIFIER in ' + appInfo);
   }
-  const updated = body.replace(
+  let updated = body.replace(
     /^PRODUCT_BUNDLE_IDENTIFIER\s*=.*$/m,
     'PRODUCT_BUNDLE_IDENTIFIER = ' + APP_ID,
   );
+  // PRODUCT_COPYRIGHT is where the template's {{organization}} lands, so
+  // leaving it alone ships "Copyright © 2026 com.example" in the bundle.
+  updated = updated
+    .replace(/^PRODUCT_COPYRIGHT\s*=.*$/m, 'PRODUCT_COPYRIGHT = Copyright © 2026 SeekDeeply. All rights reserved.')
+    .replace(/^PRODUCT_NAME\s*=.*$/m, 'PRODUCT_NAME = ' + APP_NAME);
   writeFileSync(appInfo, updated);
 
   const project = join(appDir, 'macos', 'Runner.xcodeproj', 'project.pbxproj');

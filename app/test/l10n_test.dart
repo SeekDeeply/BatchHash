@@ -54,7 +54,6 @@ void main() {
       '写名',
       '报告',
       '对比',
-      '记录',
       '设置',
     ]);
     expect(find.text('批量哈希'), findsWidgets);

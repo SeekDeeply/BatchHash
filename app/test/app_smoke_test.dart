@@ -35,7 +35,6 @@ void main() {
       'Rename',
       'Report',
       'Compare',
-      'History',
       'Settings',
     ]);
   });
@@ -55,11 +54,21 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byType(NavigationBar),
-        matching: find.text('History'),
+        matching: find.text('Rename'),
       ),
     );
     await tester.pumpAndSettle();
+
+    // The recording log is reached from the rename header, not the bottom bar.
+    await tester.tap(find.byKey(const ValueKey<String>('rename-open-history')));
+    await tester.pumpAndSettle();
     expect(find.text('Batch history'), findsOneWidget);
+
+    // It is a pushed route, so the app bar offers a way back.
+    expect(find.byType(BackButton), findsOneWidget);
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Filename suffixes'), findsOneWidget);
   });
 
   testWidgets('app renders with the dynamic color builder enabled', (

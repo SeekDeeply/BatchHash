@@ -7,6 +7,7 @@ import '../theme.dart';
 import '../util/formatting.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/status_chip.dart';
+import 'history_page.dart';
 
 /// Translation key for the label of one [RenameRowStatus].
 String _rowStatusKey(RenameRowStatus status) => switch (status) {
@@ -20,6 +21,11 @@ String _rowStatusKey(RenameRowStatus status) => switch (status) {
 };
 
 /// Suffix based rename workflow with a pure dry run before execution.
+///
+/// The recording log is reached from the header rather than the bottom
+/// navigation: records only exist because of a rename, so the entry point sits
+/// next to the page that creates them instead of competing with the four other
+/// top-level destinations.
 class RenamePage extends StatefulWidget {
   const RenamePage({super.key, required this.state});
 
@@ -38,6 +44,19 @@ class _RenamePageState extends State<RenamePage> {
   String? _error;
   String? _message;
   RenamePlanModel? _plan;
+
+  /// Pushes the recording log as its own route.
+  ///
+  /// It is deliberately not a destination: the log is only meaningful after a
+  /// rename, so it opens from here and dismisses back to this page.
+  void _openHistory() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) =>
+            HistoryPage(service: widget.state.service),
+      ),
+    );
+  }
 
   Future<void> _preview(List<BatchEntry> entries) async {
     setState(() {
@@ -135,9 +154,24 @@ class _RenamePageState extends State<RenamePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text(
-                context.strings('rename.title'),
-                style: theme.textTheme.headlineSmall,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      context.strings('rename.title'),
+                      style: theme.textTheme.headlineSmall,
+                    ),
+                  ),
+                  // Recording entry point: kept in the header so it is reachable
+                  // even when there is nothing to rename yet.
+                  IconButton(
+                    key: const ValueKey<String>('rename-open-history'),
+                    onPressed: _openHistory,
+                    icon: const Icon(Icons.history),
+                    tooltip: context.strings('history.open'),
+                  ),
+                ],
               ),
               const SizedBox(height: 4),
               Text(

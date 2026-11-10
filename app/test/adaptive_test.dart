@@ -90,7 +90,7 @@ void main() {
     final NavigationRail rail = tester.widget<NavigationRail>(
       find.byType(NavigationRail),
     );
-    expect(rail.destinations.length, 6);
+    expect(rail.destinations.length, 5);
     expect(find.text('Hash'), findsOneWidget);
     expect(find.text('Settings'), findsOneWidget);
     expect(find.byType(AppBar), findsNothing);

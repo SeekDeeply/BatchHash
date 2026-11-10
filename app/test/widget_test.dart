@@ -35,7 +35,6 @@ void main() {
       'Rename',
       'Report',
       'Compare',
-      'History',
       'Settings',
     ]);
     expect(find.text('Batch hashing'), findsOneWidget);

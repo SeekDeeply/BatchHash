@@ -8,7 +8,6 @@ import 'l10n/app_strings_scope.dart';
 import 'l10n/locale_controller.dart';
 import 'pages/compare_page.dart';
 import 'pages/hash_page.dart';
-import 'pages/history_page.dart';
 import 'pages/rename_page.dart';
 import 'pages/report_page.dart';
 import 'pages/settings_page.dart';
@@ -98,11 +97,6 @@ class _BatchHashAppState extends State<BatchHashApp> {
         key: 'nav.compare',
         icon: Icons.compare_arrows,
         build: () => ComparePage(state: _appState),
-      ),
-      AppSection(
-        key: 'nav.history',
-        icon: Icons.history,
-        build: () => HistoryPage(service: _service),
       ),
       AppSection(
         key: 'nav.settings',

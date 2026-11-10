@@ -102,12 +102,12 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
-        run: flutter create --platforms=android,ios,linux,macos,windows --project-name batchhash .
-      - name: Pub get
-        working-directory: app
-        run: flutter pub get
+        run: node ../scripts/prepare-app.mjs android,ios,linux,macos,windows
       - name: Analyze
         working-directory: app
         run: flutter analyze
@@ -133,12 +133,12 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
-        run: flutter create --platforms=android,ios,linux,macos,windows --project-name batchhash .
-      - name: Pub get
-        working-directory: app
-        run: flutter pub get
+        run: node ../scripts/prepare-app.mjs android,ios,linux,macos,windows
       - name: Bridge integration test
         working-directory: app
         env:
@@ -163,11 +163,13 @@ jobs:
           targets: aarch64-linux-android,x86_64-linux-android
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
         run: |
-          flutter create --platforms=android,linux --project-name batchhash .
-          flutter pub get
+          node ../scripts/prepare-app.mjs android,linux
       - name: Install cargo-ndk
         # Built from source: the pinned toolchain (1.89.0) satisfies cargo-ndk's
         # MSRV, and this is the path CI has already exercised end to end.
@@ -232,9 +234,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
-        run: flutter create --platforms=linux --project-name batchhash .
+        run: node ../scripts/prepare-app.mjs linux
       - name: Build
         working-directory: app
         run: |
@@ -271,9 +276,12 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
-        run: flutter create --platforms=windows --project-name batchhash .
+        run: node ../scripts/prepare-app.mjs windows
       - name: Build
         working-directory: app
         run: |
@@ -301,9 +309,12 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
-        run: flutter create --platforms=macos --project-name batchhash .
+        run: node ../scripts/prepare-app.mjs macos
       - name: Build
         working-directory: app
         run: |
@@ -328,9 +339,12 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
-        run: flutter create --platforms=ios --project-name batchhash .
+        run: node ../scripts/prepare-app.mjs ios
       - name: Build iOS simulator
         working-directory: app
         run: |
@@ -359,9 +373,12 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
-        run: flutter create --platforms=android --project-name batchhash .
+        run: node ../scripts/prepare-app.mjs android
       - name: Build APK
         working-directory: app
         run: |

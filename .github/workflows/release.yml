@@ -69,11 +69,13 @@ jobs:
           if ! command -v cargo-ndk >/dev/null 2>&1; then
             cargo install cargo-ndk --locked
           fi
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
         run: |
-          flutter create --platforms=android --project-name batchhash .
-          flutter pub get
+          node ../scripts/prepare-app.mjs android
       - name: Build the Rust core for Android
         run: |
           set -e
@@ -186,11 +188,13 @@ jobs:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
         run: |
-          flutter create --platforms=ios --project-name batchhash .
-          flutter pub get
+          node ../scripts/prepare-app.mjs ios
       - name: Build the Rust core (static library)
         run: |
           set -e
@@ -229,11 +233,13 @@ jobs:
         uses: dtolnay/rust-toolchain@1.89.0
         with:
           targets: aarch64-apple-ios
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
         run: |
-          flutter create --platforms=ios --project-name batchhash .
-          flutter pub get
+          node ../scripts/prepare-app.mjs ios
       - name: Build unsigned
         working-directory: app
         run: |
@@ -266,11 +272,13 @@ jobs:
         uses: dtolnay/rust-toolchain@1.89.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
         run: |
-          flutter create --platforms=macos --project-name batchhash .
-          flutter pub get
+          node ../scripts/prepare-app.mjs macos
       - name: Build the Rust core
         run: cargo build -p batchhash-ffi --release --locked
       - name: Build release
@@ -327,11 +335,13 @@ jobs:
         uses: dtolnay/rust-toolchain@1.89.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
         run: |
-          flutter create --platforms=windows --project-name batchhash .
-          flutter pub get
+          node ../scripts/prepare-app.mjs windows
       - name: Build the Rust core
         run: cargo build -p batchhash-ffi --release --locked
       - name: Build release
@@ -511,11 +521,13 @@ jobs:
         uses: dtolnay/rust-toolchain@1.89.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
         run: |
-          flutter create --platforms=linux --project-name batchhash .
-          flutter pub get
+          node ../scripts/prepare-app.mjs linux
       - name: Build the Rust core
         run: cargo build -p batchhash-ffi --release --locked
       - name: Build release

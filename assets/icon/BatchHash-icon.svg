@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+ <defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#10243E"/><stop offset="0.55" stop-color="#10172C"/><stop offset="1" stop-color="#21144A"/></linearGradient>
+  <linearGradient id="file" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F5FBFF"/><stop offset="1" stop-color="#A9C8E8"/></linearGradient>
+  <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#65F5E5"/><stop offset="1" stop-color="#37A7FF"/></linearGradient>
+  <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C3A4FF"/><stop offset="1" stop-color="#7A5BFF"/></linearGradient>
+  <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="18"/></filter>
+  <clipPath id="clip"><rect x="72" y="72" width="880" height="880" rx="210"/></clipPath>
+ </defs>
+ <g clip-path="url(#clip)">
+  <rect x="72" y="72" width="880" height="880" rx="210" fill="url(#bg)"/>
+  <circle cx="735" cy="270" r="240" fill="#4B39B7" opacity=".16"/>
+  <path d="M70 760 C270 620 360 850 560 730 S830 650 970 530" fill="none" stroke="#33D9F4" stroke-width="3" opacity=".15"/>
+  <path d="M90 830 C270 690 410 900 600 790 S830 710 970 600" fill="none" stroke="#9A7CFF" stroke-width="3" opacity=".13"/>
+  <!-- batch stack -->
+  <g transform="translate(0 8)" opacity=".78">
+   <path d="M260 310 L440 245 L575 320 L395 388 Z" fill="#416B99" stroke="#8ABDE7" stroke-width="8" stroke-linejoin="round"/>
+   <path d="M260 310 L260 525 L395 605 L395 388 Z" fill="#294B78" stroke="#8ABDE7" stroke-width="8" stroke-linejoin="round"/>
+   <path d="M395 388 L575 320 L575 535 L395 605 Z" fill="#203A64" stroke="#8ABDE7" stroke-width="8" stroke-linejoin="round"/>
+  </g>
+  <!-- primary file -->
+  <path d="M394 238 H578 L700 360 V675 Q700 711 664 711 H394 Q358 711 358 675 V274 Q358 238 394 238 Z" fill="#42DDF2" opacity=".18" filter="url(#glow)"/>
+  <path d="M405 225 H578 L694 341 V659 Q694 695 658 695 H405 Q369 695 369 659 V261 Q369 225 405 225 Z" fill="url(#file)" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M578 225 V315 Q578 341 604 341 H694" fill="#D4E9FA" stroke="#FFFFFF" stroke-width="7" stroke-linejoin="round"/>
+  <!-- hash mark -->
+  <g stroke="#142D4A" stroke-width="19" stroke-linecap="round" fill="none">
+   <path d="M457 390 L432 518"/><path d="M522 390 L497 518"/><path d="M414 432 H555"/><path d="M402 480 H543"/>
+  </g>
+  <!-- verification check badge -->
+  <circle cx="666" cy="635" r="128" fill="#10172C" opacity=".48"/>
+  <circle cx="666" cy="620" r="120" fill="url(#cyan)"/>
+  <circle cx="666" cy="620" r="95" fill="#102A42"/>
+  <path d="M614 621 L650 657 L720 582" fill="none" stroke="#7BFFE8" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- small batch nodes -->
+  <g fill="url(#violet)" stroke="#D8C9FF" stroke-width="5">
+   <circle cx="278" cy="643" r="24"/><circle cx="278" cy="710" r="24"/><circle cx="278" cy="777" r="24"/>
+  </g>
+  <path d="M310 643 H359 M310 710 H359 M310 777 H359" stroke="#9D8AFF" stroke-width="10" stroke-linecap="round"/>
+ </g>
+ <rect x="72" y="72" width="880" height="880" rx="210" fill="none" stroke="#9FCBFF" stroke-opacity=".24" stroke-width="4"/>
+</svg>

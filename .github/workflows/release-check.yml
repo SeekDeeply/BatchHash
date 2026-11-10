@@ -31,11 +31,13 @@ jobs:
         uses: dtolnay/rust-toolchain@1.89.0
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
         run: |
-          flutter create --platforms=linux --project-name batchhash .
-          flutter pub get
+          node ../scripts/prepare-app.mjs linux
       - name: Build the Rust core
         run: cargo build -p batchhash-ffi --release
       - name: Build release
@@ -76,11 +78,13 @@ jobs:
           if ! command -v cargo-ndk >/dev/null 2>&1; then
             cargo install cargo-ndk --locked
           fi
-      - name: Generate platform scaffolding
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate scaffolding, app id and icons
         working-directory: app
         run: |
-          flutter create --platforms=android --project-name batchhash .
-          flutter pub get
+          node ../scripts/prepare-app.mjs android
       - name: Build the Rust core for Android
         run: |
           set -e

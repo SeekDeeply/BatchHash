@@ -2,10 +2,21 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
-## [未发布]
+## [1.0.0] - 2026-11-10
+
+首个正式版本。自此版本起，发布产物的应用标识固定为 `io.github.seekdeeply.batchhash`，
+并统一使用 BatchHash 自有图标。
 
 ### 新增
 
+- **正式应用标识**：Android 的 `applicationId` / `namespace`、iOS 与 macOS 的 bundle identifier、
+  Linux 的 GTK application id 全部统一为 `io.github.seekdeeply.batchhash`，
+  不再使用 `flutter create` 的默认 `com.example.batchhash`。标识集中在
+  `scripts/app-id.mjs`，由 CI 在脚手架生成后写入各平台，避免产物之间互相不一致。
+- **应用图标**：新增 `assets/icon/BatchHash-icon.svg` 作为唯一图标源，
+  CI 由 `scripts/generate-icons.mjs` 现场栅格化到 Android 自适应图标、
+  iOS/macOS `AppIcon`、Windows `.ico` 与 Linux hicolor 各尺寸。
+  iOS 与 macOS 的图标为不透明满幅（平台自行裁圆角），Android/Windows/Linux 保留圆角透明。
 - **中文优先界面**：默认语言为简体中文（不跟随系统语言），可在「设置 → 界面语言」切换到 English，
   切换后导航、按钮、状态与错误信息整体重译。全部文案集中在 `app/lib/src/l10n/app_strings.dart`
   的 zh/en 两表，页面统一通过 `context.strings('key')` 取词（见 [docs/localization.md](docs/localization.md)）。
@@ -17,6 +28,7 @@
 
 
 ### 修复（导出覆盖同名文件 / 重复点击）
+
 
 - **导出会静默覆盖同名报告**：写入路径固定为 `batchhash-report.<ext>`，用户选了已有报告的目录后新文件直接覆盖旧文件。
   现在改为独占创建并自动避让，冲突时依次使用 `batchhash-report (1).ext`、`(2)` 等；已有文件不受影响，界面显示实际写入路径。

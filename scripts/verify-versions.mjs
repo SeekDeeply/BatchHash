@@ -7,12 +7,11 @@
 //
 // Usage:
 //   node scripts/verify-versions.mjs
-//   node scripts/verify-versions.mjs --tag v0.1.0-rc.1
+//   node scripts/verify-versions.mjs --tag v1.0.0
 //
 // In GitHub Actions the tag is read from GITHUB_REF / GITHUB_REF_NAME. A branch
-// push has no tag, so only cargo/pubspec/changelog consistency is checked: the
-// repository ships 0.1.0-rc.1 while the CHANGELOG top section is [未发布], which
-// must stay a passing state.
+// push has no tag, so only cargo/pubspec/changelog consistency is checked, which
+// keeps ordinary development commits green.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -177,6 +176,31 @@ if (pubspec !== cargo) {
 if (!log.unreleased && log.top !== cargo) {
   fail('top CHANGELOG entry ' + log.top + ' does not match version ' + cargo);
 }
+
+// Every workflow builds with --locked, so a lockfile that still records the old
+// workspace version fails the build on a version bump. Check it here, where the
+// failure message can name the actual problem.
+const lockfileVersions = [];
+try {
+  const lock = read('Cargo.lock');
+  const re = /\[\[package\]\]\nname = "(batchhash-[a-z]+)"\nversion = "([^"]+)"/g;
+  let match;
+  while ((match = re.exec(lock)) !== null) {
+    lockfileVersions.push({ name: match[1], version: match[2] });
+  }
+} catch {
+  fail('Cargo.lock is missing');
+}
+const staleLock = lockfileVersions.filter((entry) => entry.version !== cargo);
+if (staleLock.length > 0) {
+  fail(
+    'Cargo.lock records ' +
+      staleLock.map((e) => e.name + '@' + e.version).join(', ') +
+      ' but the workspace version is ' + cargo +
+      ' — update Cargo.lock before pushing (CI builds with --locked)',
+  );
+}
+console.log('Cargo.lock workspace crates: ' + lockfileVersions.length + ' at ' + cargo);
 
 const tag = requestedTag();
 if (tag === null) {

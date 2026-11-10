@@ -11,7 +11,8 @@
       Rust clippy + test（`--locked`）、Flutter analyze/test、`Bridge (Rust FFI + Dart)`、
       `Package native library`、五平台 debug 构建。
 - [ ] `Format (CI)` 已跑过并把结果回灌仓库（否则 `cargo fmt --check` 会失败）。
-- [ ] 版本门禁：`Cargo.toml` 工作区版本、`app/pubspec.yaml` 版本同为 `0.1.0-rc.1`，
+- [ ] 版本门禁：`Cargo.toml` 工作区版本、`app/pubspec.yaml` 版本同为 `1.0.0`，
+      `Cargo.lock` 内各 `batchhash-*` crate 版本同为 `1.0.0`（CI 用 `--locked` 构建），
       CHANGELOG 顶部为 `[未发布]` 或与版本一致的已发布标题。
 
 ## 2. release 产物 [CI 自动断言]
@@ -52,7 +53,7 @@
 ## 5. 打 tag 与验证 [人工]
 
 - [ ] 确认 tag 提交就是上面 `Release` 验证过的提交。
-- [ ] `git tag v0.1.0-rc.1 && git push origin v0.1.0-rc.1`（本地只打 tag，不做构建）。
+- [ ] `git tag v1.0.0 && git push origin v1.0.0`（本地只打 tag，不做构建）。
 - [ ] tag 触发的 `versions` job 会额外校验 tag 与版本、CHANGELOG 已发布条目；任一不符即失败。
 - [ ] Release 工作流完成后（由 `publish` job 创建），逐个下载产物并**再次**校验
       `.so`/`.dylib`/`.dll` 是否存在——发布产物与之前的 dispatch 是两次独立构建。

@@ -1,6 +1,3 @@
-import 'package:flutter/material.dart';
-
-
 /// Result of comparing two line sequences.
 enum TextDiffKind { same, added, removed, changed }
 

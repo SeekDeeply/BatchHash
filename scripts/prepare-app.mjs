@@ -11,8 +11,13 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// On Windows "flutter" is a .bat shim, which spawnSync cannot execute without a
+// shell: it fails with status null and no output. On POSIX a shell would add a
+// quoting layer for no benefit, so it is enabled only where it is required.
+const IS_WINDOWS = process.platform === 'win32';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const appDir = process.cwd();
@@ -30,9 +35,22 @@ for (const platform of requested) {
 
 function run(command, args) {
   console.log('prepare-app: ' + command + ' ' + args.join(' '));
-  const result = spawnSync(command, args, { stdio: 'inherit', cwd: appDir });
+  const result = spawnSync(command, args, {
+    stdio: 'inherit',
+    cwd: appDir,
+    shell: IS_WINDOWS,
+  });
+  if (result.error) {
+    // Previously this surfaced only as "exited with null", which hides the real
+    // cause (a missing executable, a .bat shim without a shell, and so on).
+    console.error('prepare-app: ' + command + ' could not run: ' + result.error.message);
+    process.exit(1);
+  }
   if (result.status !== 0) {
-    console.error('prepare-app: ' + command + ' exited with ' + result.status);
+    console.error(
+      'prepare-app: ' + command + ' exited with ' +
+        (result.status === null ? 'no status (killed by ' + result.signal + ')' : result.status),
+    );
     process.exit(result.status ?? 1);
   }
 }

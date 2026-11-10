@@ -92,9 +92,13 @@ class _ComparePageState extends State<ComparePage> {
     widget.state.report.addListener(_handleReportChanged);
     final ReportModel? report = widget.state.report.value;
     if (report != null) {
+      // Remember which report is loaded, but do not hash anything yet.
+      // That report was produced by hashing these very files moments ago;
+      // re-reading them because the user opened this tab doubles the IO and
+      // makes a finished run look unfinished. Verification is an explicit
+      // action, never a side effect of navigation.
       _loadedReportKey = _reportKey(report);
-      _loading = true;
-      unawaited(_load(report));
+      _diffDirectory = report.root;
     }
   }
 
@@ -128,12 +132,15 @@ class _ComparePageState extends State<ComparePage> {
       return;
     }
     _loadedReportKey = key;
+    // A new report invalidates the old rows, but starting to hash it here
+    // would repeat the work that just produced it.
     setState(() {
-      _loading = true;
+      _loading = false;
       _error = null;
       _rows = const <DiffRowModel>[];
+      _diffProgress = null;
+      _diffDirectory = report.root;
     });
-    unawaited(_load(report));
   }
 
   String _reportKey(ReportModel report) =>
@@ -245,9 +252,12 @@ class _ComparePageState extends State<ComparePage> {
       _loadedReportKey = null;
       _diffProgress = null;
     });
-    if (mode == CompareMode.directory) {
-      _handleReportChanged();
-    } else if (_leftReport != null && _rightReport != null) {
+    // Two imported reports are already in memory, so comparing them costs no
+    // disk IO and needs no confirmation. A directory comparison does read the
+    // files, so it waits for the user to ask for it.
+    if (mode == CompareMode.reports &&
+        _leftReport != null &&
+        _rightReport != null) {
       unawaited(_diffImported());
     }
   }
@@ -597,6 +607,12 @@ class _ComparePageState extends State<ComparePage> {
               spacing: 8,
               runSpacing: 8,
               children: <Widget>[
+                FilledButton.icon(
+                  key: const ValueKey<String>('compare-start'),
+                  onPressed: _loading || report == null ? null : _startVerify,
+                  icon: const Icon(Icons.play_arrow_outlined),
+                  label: Text(context.strings('compare.startVerify')),
+                ),
                 OutlinedButton.icon(
                   key: const ValueKey<String>('compare-choose-directory'),
                   onPressed: _loading ? null : _chooseDiffDirectory,
@@ -633,11 +649,26 @@ class _ComparePageState extends State<ComparePage> {
     if (!mounted || picked == null || picked.trim().isEmpty) {
       return;
     }
+    // Changing the target must not start reading files on its own; the user
+    // still decides when to spend the IO.
     setState(() {
       _diffDirectory = picked.trim();
     });
     widget.state.rememberPath(picked.trim());
-    await _startDirectoryDiff(report, _diffDirectory);
+  }
+
+  /// Start the verification the user asked for.
+  Future<void> _startVerify() async {
+    final ReportModel? current = widget.state.report.value;
+    if (current == null) {
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+      _rows = const <DiffRowModel>[];
+    });
+    await _load(current);
   }
   Widget _buildDiffTable(
     List<DiffRowModel> rows, {

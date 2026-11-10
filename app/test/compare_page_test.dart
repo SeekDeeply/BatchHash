@@ -15,10 +15,40 @@ Future<FakeBatchHashService> pumpCompare(WidgetTester tester, Size size) async {
   state.report.value = fake.sampleReport;
   await tester.pumpWidget(wrapInApp(ComparePage(state: state)));
   await tester.pumpAndSettle();
+  // Opening the tab must not start a verification on its own; the rows only
+  // appear once the user asks for them.
+  await tester.tap(find.byKey(const ValueKey<String>('compare-start')));
+  await tester.pumpAndSettle();
   return fake;
 }
 
 void main() {
+  testWidgets('opening the tab does not start a verification on its own', (
+    WidgetTester tester,
+  ) async {
+    setViewSize(tester, const Size(1000, 1400));
+    final FakeBatchHashService fake = FakeBatchHashService();
+    final BatchHashAppState state = BatchHashAppState(service: fake);
+    state.report.value = fake.sampleReport;
+    await tester.pumpWidget(wrapInApp(ComparePage(state: state)));
+    await tester.pumpAndSettle();
+
+    // The report was just produced by hashing these files; navigating here
+    // must not read them again.
+    expect(fake.directoryCompareCalls, 0);
+    expect(find.byType(DiffRowTile), findsNothing);
+    expect(
+      find.byKey(const ValueKey<String>('compare-start')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey<String>('compare-start')));
+    await tester.pumpAndSettle();
+
+    expect(fake.directoryCompareCalls, 1);
+    expect(find.byType(DiffRowTile), findsNWidgets(12));
+  });
+
   testWidgets('filter chips filter the comparison rows', (
     WidgetTester tester,
   ) async {

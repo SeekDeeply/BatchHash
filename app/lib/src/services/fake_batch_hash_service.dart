@@ -385,12 +385,19 @@ class FakeBatchHashService implements BatchHashService {
     _cancelled = true;
   }
 
+  /// How many directory comparisons have been started.
+  ///
+  /// Lets a test prove that merely opening the comparison tab does not hash
+  /// anything, which is what made a finished run look like it restarted.
+  int directoryCompareCalls = 0;
+
   @override
   Stream<DiffProgress> compareReportWithDirectory({
     required ReportModel report,
     required String directory,
     bool recursive = false,
   }) async* {
+    directoryCompareCalls += 1;
     // A new run starts uncancelled; a sticky flag would make the next
     // comparison abort immediately and mask a real regression.
     _cancelled = false;

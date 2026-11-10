@@ -130,11 +130,15 @@ void main() {
     final BatchEntry entry = scanned.firstWhere(
       (BatchEntry candidate) => candidate.status == EntryStatus.ok,
     );
-    final List<BatchEntry> hashed = await fake.computeHashes(
-      entries: <BatchEntry>[entry],
-      algorithms: <String>['sha256', 'xxh3-64', 'crc32', 'md5'],
-    ).toList();
-    final Map<String, String> hashes = hashed.last.entries.first.hashes;
+    // computeHashes streams progress samples; the hashed entries ride along on
+    // each sample, so take the final one rather than a returned list.
+    final List<HashProgress> samples = await fake
+        .computeHashes(
+          entries: <BatchEntry>[entry],
+          algorithms: <String>['sha256', 'xxh3-64', 'crc32', 'md5'],
+        )
+        .toList();
+    final Map<String, String> hashes = samples.last.entries.first.hashes;
     expect(hashes['sha256'], hasLength(64));
     expect(hashes['xxh3-64'], hasLength(16));
     expect(hashes['crc32'], hasLength(8));

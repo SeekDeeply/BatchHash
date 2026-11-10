@@ -47,7 +47,7 @@ class AlgorithmPickerDialog extends StatefulWidget {
 }
 
 class _AlgorithmPickerDialogState extends State<AlgorithmPickerDialog> {
-  late Set<String> _selected = <String>{...widget.selected};
+  late final Set<String> _selected = <String>{...widget.selected};
   final TextEditingController _search = TextEditingController();
   String _query = '';
 
@@ -86,7 +86,7 @@ class _AlgorithmPickerDialogState extends State<AlgorithmPickerDialog> {
   }
 
   String _categoryLabel(BuildContext context, AlgorithmCategory category) {
-    return context.strings('algorithm.category.' + category.wireName);
+    return context.strings('algorithm.category.${category.wireName}');
   }
 
   @override
@@ -143,7 +143,7 @@ class _AlgorithmPickerDialogState extends State<AlgorithmPickerDialog> {
                           for (final AlgorithmInfo info in entry.value)
                             CheckboxListTile(
                               key: ValueKey<String>(
-                                'algorithm-picker-' + info.id,
+                                'algorithm-picker-${info.id}',
                               ),
                               dense: true,
                               value: _selected.contains(info.id),
@@ -151,10 +151,7 @@ class _AlgorithmPickerDialogState extends State<AlgorithmPickerDialog> {
                               title: Text(info.displayName),
                               subtitle: Text(
                                 info.suffixWarning ??
-                                    info.id +
-                                        ' · ' +
-                                        '${info.hexLength}' +
-                                        ' hex',
+                                    '${info.id} · ${info.hexLength} hex',
                               ),
                               secondary: info.suffixUsable
                                   ? const Icon(Icons.bookmark_added_outlined)

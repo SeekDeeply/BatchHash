@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../l10n/app_strings.dart';
+import '../l10n/app_strings_scope.dart';
 import 'text_diff.dart';
 
 /// Side-by-side line comparison of two pasted texts.

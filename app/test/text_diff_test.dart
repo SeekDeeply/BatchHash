@@ -264,6 +264,10 @@ void main() {
         find.byKey(const ValueKey<String>('text-compare-left')),
         'alpha',
       );
+      // Rebuild before tapping: the button only becomes enabled on the frame
+      // after the edit, and a tap on the previous frame would hit a disabled
+      // button and silently do nothing.
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey<String>('text-compare-run')));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));

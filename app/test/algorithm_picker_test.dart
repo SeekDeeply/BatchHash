@@ -102,7 +102,7 @@ void main() {
           'algorithm.selectedCount',
           locale: 'en',
           args: <String, String>{
-            'count': '${visible}',
+            'count': '$visible',
             'total': '${kAlgorithmCatalogue.length}',
           },
         ),

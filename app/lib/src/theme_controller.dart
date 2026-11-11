@@ -30,6 +30,37 @@ class ThemeController extends ChangeNotifier {
   void reset() => select(AppThemeDefaults.seed);
 }
 
+/// The accent a seed actually produces in the running UI.
+///
+/// This is the whole reason the swatch row was misleading: it showed the seed,
+/// while Material 3 paints primary from a fixed tonal step (tone 40 in light
+/// mode) of the generated palette. Two seeds a few degrees apart in hue
+/// therefore collapse to nearly the same primary, which is exactly what the
+/// user reported as "theme 1 and theme 2 look the same".
+///
+/// `DynamicSchemeVariant.fidelity` is what fixes it rather than swapping hex
+/// values: tonalSpot normalises every seed to the same chroma/lightness recipe,
+/// while fidelity keeps the seed's own chroma and tone as far as the contrast
+/// rules allow, so `#00658F` and a bright sky blue stay visibly different.
+Color derivedPrimary(Color seed, {Brightness brightness = Brightness.light}) {
+  return ColorScheme.fromSeed(
+    seedColor: seed,
+    brightness: brightness,
+    dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+  ).primary;
+}
+
+/// Perceptual lightness of [color] on a 0..1 scale, for comparison and tests.
+///
+/// Uses the standard luminance weights so "is this noticeably lighter" is
+/// answered the way the eye answers it, not by comparing raw channel sums.
+double relativeLightness(Color color) {
+  // red/green/blue/alpha, not the r/g/b/a getters: those only exist from
+  // Flutter 3.27 and CI pins 3.24.5.
+  return (0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue) /
+      255;
+}
+
 /// Default seed color, kept next to the controller so both agree.
 class AppThemeDefaults {
   const AppThemeDefaults._();

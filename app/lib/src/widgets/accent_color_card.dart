@@ -17,11 +17,14 @@ class AccentColorCard extends StatelessWidget {
 
   /// Presets worth offering directly; typed colors cover everything else.
   ///
-  /// `#66CCFF` is here on request: it is the classic sky blue used across many
-  /// Chinese-language apps, so it is a likely first choice.
+  /// The seeds are chosen so their *derived* accents stay distinguishable. The
+  /// previous pair (`#00658F` and `#66CCFF`) sat ~3 degrees apart in hue, and
+  /// Material 3 pulls primary from a fixed tonal step, so both produced nearly
+  /// the same button color. Sky is now `#29B6F6`, which is far enough to read
+  /// as a different accent rather than a slightly different patch of blue.
   static const List<({String key, Color color})> presets = <({String key, Color color})>[
     (key: 'accent.teal', color: Color(0xFF00658F)),
-    (key: 'accent.sky', color: Color(0xFF66CCFF)),
+    (key: 'accent.sky', color: Color(0xFF29B6F6)),
     (key: 'accent.indigo', color: Color(0xFF3F51B5)),
     (key: 'accent.violet', color: Color(0xFF6750A4)),
     (key: 'accent.rose', color: Color(0xFFB3261E)),
@@ -65,14 +68,19 @@ class AccentColorCard extends StatelessWidget {
                       style: theme.textTheme.titleMedium,
                     ),
                   ),
-                  Container(
-                    key: const ValueKey<String>('accent-preview'),
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: seed,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: scheme.outlineVariant),
+                  Tooltip(
+                    message: context.strings('accent.derivedHint'),
+                    child: Container(
+                      key: const ValueKey<String>('accent-preview'),
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        // The derived accent, not the seed: this is what the
+                        // UI will actually paint.
+                        color: derivedPrimary(seed),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: scheme.outlineVariant),
+                      ),
                     ),
                   ),
                 ],
@@ -98,9 +106,14 @@ class AccentColorCard extends StatelessWidget {
                         ),
                         borderRadius: BorderRadius.circular(20),
                         onTap: () => controller.select(preset.color),
+                        // Two rings on purpose: the outer edge is the seed the
+                        // user types, the inner disc is the accent that will
+                        // actually be painted. Showing only the seed is what
+                        // made two presets look identical before.
                         child: Container(
-                          width: 32,
-                          height: 32,
+                          width: 34,
+                          height: 34,
+                          padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
                             color: preset.color,
                             shape: BoxShape.circle,
@@ -109,6 +122,15 @@ class AccentColorCard extends StatelessWidget {
                                   ? scheme.onSurface
                                   : scheme.outlineVariant,
                               width: seed.value == preset.color.value ? 3 : 1,
+                            ),
+                          ),
+                          child: Container(
+                            key: ValueKey<String>(
+                              'accent-preset-inner-${preset.key}',
+                            ),
+                            decoration: BoxDecoration(
+                              color: derivedPrimary(preset.color),
+                              shape: BoxShape.circle,
                             ),
                           ),
                         ),
@@ -129,7 +151,7 @@ class AccentColorCard extends StatelessWidget {
                   TextButton(
                     key: const ValueKey<String>('accent-reset'),
                     onPressed: controller.isDefault ? null : controller.reset,
-                    child: Text(context.strings('accent.reset')),
+                    child: Text(context.strings('accent.resetToDefault')),
                   ),
                 ],
               ),
@@ -216,24 +238,49 @@ class _AccentColorInputDialogState extends State<AccentColorInputDialog> {
             const SizedBox(height: 16),
             Row(
               children: <Widget>[
+                // The preview paints the derived accent, and the seed ring
+                // around it keeps the typed value visible: what you type and
+                // what you get are both on screen.
                 Container(
-                  width: 40,
-                  height: 40,
+                  key: const ValueKey<String>('accent-dialog-preview'),
+                  width: 44,
+                  height: 44,
+                  padding: const EdgeInsets.all(5),
                   decoration: BoxDecoration(
                     color: live ?? scheme.surfaceContainerHighest,
                     shape: BoxShape.circle,
                     border: Border.all(color: scheme.outlineVariant),
                   ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: live == null
+                          ? scheme.surfaceContainerHighest
+                          : derivedPrimary(live),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    live == null
-                        ? context.strings('accent.previewInvalid')
-                        : formatColorInput(live),
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontFamily: 'monospace',
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        live == null
+                            ? context.strings('accent.previewInvalid')
+                            : formatColorInput(live),
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                      if (live != null)
+                        Text(
+                          context.strings('accent.derivedHint'),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],

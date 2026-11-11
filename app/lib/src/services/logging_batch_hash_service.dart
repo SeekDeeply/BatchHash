@@ -300,11 +300,139 @@ class LoggingBatchHashService implements BatchHashService {
     required String directory,
     bool recursive = false,
   }) {
-    return _recordStream('op.compareDirectory', inner.compareReportWithDirectory(
-      report: report,
-      directory: directory,
-      recursive: recursive,
-    ));
+    // A verification is only useful in the log if it says what it found. The
+    // previous record pointed at the directory and nothing else, so history
+    // showed "compared" without ever answering "did it match?".
+    final DateTime startedAt = DateTime.now();
+    final Stopwatch watch = Stopwatch()..start();
+    final List<DiffRowModel> latest = <DiffRowModel>[];
+
+    Future<void> record({required bool ok, Object? error}) async {
+      watch.stop();
+      final String detail = ok
+          ? describeVerification(latest, directory: directory)
+          : '$error';
+      await store.append(
+        OperationLogEntry(
+          kind: 'op.compareDirectory',
+          status: ok,
+          startedAt: startedAt,
+          detail: detail,
+          durationMs: watch.elapsedMilliseconds,
+          hashes: ok
+              ? digestsFromDiff(latest)
+              : const <HashDigestRecord>[],
+        ),
+      );
+    }
+
+    return inner
+        .compareReportWithDirectory(
+          report: report,
+          directory: directory,
+          recursive: recursive,
+        )
+        .transform(
+          StreamTransformer<DiffProgress, DiffProgress>.fromHandlers(
+            handleData: (DiffProgress progress, EventSink<DiffProgress> sink) {
+              // Keep the newest sample: rows are only complete once done.
+              if (progress.rows.isNotEmpty) {
+                latest
+                  ..clear()
+                  ..addAll(progress.rows);
+              }
+              sink.add(progress);
+            },
+            handleDone: (EventSink<DiffProgress> sink) async {
+              await record(ok: true);
+              sink.close();
+            },
+            handleError: (
+              Object error,
+              StackTrace stack,
+              EventSink<DiffProgress> sink,
+            ) async {
+              await record(ok: false, error: error);
+              sink.addError(error, stack);
+            },
+          ),
+        );
+  }
+
+  /// One-line verdict for a verification run.
+  ///
+  /// The wording is derived from the row statuses rather than from the report
+  /// alone: `unchanged` is a match, everything else means the file differs or
+  /// could not be judged, and lumping those together would report a corrupt row
+  /// as a plain mismatch.
+  String describeVerification(
+    List<DiffRowModel> rows, {
+    required String directory,
+  }) {
+    if (rows.isEmpty) {
+      return '$directory · 0';
+    }
+    int matched = 0;
+    int mismatched = 0;
+    int unresolved = 0;
+    for (final DiffRowModel row in rows) {
+      switch (row.status) {
+        case DiffStatus.unchanged:
+          matched += 1;
+        case DiffStatus.changed:
+        case DiffStatus.added:
+        case DiffStatus.removed:
+          mismatched += 1;
+        case DiffStatus.unknown:
+        case DiffStatus.ambiguous:
+        case DiffStatus.duplicateKey:
+        case DiffStatus.outOfRoot:
+        case DiffStatus.corrupt:
+        case DiffStatus.unstable:
+          unresolved += 1;
+      }
+    }
+    final List<String> parts = <String>[directory];
+    parts.add('match $matched');
+    if (mismatched > 0) {
+      parts.add('mismatch $mismatched');
+    }
+    if (unresolved > 0) {
+      parts.add('unresolved $unresolved');
+    }
+    return parts.join(' · ');
+  }
+
+  /// Digests of the rows that actually matched.
+  ///
+  /// Only matching rows are kept: recording every compared file would bury the
+  /// log under the contents of the report, while the matching digests are what a
+  /// later reader wants to see to believe the verification.
+  List<HashDigestRecord> digestsFromDiff(List<DiffRowModel> rows) {
+    final List<HashDigestRecord> records = <HashDigestRecord>[];
+    for (final DiffRowModel row in rows) {
+      if (row.status != DiffStatus.unchanged) {
+        continue;
+      }
+      final Map<String, String> hashes =
+          row.right?.hashes ?? row.left?.hashes ?? const <String, String>{};
+      for (final MapEntry<String, String> hash in hashes.entries) {
+        if (hash.value.isEmpty) {
+          continue;
+        }
+        if (records.length >= kMaxRecordedDigests) {
+          return records;
+        }
+        records.add(
+          HashDigestRecord(
+            path: row.path,
+            algorithm: hash.key,
+            digest: hash.value,
+          ),
+        );
+      }
+    }
+    return records;
   }
 
   @override

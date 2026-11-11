@@ -28,7 +28,16 @@ class AppTheme {
   /// experience keeps following the system.
   static ThemeData light(ColorScheme? dynamicScheme, {Color? seed}) {
     if (_isUserChoice(seed)) {
-      return _themeFrom(ColorScheme.fromSeed(seedColor: seed!));
+      // fidelity, not the default tonalSpot: tonalSpot reshapes every seed to
+      // one fixed chroma/tone recipe, so two seeds of similar hue produced the
+      // same primary and the setting looked like it did nothing. fidelity keeps
+      // the chosen color recognisable, which is the point of picking it.
+      return _themeFrom(
+        ColorScheme.fromSeed(
+          seedColor: seed!,
+          dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+        ),
+      );
     }
     return _themeFrom(
       dynamicScheme ?? ColorScheme.fromSeed(seedColor: seed ?? seedColor),
@@ -42,6 +51,7 @@ class AppTheme {
         ColorScheme.fromSeed(
           seedColor: seed!,
           brightness: Brightness.dark,
+          dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
         ),
       );
     }

@@ -43,36 +43,48 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('accent input applies a valid hex color', (WidgetTester tester) async {
+  testWidgets('manual entry applies a valid hex color through the dialog', (
+    WidgetTester tester,
+  ) async {
     await pumpSettings(tester);
+
+    await tester.tap(find.byKey(const ValueKey<String>('accent-open-manual')));
+    await tester.pumpAndSettle();
 
     await tester.enterText(
       find.byKey(const ValueKey<String>('accent-input')),
       '#3F51B5',
     );
     await tester.tap(find.byKey(const ValueKey<String>('accent-apply')));
-    await tester.pump();
+    await tester.pumpAndSettle();
 
     expect(theme.seed, const Color(0xFF3F51B5));
   });
 
-  testWidgets('accent input rejects an invalid value and keeps the old seed', (
+  testWidgets('manual entry rejects an invalid value and keeps the old seed', (
     WidgetTester tester,
   ) async {
     await pumpSettings(tester);
     final Color before = theme.seed;
+
+    await tester.tap(find.byKey(const ValueKey<String>('accent-open-manual')));
+    await tester.pumpAndSettle();
 
     await tester.enterText(
       find.byKey(const ValueKey<String>('accent-input')),
       'not-a-color',
     );
     await tester.tap(find.byKey(const ValueKey<String>('accent-apply')));
-    await tester.pump();
+    await tester.pumpAndSettle();
 
+    // The dialog stays open with an error rather than closing on bad input.
     expect(theme.seed, before);
+    expect(find.byKey(const ValueKey<String>('accent-input-dialog')), findsOneWidget);
   });
 
-  testWidgets('accent preset updates the controller', (WidgetTester tester) async {
+  testWidgets('tapping a preset applies it without a confirm step', (
+    WidgetTester tester,
+  ) async {
     await pumpSettings(tester);
 
     await tester.tap(
@@ -81,6 +93,19 @@ void main() {
     await tester.pump();
 
     expect(theme.seed, const Color(0xFF3F51B5));
+  });
+
+  testWidgets('the #66CCFF preset is offered and applies', (
+    WidgetTester tester,
+  ) async {
+    await pumpSettings(tester);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('accent-preset-accent.sky')),
+    );
+    await tester.pump();
+
+    expect(theme.seed, const Color(0xFF66CCFF));
   });
 
   testWidgets('history entry opens the operation log', (WidgetTester tester) async {

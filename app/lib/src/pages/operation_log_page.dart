@@ -102,7 +102,7 @@ class _OperationLogPageState extends State<OperationLogPage> {
                 const Divider(height: 1),
             itemBuilder: (BuildContext context, int index) {
               final OperationLogEntry entry = entries[index];
-              return ListTile(
+              final Widget tile = ListTile(
                 dense: true,
                 leading: Icon(
                   entry.status ? Icons.check_circle : Icons.error,
@@ -129,6 +129,69 @@ class _OperationLogPageState extends State<OperationLogPage> {
                     color: entry.status ? scheme.onSurfaceVariant : scheme.error,
                   ),
                 ),
+              );
+              if (entry.hashes.isEmpty) {
+                return tile;
+              }
+              // Digests are the verifiable payload, so they are shown but kept
+              // collapsed: a batch can hold hundreds of them.
+              return ExpansionTile(
+                key: ValueKey<String>('operation-log-hashes-$index'),
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(left: 40, bottom: 8),
+                expandedCrossAxisAlignment: CrossAxisAlignment.start,
+                title: tile,
+                children: <Widget>[
+                  for (final HashDigestRecord record in entry.hashes)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          SizedBox(
+                            width: 90,
+                            child: Text(
+                              record.algorithm,
+                              style: theme.textTheme.labelSmall,
+                            ),
+                          ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  record.path,
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                                SelectableText(
+                                  record.digest,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontFamily: 'monospace',
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (entry.hashesTruncated > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        context.strings(
+                          'history.operationHashesTruncated',
+                          args: <String, String>{
+                            'count': '${entry.hashesTruncated}',
+                          },
+                        ),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                ],
               );
             },
           );

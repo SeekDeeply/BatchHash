@@ -24,6 +24,7 @@ class LoggingBatchHashService implements BatchHashService {
     String kind,
     Future<T> Function() body, {
     String? Function(T value)? detail,
+    List<HashDigestRecord> Function(T value)? digests,
   }) async {
     final DateTime startedAt = DateTime.now();
     final Stopwatch watch = Stopwatch()..start();
@@ -37,6 +38,7 @@ class LoggingBatchHashService implements BatchHashService {
           startedAt: startedAt,
           detail: detail?.call(value),
           durationMs: watch.elapsedMilliseconds,
+          hashes: digests?.call(value) ?? const <HashDigestRecord>[],
         ),
       );
       return value;
@@ -94,13 +96,62 @@ class LoggingBatchHashService implements BatchHashService {
     required List<String> algorithms,
     bool forceSoftware = false,
   }) {
-    // The stream itself is not awaited here; the log entry is written when the
-    // last sample arrives, which is when the batch actually finished.
-    return _recordStream('op.hash', inner.computeHashes(
-      entries: entries,
-      algorithms: algorithms,
-      forceSoftware: forceSoftware,
-    ));
+    // Digests only exist once the run finishes, so the samples are watched and
+    // the log entry is written at the end rather than when the call starts.
+    final DateTime startedAt = DateTime.now();
+    final Stopwatch watch = Stopwatch()..start();
+    // Keyed by path so a re-reported entry replaces its earlier sample instead
+    // of duplicating it; a batch reports each file once per algorithm set.
+    final Map<String, BatchEntry> latestByPath = <String, BatchEntry>{};
+
+    void record({required bool ok, Object? error}) {
+      watch.stop();
+      final List<BatchEntry> finished = latestByPath.values.toList(growable: false);
+      final ({List<HashDigestRecord> records, int truncated}) collected =
+          collectDigests(finished);
+      unawaited(
+        store.append(
+          OperationLogEntry(
+            kind: 'op.hash',
+            status: ok,
+            startedAt: startedAt,
+            detail: error == null
+                ? '${finished.length} files'
+                : '$error',
+            durationMs: watch.elapsedMilliseconds,
+            hashes: collected.records,
+            hashesTruncated: collected.truncated,
+          ),
+        ),
+      );
+    }
+
+    return inner
+        .computeHashes(
+          entries: entries,
+          algorithms: algorithms,
+          forceSoftware: forceSoftware,
+        )
+        .transform(
+          StreamTransformer<HashProgress, HashProgress>.fromHandlers(
+            handleData: (HashProgress progress, EventSink<HashProgress> sink) {
+              for (final BatchEntry entry in progress.entries) {
+                if (entry.hashes.isNotEmpty) {
+                  latestByPath[entry.path] = entry;
+                }
+              }
+              sink.add(progress);
+            },
+            handleDone: (EventSink<HashProgress> sink) {
+              record(ok: true);
+              sink.close();
+            },
+            handleError: (Object error, StackTrace stack, EventSink<HashProgress> sink) {
+              record(ok: false, error: error);
+              sink.addError(error, stack);
+            },
+          ),
+        );
   }
 
   /// Record a stream operation once it completes or fails.
@@ -183,9 +234,21 @@ class LoggingBatchHashService implements BatchHashService {
     required String text,
     required List<String> algorithms,
   }) {
+    // The pasted text itself is not recorded: history may be exported or read
+    // by someone else, and the digest is the verifiable part anyway.
     return _record(
       'op.hashText',
       () => inner.hashText(text: text, algorithms: algorithms),
+      detail: (List<TextHashResult> results) =>
+          '${text.length} chars · ${results.length}',
+      digests: (List<TextHashResult> results) => <HashDigestRecord>[
+        for (final TextHashResult result in results)
+          HashDigestRecord(
+            path: 'text',
+            algorithm: result.algorithmId,
+            digest: result.digest,
+          ),
+      ],
     );
   }
 

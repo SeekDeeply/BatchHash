@@ -10,12 +10,26 @@ class AppTheme {
   /// Seed the app shipped with; kept as an alias for the settings copy.
   static const Color seedColor = AppThemeDefaults.seed;
 
+  /// Whether [seed] represents a deliberate user choice.
+  ///
+  /// The shipped default is not a choice: it is what the app uses when the user
+  /// never opened the picker. Treating it as one would silently disable platform
+  /// dynamic color for everyone, so only a different value counts.
+  static bool _isUserChoice(Color? seed) {
+    return seed != null && seed.value != AppThemeDefaults.seed.value;
+  }
+
   /// Build the light theme.
   ///
-  /// [seed] comes from the user's color choice and only applies when there is
-  /// no dynamic (wallpaper) scheme: an explicit choice must win over the
-  /// platform palette, otherwise the setting would look broken on Android.
+  /// An explicit [seed] wins over the platform dynamic (wallpaper) scheme:
+  /// preferring the wallpapers palette here would make the accent setting look
+  /// broken on any device that supplies one, which is every recent Android.
+  /// Without a user choice the dynamic scheme is still used, so the default
+  /// experience keeps following the system.
   static ThemeData light(ColorScheme? dynamicScheme, {Color? seed}) {
+    if (_isUserChoice(seed)) {
+      return _themeFrom(ColorScheme.fromSeed(seedColor: seed!));
+    }
     return _themeFrom(
       dynamicScheme ?? ColorScheme.fromSeed(seedColor: seed ?? seedColor),
     );
@@ -23,6 +37,14 @@ class AppTheme {
 
   /// Build the dark theme, honouring [seed] the same way as [light].
   static ThemeData dark(ColorScheme? dynamicScheme, {Color? seed}) {
+    if (_isUserChoice(seed)) {
+      return _themeFrom(
+        ColorScheme.fromSeed(
+          seedColor: seed!,
+          brightness: Brightness.dark,
+        ),
+      );
+    }
     return _themeFrom(
       dynamicScheme ??
           ColorScheme.fromSeed(

@@ -89,4 +89,42 @@ void main() {
       expect(controller.isDefault, isTrue);
     });
   });
+  group('seed precedence over platform dynamic color', () {
+    const Color platformPrimary = Color(0xFF123456);
+    final ColorScheme dynamicScheme = ColorScheme.fromSeed(
+      seedColor: platformPrimary,
+    );
+
+    test('an explicit choice overrides the dynamic scheme', () {
+      // This is the fix for the reported bug: the wallpaper palette used to win,
+      // so changing the accent color appeared to do nothing on Android.
+      final ThemeData built = AppTheme.light(
+        dynamicScheme,
+        seed: const Color(0xFF66CCFF),
+      );
+      expect(
+        built.colorScheme.primary,
+        isNot(ColorScheme.fromSeed(seedColor: platformPrimary).primary),
+      );
+    });
+
+    test('the default seed still allows dynamic color', () {
+      final ThemeData built = AppTheme.light(
+        dynamicScheme,
+        seed: AppThemeDefaults.seed,
+      );
+      expect(built.colorScheme.primary, dynamicScheme.primary);
+    });
+
+    test('with no dynamic scheme the seed decides', () {
+      final ThemeData built = AppTheme.light(
+        null,
+        seed: const Color(0xFF66CCFF),
+      );
+      expect(
+        built.colorScheme.primary,
+        ColorScheme.fromSeed(seedColor: const Color(0xFF66CCFF)).primary,
+      );
+    });
+  });
 }

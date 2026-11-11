@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
 
-import '../l10n/app_strings.dart';
 import '../l10n/app_strings_scope.dart';
 import '../services/batch_hash_service.dart';
+import '../services/operation_log_store.dart';
 import '../theme.dart';
 import '../theme_controller.dart';
 import '../widgets/accent_color_card.dart';
-import 'legal_page.dart';
-import 'operation_log_page.dart';
-import '../services/operation_log_store.dart';
 import '../widgets/hardware_panel.dart';
 import 'about_page.dart';
+import 'legal_page.dart';
+import 'operation_log_page.dart';
 
 /// App preferences plus a hardware panel and the About entry point.
 class SettingsPage extends StatelessWidget {
@@ -39,6 +38,10 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A field is not promoted by a null check, so the branch needs a local:
+    // `theme == null` on the field would keep the un-promoted static type and
+    // the else branch could not pass a ThemeController.
+    final ThemeController? themeController = theme;
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final ValueChanged<String>? onLocaleChanged = this.onLocaleChanged;
@@ -93,7 +96,7 @@ class SettingsPage extends StatelessWidget {
                     ),
                   ),
                 const Divider(height: 1),
-                if (theme == null)
+                if (themeController == null)
                   ListTile(
                     leading: const Icon(Icons.palette_outlined),
                     title: Text(context.strings('settings.theme')),
@@ -107,7 +110,7 @@ class SettingsPage extends StatelessWidget {
                     ),
                   )
                 else
-                  AccentColorCard(controller: theme),
+                  AccentColorCard(controller: themeController),
                 const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.memory_outlined),

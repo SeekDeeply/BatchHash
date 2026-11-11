@@ -47,7 +47,7 @@ class AlgorithmPickerDialog extends StatefulWidget {
 }
 
 class _AlgorithmPickerDialogState extends State<AlgorithmPickerDialog> {
-  late final Set<String> _selected = <String>{...widget.selected};
+  late Set<String> _selected = <String>{...widget.selected};
   final TextEditingController _search = TextEditingController();
   String _query = '';
 

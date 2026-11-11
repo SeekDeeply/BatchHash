@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../models/models.dart';
 import '../models/operation_log.dart';
 import 'batch_hash_service.dart';
@@ -102,34 +104,37 @@ class LoggingBatchHashService implements BatchHashService {
   }
 
   /// Record a stream operation once it completes or fails.
+  ///
+  /// The write is deliberately fire-and-forget: a stream listener must not wait
+  /// on disk I/O between samples. [OperationLogStore.append] already swallows
+  /// its own errors, so an unawaited call cannot surface as an unhandled
+  /// exception.
   Stream<T> _recordStream<T>(String kind, Stream<T> source) {
     final DateTime startedAt = DateTime.now();
     final Stopwatch watch = Stopwatch()..start();
+    void record({required bool ok, Object? error}) {
+      watch.stop();
+      unawaited(
+        store.append(
+          OperationLogEntry(
+            kind: kind,
+            status: ok,
+            startedAt: startedAt,
+            detail: error == null ? null : '$error',
+            durationMs: watch.elapsedMilliseconds,
+          ),
+        ),
+      );
+    }
+
     return source.transform(
       StreamTransformer<T, T>.fromHandlers(
         handleDone: (EventSink<T> sink) {
-          watch.stop();
-          store.append(
-            OperationLogEntry(
-              kind: kind,
-              status: true,
-              startedAt: startedAt,
-              durationMs: watch.elapsedMilliseconds,
-            ),
-          );
+          record(ok: true);
           sink.close();
         },
         handleError: (Object error, StackTrace stack, EventSink<T> sink) {
-          watch.stop();
-          store.append(
-            OperationLogEntry(
-              kind: kind,
-              status: false,
-              startedAt: startedAt,
-              detail: '$error',
-              durationMs: watch.elapsedMilliseconds,
-            ),
-          );
+          record(ok: false, error: error);
           sink.addError(error, stack);
         },
       ),

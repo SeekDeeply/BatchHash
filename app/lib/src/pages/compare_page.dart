@@ -443,9 +443,9 @@ class _ComparePageState extends State<ComparePage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           tabs,
-          const Expanded(
+          Expanded(
             child: Padding(
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
               child: TextComparePanel(service: widget.state.service),
             ),
           ),

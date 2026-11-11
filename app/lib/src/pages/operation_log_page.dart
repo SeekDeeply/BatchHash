@@ -98,7 +98,8 @@ class _OperationLogPageState extends State<OperationLogPage> {
             key: const ValueKey<String>('operation-log-list'),
             padding: const EdgeInsets.all(16),
             itemCount: entries.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
+            separatorBuilder: (BuildContext context, int index) =>
+                const Divider(height: 1),
             itemBuilder: (BuildContext context, int index) {
               final OperationLogEntry entry = entries[index];
               return ListTile(

@@ -87,4 +87,38 @@ void main() {
       expect(restored?.width, WindowState.minWidth);
     });
   });
+
+  group('close path stays cheap', () {
+    late Directory temp;
+    late WindowStateStore store;
+
+    setUp(() async {
+      temp = await Directory.systemTemp.createTemp('batchhash-window-close');
+      store = WindowStateStore(supportDirectory: () async => temp);
+    });
+
+    tearDown(() async {
+      if (await temp.exists()) {
+        await temp.delete(recursive: true);
+      }
+    });
+
+    test('a save leaves the file readable without an explicit sync', () async {
+      // The store used to pass flush: true, which forces a disk sync. Window
+      // geometry is a convenience, so that cost bought nothing and made every
+      // close that saved a size stall.
+      await store.save(const WindowState(width: 1200, height: 800));
+      final WindowState? reloaded = await WindowStateStore(
+        supportDirectory: () async => temp,
+      ).load();
+      expect(reloaded?.width, 1200);
+    });
+
+    test('geometry is clamped before it reaches the disk', () async {
+      await store.save(const WindowState(width: 1, height: 1));
+      final WindowState? reloaded = await store.load();
+      expect(reloaded?.width, WindowState.minWidth);
+      expect(reloaded?.height, WindowState.minHeight);
+    });
+  });
 }

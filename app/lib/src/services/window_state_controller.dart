@@ -16,15 +16,30 @@ class WindowStateController with WindowListener {
 
   final WindowStateStore store;
 
-  /// Debounce timer for the resize handler.
-  ///
-  /// A drag fires dozens of resize events per second; writing on every one
-  /// would hammer the disk while the user is still moving the window.
+  /// Debounce timer for platforms that only report continuous resizes.
   Timer? _debounce;
 
-  /// Writes are serialised through this chain so a save started during a
-  /// debounce cannot interleave with the final write on close.
+  /// Writes are serialised through this chain so a save cannot interleave with
+  /// the close that follows it.
   Future<void> _pending = Future<void>.value();
+
+  /// Incremented on every resize.
+  ///
+  /// A write takes milliseconds, and a resize can land in the middle of one.
+  /// Comparing the captured value against the latest tells [_capture] whether
+  /// what it just wrote is still current, so a resize during a write is not
+  /// silently discarded.
+  int _generation = 0;
+
+  /// Whether the current size has not been persisted yet.
+  ///
+  /// This drives the only thing that can make a close slow: while [_dirty], the
+  /// close is intercepted so the write can land. The moment the write lands the
+  /// interception is released again, so a normal close never waits on anything.
+  bool _dirty = false;
+
+  /// Guards against re-entrant arming of the close interception.
+  bool _guardArmed = false;
 
   /// False on Android/iOS, where there is no window to size.
   static bool get isSupported =>
@@ -56,10 +71,6 @@ class WindowStateController with WindowListener {
           await windowManager.focus();
         },
       );
-      // The close event is not cancellable by default, so a resize made in the
-      // last second before quitting could be lost. Preventing the close lets
-      // the handler write first and then close for real.
-      await windowManager.setPreventClose(true);
       windowManager.addListener(this);
     } catch (error) {
       debugPrint('window geometry not restored: $error');
@@ -79,27 +90,85 @@ class WindowStateController with WindowListener {
 
   @override
   void onWindowResize() {
+    // Linux reports only the continuous event, so a short debounce stands in
+    // for the "finished" signal. No IPC happens here: the size is read once the
+    // timer fires, not on every frame of a drag.
+    _markDirty();
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), _capture);
+    _debounce = Timer(const Duration(milliseconds: 400), _flush);
   }
 
-  /// Capture on close, then close for real.
+  @override
+  void onWindowResized() {
+    // macOS and Windows report the end of the drag directly, so the size can be
+    // persisted immediately instead of waiting out a debounce.
+    _debounce?.cancel();
+    _debounce = null;
+    _markDirty();
+    _flush();
+  }
+
+  /// Arm the close interception, because a write is now outstanding.
+  void _markDirty() {
+    _dirty = true;
+    _generation += 1;
+    if (_guardArmed) {
+      return;
+    }
+    _guardArmed = true;
+    // Only armed while dirty. A close with nothing to save is left entirely to
+    // the platform, which is what keeps it instant; intercepting every close
+    // forced a native -> Dart -> destroy round trip on each one.
+    unawaited(
+      windowManager
+          .setPreventClose(true)
+          .catchError((Object error) {
+            _guardArmed = false;
+            debugPrint('close interception not armed: $error');
+          }),
+    );
+  }
+
+  /// Release the close interception once nothing is outstanding.
+  Future<void> _disarm() async {
+    if (!_guardArmed) {
+      return;
+    }
+    _guardArmed = false;
+    try {
+      await windowManager.setPreventClose(false);
+    } catch (error) {
+      debugPrint('close interception not released: $error');
+    }
+  }
+
+  /// Persist the current size and disarm when done.
+  void _flush() {
+    _pending = _pending.then((_) async {
+      await _capture();
+      if (!_dirty) {
+        await _disarm();
+      }
+    });
+  }
+
+  /// Close the window, waiting for a write only when one is outstanding.
   ///
-  /// The debounce would otherwise swallow the final size when the user resizes
-  /// and quits immediately. Because [attach] set `setPreventClose(true)`, the
-  /// window stays open until the write lands and the close is re-issued;
-  /// without that, quitting mid-write would race the process exit.
-  /// [WindowListener.onWindowClose] returns void, so the write is started here
-  /// and completed on [_pending]; the window stays open because [attach] set
-  /// `setPreventClose(true)`, and it is closed once the write lands.
+  /// Reached only while the interception is armed, i.e. only when a resize is
+  /// waiting to be saved. [WindowListener.onWindowClose] returns void, so the
+  /// work continues on [_pending].
   @override
   void onWindowClose() {
     _debounce?.cancel();
     _debounce = null;
-    _pending = _pending.then((_) => _capture()).then((_) async {
-      // Releasing the guard is unconditional: if the write failed there is no
-      // reason to trap the user in a window that will not close.
+    _pending = _pending.then((_) async {
+      if (_dirty) {
+        await _capture();
+      }
       try {
+        // Released unconditionally: if the write failed there is no reason to
+        // trap the user in a window that will not close.
+        _guardArmed = false;
         await windowManager.setPreventClose(false);
         await windowManager.destroy();
       } catch (error) {
@@ -108,21 +177,40 @@ class WindowStateController with WindowListener {
     });
   }
 
+  /// Read the current geometry and persist it.
+  ///
+  /// Three IPC round trips plus a write, so this never runs per frame. The three
+  /// queries are issued together: they are independent, and awaiting them in
+  /// sequence tripled the latency on the close path.
   Future<void> _capture() async {
+    final int generation = _generation;
     try {
-      // Report the normal size, not the maximised one: restoring a maximised
-      // window should still remember where the user had put the edges.
-      final Size size = await windowManager.getSize();
-      final bool maximised = await windowManager.isMaximized();
-      final bool fullScreen = await windowManager.isFullScreen();
+      final List<Object> answers = await Future.wait(<Future<Object>>[
+        windowManager.getSize(),
+        windowManager.isMaximized(),
+        windowManager.isFullScreen(),
+      ]);
+      final Size size = answers[0] as Size;
+      final bool maximised = answers[1] as bool;
+      final bool fullScreen = answers[2] as bool;
       if (maximised || fullScreen) {
+        // Keep the last normal size; that is what should come back when the
+        // user un-maximises next time.
+        _settle(generation);
         return;
       }
-      await store.save(
-        WindowState(width: size.width, height: size.height),
-      );
+      await store.save(WindowState(width: size.width, height: size.height));
+      _settle(generation);
     } catch (error) {
+      _settle(generation);
       debugPrint('window geometry not saved: $error');
+    }
+  }
+
+  /// Clear dirty only if no newer resize arrived while writing.
+  void _settle(int generation) {
+    if (generation == _generation) {
+      _dirty = false;
     }
   }
 }

@@ -101,10 +101,10 @@ class WindowStateStore {
     try {
       final File file = await _file();
       await file.parent.create(recursive: true);
-      await file.writeAsString(
-        jsonEncode(state.clamped.toJson()),
-        flush: true,
-      );
+      // No flush: the write must not force a disk sync on the close path, and
+      // a lost window size costs nothing on the next launch. This knob is the
+      // difference between a close that feels instant and one that stalls.
+      await file.writeAsString(jsonEncode(state.clamped.toJson()));
     } catch (_) {
       // Same reasoning as load(): window geometry is a convenience, not data
       // the user asked to keep, so a failed write stays silent.

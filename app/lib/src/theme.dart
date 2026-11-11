@@ -1,24 +1,32 @@
 import 'package:flutter/material.dart';
 
 import 'models/models.dart';
+import 'theme_controller.dart';
 
 /// Material 3 theme configuration with a teal-blue seed fallback.
 class AppTheme {
   const AppTheme._();
 
-  static const Color seedColor = Color(0xFF00658F);
+  /// Seed the app shipped with; kept as an alias for the settings copy.
+  static const Color seedColor = AppThemeDefaults.seed;
 
-  static ThemeData light(ColorScheme? dynamicScheme) {
+  /// Build the light theme.
+  ///
+  /// [seed] comes from the user's color choice and only applies when there is
+  /// no dynamic (wallpaper) scheme: an explicit choice must win over the
+  /// platform palette, otherwise the setting would look broken on Android.
+  static ThemeData light(ColorScheme? dynamicScheme, {Color? seed}) {
     return _themeFrom(
-      dynamicScheme ?? ColorScheme.fromSeed(seedColor: seedColor),
+      dynamicScheme ?? ColorScheme.fromSeed(seedColor: seed ?? seedColor),
     );
   }
 
-  static ThemeData dark(ColorScheme? dynamicScheme) {
+  /// Build the dark theme, honouring [seed] the same way as [light].
+  static ThemeData dark(ColorScheme? dynamicScheme, {Color? seed}) {
     return _themeFrom(
       dynamicScheme ??
           ColorScheme.fromSeed(
-            seedColor: seedColor,
+            seedColor: seed ?? seedColor,
             brightness: Brightness.dark,
           ),
     );

@@ -446,7 +446,7 @@ class _ComparePageState extends State<ComparePage> {
           const Expanded(
             child: Padding(
               padding: EdgeInsets.all(16),
-              child: TextComparePanel(),
+              child: TextComparePanel(service: widget.state.service),
             ),
           ),
         ],

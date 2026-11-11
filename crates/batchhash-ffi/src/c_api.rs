@@ -19,7 +19,9 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use serde::Serialize;
 use serde_json::json;
 
-use crate::api::{self, ApiError, BatchRequestDto, ProbeRequest, ScanRequest, UndoRequestDto};
+use crate::api::{
+    self, ApiError, BatchRequestDto, HashTextRequest, ProbeRequest, ScanRequest, UndoRequestDto,
+};
 
 /// Version of the C ABI (bumped when the envelope shape changes).
 pub const C_ABI_VERSION: u32 = 1;
@@ -67,6 +69,20 @@ pub unsafe extern "C" fn bh_probe(request: *const c_char) -> *mut c_char {
         let parsed: ProbeRequest = parse_request(request, true)?;
         let hardware = api::probe(&parsed);
         serde_json::to_value(hardware).map_err(internal_error)
+    })
+}
+
+/// Hash in-memory text. Request: {"data_base64": "...", "algorithms": [...]}.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_hash_text(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: HashTextRequest = parse_request(request, true)?;
+        let hashes = api::hash_text_request(&parsed)?;
+        serde_json::to_value(hashes).map_err(internal_error)
     })
 }
 

@@ -1,4 +1,5 @@
 import 'package:batchhash/src/models/models.dart';
+import 'package:batchhash/src/services/fake_batch_hash_service.dart';
 import 'package:batchhash/src/widgets/text_compare_panel.dart';
 import 'package:batchhash/src/widgets/text_diff.dart';
 import 'package:flutter/material.dart';
@@ -159,6 +160,103 @@ void main() {
       expect(
         find.byKey(const ValueKey<String>('text-compare-summary')),
         findsOneWidget,
+      );
+    });
+  });
+
+  group('TextComparePanel digests', () {
+    testWidgets('shows a digest per algorithm once a compare runs', (
+      WidgetTester tester,
+    ) async {
+      final FakeBatchHashService service = FakeBatchHashService();
+      await tester.pumpWidget(
+        wrapInApp(
+          TextComparePanel(
+            service: service,
+            algorithms: const <String>['sha256', 'blake3'],
+          ),
+        ),
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('text-compare-left')),
+        'alpha',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('text-compare-right')),
+        'beta',
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('text-compare-run')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey<String>('text-compare-hashes')),
+        findsOneWidget,
+      );
+
+      final List<TextHashResult> expectedLeft = await service.hashText(
+        text: 'alpha',
+        algorithms: const <String>['sha256', 'blake3'],
+      );
+      for (final TextHashResult result in expectedLeft) {
+        expect(find.text(result.digest), findsWidgets);
+      }
+    });
+
+    testWidgets('identical text produces identical digests for both sides', (
+      WidgetTester tester,
+    ) async {
+      final FakeBatchHashService service = FakeBatchHashService();
+      await tester.pumpWidget(
+        wrapInApp(TextComparePanel(service: service)),
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('text-compare-left')),
+        'same',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('text-compare-right')),
+        'same',
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('text-compare-run')));
+      await tester.pumpAndSettle();
+
+      final List<TextHashResult> left = await service.hashText(
+        text: 'same',
+        algorithms: const <String>['sha256', 'blake3'],
+      );
+      for (final TextHashResult result in left) {
+        expect(find.text(result.digest), findsOneWidget);
+      }
+    });
+
+    testWidgets('editing text after a compare clears the digests', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(
+        wrapInApp(TextComparePanel(service: FakeBatchHashService())),
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('text-compare-left')),
+        'alpha',
+      );
+      await tester.tap(find.byKey(const ValueKey<String>('text-compare-run')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey<String>('text-compare-hashes')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('text-compare-left')),
+        'changed',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey<String>('text-compare-hashes')),
+        findsNothing,
       );
     });
   });

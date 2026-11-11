@@ -186,6 +186,35 @@ class RustBatchHashService implements BatchHashService {
   }
 
   @override
+  Future<List<TextHashResult>> hashText({
+    required String text,
+    required List<String> algorithms,
+  }) async {
+    if (algorithms.isEmpty) {
+      return const <TextHashResult>[];
+    }
+    // The core takes base64 so any byte sequence survives the JSON request, and
+    // it hashes the exact bytes: no newline handling happens on either side.
+    final Map<String, Object?> response = native.hashText(
+      dataBase64: base64Encode(utf8.encode(text)),
+      algorithms: algorithms,
+    );
+    final Map<String, String> names = <String, String>{
+      for (final AlgorithmInfo info in await listAlgorithms())
+        info.id: info.displayName,
+    };
+    return <TextHashResult>[
+      for (final Object? row in (response['hashes'] as List<Object?>? ?? const <Object?>[]))
+        if (row is Map<String, Object?>)
+          TextHashResult(
+            algorithmId: row['id'] as String? ?? '',
+            displayName:
+                names[row['id']] ?? (row['id'] as String? ?? ''),
+            digest: row['digest'] as String? ?? '',
+          ),
+    ];
+  }
+  @override
   Future<List<BatchEntry>> scanDirectory(
     String path, {
     bool recursive = false,

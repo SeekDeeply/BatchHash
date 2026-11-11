@@ -114,6 +114,20 @@ class BatchHashNative {
   /// Registered algorithms in canonical order.
   List<Map<String, Object?>> algorithms() => _callNoArgList('bh_algorithms');
 
+  /// Hash in-memory text without touching the filesystem.
+  ///
+  /// [dataBase64] carries the payload so arbitrary bytes survive the JSON
+  /// request; the core hashes them in one pass exactly like a file.
+  Map<String, Object?> hashText({
+    required String dataBase64,
+    required List<String> algorithms,
+  }) {
+    return _callMap('bh_hash_text', <String, Object?>{
+      'data_base64': dataBase64,
+      'algorithms': algorithms,
+    });
+  }
+
   /// Hardware capability report.
   Map<String, Object?> probe({bool forcedSoft = false}) {
     return _callMap('bh_probe', <String, Object?>{'forced_soft': forcedSoft});

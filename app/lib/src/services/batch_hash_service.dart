@@ -69,6 +69,17 @@ abstract class BatchHashService {
     List<String>? restrictPaths,
   });
 
+  /// Hash in-memory [text] with [algorithms].
+  ///
+  /// Used by the text comparison view to show each side's digest, so a user
+  /// can tell whether two pasted blobs really match without trusting the diff
+  /// alone. Implementations must hash exactly the bytes given: no newline
+  /// normalisation, no trailing-newline trimming, since either would make the
+  /// digest disagree with hashing the same text as a file.
+  Future<List<TextHashResult>> hashText({
+    required String text,
+    required List<String> algorithms,
+  });
   /// Write [report] in [formats].
   ///
   /// Without [directory], the implementation picks a stable per-user location

@@ -13,8 +13,11 @@ import 'pages/report_page.dart';
 import 'pages/settings_page.dart';
 import 'services/batch_hash_service.dart';
 import 'services/fake_batch_hash_service.dart';
+import 'services/logging_batch_hash_service.dart';
+import 'services/operation_log_store.dart';
 import 'services/rust_batch_hash_service.dart';
 import 'theme.dart';
+import 'theme_controller.dart';
 import 'widgets/adaptive_scaffold.dart';
 import 'widgets/demo_data_banner.dart';
 
@@ -63,6 +66,8 @@ class _BatchHashAppState extends State<BatchHashApp> {
   late final BatchHashService _service;
   late final BatchHashAppState _appState;
   late final LocaleController _localeController;
+  late final ThemeController _themeController;
+  late final OperationLogStore _logStore;
   late final List<AppSection> _sections;
   late final bool _usingDemoData;
   int _selectedIndex = 0;
@@ -73,9 +78,17 @@ class _BatchHashAppState extends State<BatchHashApp> {
     final RustBatchHashService? native = widget.service == null
         ? RustBatchHashService.tryCreate()
         : null;
-    _service = widget.service ?? native ?? FakeBatchHashService();
     _usingDemoData = native == null && widget.service == null;
+    final BatchHashService core = widget.service ?? native ?? FakeBatchHashService();
+    // A test injects its own service and must not have a side effect on the
+    // real support directory, so history is only recorded for the app's own
+    // wiring. The decorator is transparent: pages still see a plain service.
+    _logStore = OperationLogStore();
+    _service = widget.service == null
+        ? LoggingBatchHashService(inner: core, store: _logStore)
+        : core;
     _localeController = LocaleController(initial: widget.locale);
+    _themeController = ThemeController();
     _appState = BatchHashAppState(service: _service);
     _sections = <AppSection>[
       AppSection(
@@ -105,6 +118,8 @@ class _BatchHashAppState extends State<BatchHashApp> {
           service: _service,
           locale: _localeController.locale,
           onLocaleChanged: _localeController.select,
+          theme: _themeController,
+          logStore: _logStore,
         ),
       ),
     ];
@@ -113,6 +128,7 @@ class _BatchHashAppState extends State<BatchHashApp> {
   @override
   void dispose() {
     _localeController.dispose();
+    _themeController.dispose();
     _appState.dispose();
     super.dispose();
   }
@@ -131,14 +147,20 @@ class _BatchHashAppState extends State<BatchHashApp> {
 
   Widget _buildApp(ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
     return ListenableBuilder(
-      listenable: _localeController,
+      // Both controllers drive the shell: the locale picks copy, the theme
+      // controller picks the seed the color scheme is derived from.
+      listenable: Listenable.merge(<Listenable>[
+        _localeController,
+        _themeController,
+      ]),
       builder: (BuildContext context, Widget? child) {
         final String locale = _localeController.locale;
+        final Color seed = _themeController.seed;
         return MaterialApp(
           title: AppStrings.of('app.title', locale: locale),
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.light(lightDynamic),
-          darkTheme: AppTheme.dark(darkDynamic),
+          theme: AppTheme.light(lightDynamic, seed: seed),
+          darkTheme: AppTheme.dark(darkDynamic, seed: seed),
           themeMode: ThemeMode.system,
           locale: Locale(locale),
           supportedLocales: <Locale>[

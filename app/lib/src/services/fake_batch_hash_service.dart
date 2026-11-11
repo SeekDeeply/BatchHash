@@ -137,6 +137,33 @@ class FakeBatchHashService implements BatchHashService {
   Future<List<AlgorithmInfo>> listAlgorithms() async => kAlgorithmCatalogue;
 
   @override
+  Future<List<TextHashResult>> hashText({
+    required String text,
+    required List<String> algorithms,
+  }) async {
+    // Deterministic demo digests: same text and algorithm always give the same
+    // hex, so a test can assert equality without a native library. The value is
+    // not a real digest, exactly like every other hash this fake produces.
+    return <TextHashResult>[
+      for (final String algorithm in algorithms)
+        TextHashResult(
+          algorithmId: algorithm,
+          displayName: _displayName(algorithm),
+          digest: _digest('text:$text', _hexLength(algorithm)),
+        ),
+    ];
+  }
+
+  /// Catalogue display name for [algorithm], falling back to the id.
+  String _displayName(String algorithm) {
+    for (final AlgorithmInfo info in kAlgorithmCatalogue) {
+      if (info.id == algorithm) {
+        return info.displayName;
+      }
+    }
+    return algorithm;
+  }
+  @override
   Future<List<BatchEntry>> scanDirectory(
     String path, {
     bool recursive = false,

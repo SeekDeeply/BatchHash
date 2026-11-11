@@ -969,6 +969,23 @@ class HistoryBatchModel {
   }
 }
 
+/// One algorithm's digest of a pasted text.
+class TextHashResult {
+  const TextHashResult({
+    required this.algorithmId,
+    required this.displayName,
+    required this.digest,
+  });
+
+  /// Stable algorithm id, for example `sha256`.
+  final String algorithmId;
+
+  /// Human readable name, so the UI does not repeat the catalogue lookup.
+  final String displayName;
+
+  /// Lowercase hex digest.
+  final String digest;
+}
 /// CPU side hardware information reported by the core probe.
 class HardwareInfoModel {
   const HardwareInfoModel({

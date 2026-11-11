@@ -917,6 +917,118 @@ pub struct HashEntriesRequest {
     pub follow_links: bool,
 }
 
+/// Request for [hash_text_request]: hash in-memory text in one pass.
+///
+/// Bytes are carried as base64 so the request stays valid JSON; text the user
+/// pasted may contain arbitrary UTF-8 (or invalid sequences after a bad decode),
+/// which a JSON string would not round-trip byte for byte.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HashTextRequest {
+    /// Base64 encoded payload to hash.
+    pub data_base64: String,
+    /// Algorithms to compute.
+    pub algorithms: Vec<String>,
+}
+
+/// One algorithm's digest for a [hash_text_request].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TextHashDto {
+    /// Stable algorithm id.
+    pub id: String,
+    /// Lowercase hex digest.
+    pub digest: String,
+}
+
+/// Result of [hash_text_request].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HashTextResponse {
+    /// Size of the hashed payload in bytes.
+    pub size: u64,
+    /// One digest per requested algorithm, in canonical registry order.
+    pub hashes: Vec<TextHashDto>,
+}
+
+/// Hash in-memory bytes without touching the filesystem.
+///
+/// The text comparison feature needs digests of two pasted strings. Writing them
+/// to temporary files first would work but inherits every platform quirk around
+/// temp directories, cleanup and permissions; hashing the bytes directly keeps
+/// the operation pure and makes it identical on every platform.
+pub fn hash_text_request(request: &HashTextRequest) -> Result<HashTextResponse, ApiError> {
+    let algorithms = parse_algorithms(&request.algorithms)?;
+    let data = decode_base64(&request.data_base64)?;
+    let options = batchhash_hash::HashOptions::new(algorithms);
+    let mut cursor = std::io::Cursor::new(&data);
+    let hashes = batchhash_hash::compute_hashes(&mut cursor, &options)
+        .map_err(|error| ApiError::invalid(format!("hashing failed: {error}")))?;
+    Ok(HashTextResponse {
+        size: data.len() as u64,
+        hashes: hashes
+            .into_iter()
+            .map(|(algorithm, digest)| TextHashDto {
+                id: algorithm.stable_id().to_string(),
+                digest,
+            })
+            .collect(),
+    })
+}
+
+/// Decode standard base64, rejecting anything malformed.
+fn decode_base64(encoded: &str) -> Result<Vec<u8>, ApiError> {
+    // A tiny decoder keeps the dependency list unchanged: the payloads here are
+    // user-pasted text, not large binaries, so a straightforward implementation
+    // is fast enough and one less crate to audit.
+    let mut table = [255u8; 256];
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for (index, byte) in ALPHABET.iter().enumerate() {
+        table[*byte as usize] = index as u8;
+    }
+    let bytes: Vec<u8> = encoded
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect();
+    if bytes.len() % 4 != 0 {
+        return Err(ApiError::invalid(
+            "data_base64 length is not a multiple of 4",
+        ));
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+    for (chunk_index, chunk) in bytes.chunks(4).enumerate() {
+        let last = chunk_index == bytes.len() / 4 - 1;
+        let mut values = [0u8; 4];
+        let mut padding = 0usize;
+        for (position, byte) in chunk.iter().enumerate() {
+            if *byte == b'=' {
+                if !last || position < 2 {
+                    return Err(ApiError::invalid("invalid base64 padding"));
+                }
+                padding += 1;
+                values[position] = 0;
+                continue;
+            }
+            if padding > 0 {
+                return Err(ApiError::invalid("invalid base64 padding"));
+            }
+            let value = table[*byte as usize];
+            if value == 255 {
+                return Err(ApiError::invalid("invalid base64 character"));
+            }
+            values[position] = value;
+        }
+        let triple = ((values[0] as u32) << 18)
+            | ((values[1] as u32) << 12)
+            | ((values[2] as u32) << 6)
+            | (values[3] as u32);
+        out.push((triple >> 16) as u8);
+        if padding < 2 {
+            out.push((triple >> 8) as u8);
+        }
+        if padding < 1 {
+            out.push(triple as u8);
+        }
+    }
+    Ok(out)
+}
 /// Request for [plan_renames_request]: pure suffix planning over known entries.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlanRenamesRequest {
@@ -1764,5 +1876,88 @@ mod tests {
         })
         .expect("import");
         assert!(imported.contains("schema_version"), "{imported}");
+    }
+}
+
+#[cfg(test)]
+mod hash_text_tests {
+    use super::*;
+
+    fn b64(data: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in data.chunks(3) {
+            let b0 = chunk[0] as u32;
+            let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+            let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+            let triple = (b0 << 16) | (b1 << 8) | b2;
+            out.push(ALPHABET[(triple >> 18) as usize & 63] as char);
+            out.push(ALPHABET[(triple >> 12) as usize & 63] as char);
+            out.push(if chunk.len() > 1 {
+                ALPHABET[(triple >> 6) as usize & 63] as char
+            } else {
+                '='
+            });
+            out.push(if chunk.len() > 2 {
+                ALPHABET[triple as usize & 63] as char
+            } else {
+                '='
+            });
+        }
+        out
+    }
+
+    #[test]
+    fn base64_decoder_round_trips_every_length() {
+        // Covers all three padding cases plus longer runs.
+        for length in 0..=32usize {
+            let data: Vec<u8> = (0..length).map(|i| (i * 37 + 11) as u8).collect();
+            let decoded = decode_base64(&b64(&data)).expect("decode");
+            assert_eq!(decoded, data, "length {length}");
+        }
+    }
+
+    #[test]
+    fn base64_decoder_rejects_malformed_input() {
+        assert!(decode_base64("abc").is_err(), "length not multiple of 4");
+        assert!(decode_base64("ab!d").is_err(), "bad character");
+        assert!(decode_base64("=abc").is_err(), "padding first");
+        assert!(decode_base64("ab=c").is_err(), "padding mid-quad");
+    }
+
+    #[test]
+    fn hashing_text_matches_hashing_the_same_bytes_from_a_reader() {
+        let payload = b"batchhash text compare";
+        let request = HashTextRequest {
+            data_base64: b64(payload),
+            algorithms: vec!["sha256".to_string(), "blake3".to_string()],
+        };
+        let response = hash_text_request(&request).expect("hash text");
+        assert_eq!(response.size, payload.len() as u64);
+        assert_eq!(response.hashes.len(), 2);
+        let expected = batchhash_hash::hash_reader(
+            &mut std::io::Cursor::new(payload.to_vec()),
+            &[AlgorithmId::Sha256, AlgorithmId::Blake3],
+        )
+        .expect("reference hash");
+        for entry in &response.hashes {
+            let algorithm = AlgorithmId::from_stable_id(&entry.id).expect("known id");
+            assert_eq!(entry.digest, expected[&algorithm], "{}", entry.id);
+        }
+    }
+
+    #[test]
+    fn empty_text_hashes_to_the_empty_digest() {
+        let request = HashTextRequest {
+            data_base64: String::new(),
+            algorithms: vec!["sha256".to_string()],
+        };
+        let response = hash_text_request(&request).expect("hash empty");
+        assert_eq!(response.size, 0);
+        assert_eq!(
+            response.hashes[0].digest,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 }

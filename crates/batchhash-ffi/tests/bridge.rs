@@ -404,6 +404,47 @@ fn c_abi_probe_accepts_an_empty_request() {
 }
 
 #[test]
+fn c_abi_hash_text_hashes_in_memory_bytes() {
+    // "abc" in standard base64.
+    let request = serde_json::json!({
+        "data_base64": "YWJj",
+        "algorithms": ["sha256", "md5"],
+    });
+    let payload = CString::new(request.to_string()).expect("cstring");
+    let response = call_ok(unsafe { c_api::bh_hash_text(payload.as_ptr()) });
+    assert_eq!(response["size"], 3);
+    let hashes = response["hashes"].as_array().expect("hashes array");
+    assert_eq!(hashes.len(), 2);
+    // Digests come back in canonical registry order (MD5 precedes SHA-256),
+    // not in the order the request listed them.
+    let digest_of = |id: &str| -> String {
+        hashes
+            .iter()
+            .find(|entry| entry["id"] == id)
+            .map(|entry| entry["digest"].as_str().unwrap_or_default().to_string())
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        digest_of("sha256"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+    assert_eq!(digest_of("md5"), "900150983cd24fb0d6963f7d28e17f72");
+}
+
+#[test]
+fn c_abi_hash_text_rejects_bad_base64_and_unknown_algorithms() {
+    let bad = serde_json::json!({ "data_base64": "!!!", "algorithms": ["sha256"] });
+    let payload = CString::new(bad.to_string()).expect("cstring");
+    let error = call_err(unsafe { c_api::bh_hash_text(payload.as_ptr()) });
+    assert_eq!(error["kind"], "invalid_request");
+
+    let unknown = serde_json::json!({ "data_base64": "", "algorithms": ["nope"] });
+    let payload = CString::new(unknown.to_string()).expect("cstring");
+    let error = call_err(unsafe { c_api::bh_hash_text(payload.as_ptr()) });
+    assert_eq!(error["kind"], "invalid_request");
+}
+
+#[test]
 fn hash_entries_request_hashes_explicit_paths() {
     let temp = tempfile::tempdir().expect("tempdir");
     write(&temp.path().join("a.txt"), b"alpha");

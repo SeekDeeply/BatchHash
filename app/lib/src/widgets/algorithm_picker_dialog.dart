@@ -71,6 +71,28 @@ class _AlgorithmPickerDialogState extends State<AlgorithmPickerDialog> {
     ];
   }
 
+  /// Select every algorithm the catalogue offers.
+  ///
+  /// Only the algorithms currently visible are selected when a search is
+  /// active, so "select all" means "all of these results" rather than silently
+  /// adding algorithms the user filtered away.
+  void _selectAll() {
+    setState(() {
+      for (final AlgorithmInfo info in _visible) {
+        _selected.add(info.id);
+      }
+    });
+  }
+
+  /// Drop back to a single algorithm: the run needs at least one.
+  void _resetSelection() {
+    setState(() {
+      final String keep = _selected.isEmpty
+          ? widget.catalogue.first.id
+          : _selected.first;
+      _selected = <String>{keep};
+    });
+  }
   void _toggle(String id) {
     setState(() {
       if (_selected.contains(id)) {
@@ -116,6 +138,34 @@ class _AlgorithmPickerDialogState extends State<AlgorithmPickerDialog> {
                 isDense: true,
               ),
               onChanged: (String value) => setState(() => _query = value),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                TextButton.icon(
+                  key: const ValueKey<String>('algorithm-select-all'),
+                  onPressed: _selectAll,
+                  icon: const Icon(Icons.done_all, size: 18),
+                  label: Text(context.strings('algorithm.selectAll')),
+                ),
+                TextButton.icon(
+                  key: const ValueKey<String>('algorithm-select-none'),
+                  onPressed: _selected.length > 1 ? _resetSelection : null,
+                  icon: const Icon(Icons.remove_done, size: 18),
+                  label: Text(context.strings('algorithm.selectNone')),
+                ),
+                const Spacer(),
+                Text(
+                  context.strings(
+                    'algorithm.selectedCount',
+                    args: <String, String>{
+                      'count': '${_selected.length}',
+                      'total': '${widget.catalogue.length}',
+                    },
+                  ),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             Expanded(

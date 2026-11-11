@@ -4,6 +4,11 @@ import '../l10n/app_strings.dart';
 import '../l10n/app_strings_scope.dart';
 import '../services/batch_hash_service.dart';
 import '../theme.dart';
+import '../theme_controller.dart';
+import '../widgets/accent_color_card.dart';
+import 'legal_page.dart';
+import 'operation_log_page.dart';
+import '../services/operation_log_store.dart';
 import '../widgets/hardware_panel.dart';
 import 'about_page.dart';
 
@@ -14,6 +19,8 @@ class SettingsPage extends StatelessWidget {
     required this.service,
     this.locale,
     this.onLocaleChanged,
+    this.theme,
+    this.logStore,
   });
 
   final BatchHashService service;
@@ -23,6 +30,12 @@ class SettingsPage extends StatelessWidget {
 
   /// Called with the new language code; when null the switch is hidden.
   final ValueChanged<String>? onLocaleChanged;
+
+  /// Holds the seed color; when null the accent picker is hidden.
+  final ThemeController? theme;
+
+  /// Source of the operation history; when null a fresh store is used.
+  final OperationLogStore? logStore;
 
   @override
   Widget build(BuildContext context) {
@@ -80,18 +93,21 @@ class SettingsPage extends StatelessWidget {
                     ),
                   ),
                 const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.palette_outlined),
-                  title: Text(context.strings('settings.theme')),
-                  subtitle: Text(
-                    context.strings(
-                      'settings.themeDetail',
-                      args: <String, String>{
-                        'seed': AppTheme.seedColor.toString(),
-                      },
+                if (theme == null)
+                  ListTile(
+                    leading: const Icon(Icons.palette_outlined),
+                    title: Text(context.strings('settings.theme')),
+                    subtitle: Text(
+                      context.strings(
+                        'settings.themeDetail',
+                        args: <String, String>{
+                          'seed': AppTheme.seedColor.toString(),
+                        },
+                      ),
                     ),
-                  ),
-                ),
+                  )
+                else
+                  AccentColorCard(controller: theme),
                 const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.memory_outlined),
@@ -106,7 +122,46 @@ class SettingsPage extends StatelessWidget {
           const SizedBox(height: 16),
           HardwarePanelLoader(service: service),
           const SizedBox(height: 16),
+          const SizedBox(height: 16),
           Card(
+            child: Column(
+              children: <Widget>[
+                ListTile(
+                  key: const ValueKey<String>('settings-history'),
+                  leading: const Icon(Icons.history),
+                  title: Text(context.strings('settings.history')),
+                  subtitle: Text(context.strings('settings.historyDetail')),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    await Navigator.of(context).push<void>(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) =>
+                            OperationLogPage(
+                              store: logStore ?? OperationLogStore(),
+                            ),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  key: const ValueKey<String>('settings-legal'),
+                  leading: const Icon(Icons.gavel_outlined),
+                  title: Text(context.strings('settings.legal')),
+                  subtitle: Text(context.strings('settings.legalDetail')),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    await Navigator.of(context).push<void>(
+                      MaterialPageRoute<void>(
+                        builder: (BuildContext context) => const LegalPage(),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),          Card(
             child: ListTile(
               key: const ValueKey<String>('settings-about'),
               leading: const Icon(Icons.info_outline),

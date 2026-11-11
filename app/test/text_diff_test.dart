@@ -265,7 +265,16 @@ void main() {
         'alpha',
       );
       await tester.tap(find.byKey(const ValueKey<String>('text-compare-run')));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // Report the concrete reason when the card is missing: an error banner
+      // means hashing failed, silence means it never ran.
+      final Finder error = find.byKey(
+        const ValueKey<String>('text-compare-hash-error'),
+        skipOffstage: false,
+      );
+      expect(error, findsNothing, reason: 'hashing reported an error');
       expect(
         find.byKey(
           const ValueKey<String>('text-compare-hashes'),

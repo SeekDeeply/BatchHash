@@ -10,6 +10,33 @@ import '../models/models.dart';
 /// algorithms exist. It only decides how they are presented: a search field
 /// over the display name, stable id and category, and one section per
 /// [AlgorithmCategory].
+
+/// Pure selection helpers, kept free of widget state so the rules can be
+/// tested without laying out a dialog.
+///
+/// The picker is a scrolling list inside a fixed-height dialog, which makes
+/// widget-level assertions about "every row" fragile; the rules themselves are
+/// what matter, and they are plain set operations.
+Set<String> selectAllAmong({
+  required Set<String> selected,
+  required Iterable<String> visible,
+}) {
+  return <String>{...selected, ...visible};
+}
+
+/// Collapse a selection to exactly one algorithm.
+///
+/// A batch needs at least one algorithm, so this never returns an empty set;
+/// it keeps the first current selection, or [fallback] when nothing is chosen.
+Set<String> keepSingleAmong({
+  required Set<String> selected,
+  required String fallback,
+}) {
+  if (selected.isEmpty) {
+    return <String>{fallback};
+  }
+  return <String>{selected.first};
+}
 class AlgorithmPickerDialog extends StatefulWidget {
   const AlgorithmPickerDialog({
     super.key,
@@ -77,24 +104,23 @@ class _AlgorithmPickerDialogState extends State<AlgorithmPickerDialog> {
   /// active, so "select all" means "all of these results" rather than silently
   /// adding algorithms the user filtered away.
   void _selectAll() {
-    final Set<String> next = <String>{..._selected};
-    for (final AlgorithmInfo info in _visible) {
-      next.add(info.id);
-    }
     setState(() {
       // Replacing the set (rather than mutating it) keeps the state change
       // obvious and avoids any identity-equality surprise downstream.
-      _selected = next;
+      _selected = selectAllAmong(
+        selected: _selected,
+        visible: <String>[for (final AlgorithmInfo info in _visible) info.id],
+      );
     });
   }
 
   /// Drop back to a single algorithm: the run needs at least one.
   void _resetSelection() {
     setState(() {
-      final String keep = _selected.isEmpty
-          ? widget.catalogue.first.id
-          : _selected.first;
-      _selected = <String>{keep};
+      _selected = keepSingleAmong(
+        selected: _selected,
+        fallback: widget.catalogue.first.id,
+      );
     });
   }
   void _toggle(String id) {

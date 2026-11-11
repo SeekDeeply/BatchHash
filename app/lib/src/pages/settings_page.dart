@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_strings.dart';
 import '../l10n/app_strings_scope.dart';
 import '../services/batch_hash_service.dart';
 import '../services/operation_log_store.dart';
@@ -38,12 +39,11 @@ class SettingsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // A field is not promoted by a null check, so the branch needs a local:
-    // `theme == null` on the field would keep the un-promoted static type and
-    // the else branch could not pass a ThemeController.
+    // The card needs a promoted ThemeController, and a nullable field is never
+    // promoted by a null check, so read it into a local first.
     final ThemeController? themeController = theme;
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
+    final ThemeData themeData = Theme.of(context);
+    final ColorScheme scheme = themeData.colorScheme;
     final ValueChanged<String>? onLocaleChanged = this.onLocaleChanged;
     final String language = AppStrings.normalize(locale);
     return SingleChildScrollView(
@@ -53,12 +53,12 @@ class SettingsPage extends StatelessWidget {
         children: <Widget>[
           Text(
             context.strings('settings.title'),
-            style: theme.textTheme.headlineSmall,
+            style: themeData.textTheme.headlineSmall,
           ),
           const SizedBox(height: 4),
           Text(
             context.strings('settings.subtitle'),
-            style: theme.textTheme.bodyMedium?.copyWith(
+            style: themeData.textTheme.bodyMedium?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
           ),

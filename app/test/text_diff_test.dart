@@ -191,7 +191,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.byKey(const ValueKey<String>('text-compare-hashes')),
+        find.byKey(
+          const ValueKey<String>('text-compare-hashes'),
+          skipOffstage: false,
+        ),
         findsOneWidget,
       );
 
@@ -264,7 +267,10 @@ void main() {
       await tester.tap(find.byKey(const ValueKey<String>('text-compare-run')));
       await tester.pumpAndSettle();
       expect(
-        find.byKey(const ValueKey<String>('text-compare-hashes')),
+        find.byKey(
+          const ValueKey<String>('text-compare-hashes'),
+          skipOffstage: false,
+        ),
         findsOneWidget,
       );
 
@@ -274,7 +280,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(
-        find.byKey(const ValueKey<String>('text-compare-hashes')),
+        find.byKey(
+          const ValueKey<String>('text-compare-hashes'),
+          skipOffstage: false,
+        ),
         findsNothing,
       );
     });

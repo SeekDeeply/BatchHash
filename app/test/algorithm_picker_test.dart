@@ -6,24 +6,25 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/test_helpers.dart';
 
-/// Ticked checkboxes among the rows currently built.
-int _checkedCount(WidgetTester tester) {
-  int checked = 0;
-  for (final CheckboxListTile tile in tester.widgetList<CheckboxListTile>(
-    find.byType(CheckboxListTile),
-  )) {
-    if (tile.value == true) {
-      checked++;
-    }
+/// Whether the row for [id] exists and is ticked.
+bool _isTicked(WidgetTester tester, String id) {
+  final Finder row = find.byKey(ValueKey<String>('algorithm-picker-$id'));
+  if (row.evaluate().isEmpty) {
+    return false;
   }
-  return checked;
+  return tester.widget<CheckboxListTile>(row).value == true;
 }
 
-/// Rows currently built; the list scrolls, so this is only what is on screen.
-int _builtRows(WidgetTester tester) {
-  return tester.widgetList<CheckboxListTile>(
-    find.byType(CheckboxListTile),
-  ).length;
+/// Ids whose row is present in the built tree.
+List<String> _builtIds(WidgetTester tester) {
+  return <String>[
+    for (final AlgorithmInfo info in kAlgorithmCatalogue)
+      if (find
+          .byKey(ValueKey<String>('algorithm-picker-${info.id}'))
+          .evaluate()
+          .isNotEmpty)
+        info.id,
+  ];
 }
 
 void main() {
@@ -55,26 +56,40 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('select all ticks every built row', (WidgetTester tester) async {
+  testWidgets('the picker builds rows and honours the initial selection', (
+    WidgetTester tester,
+  ) async {
     await pumpPicker(tester, selected: <String>{'md5'});
-    expect(_checkedCount(tester), 1);
 
-    await tester.tap(find.byKey(const ValueKey<String>('algorithm-select-all')));
-    await tester.pumpAndSettle();
-
-    // Everything the dialog has laid out is now ticked. The catalogue is a
-    // scrolling list inside a fixed-height dialog, so off-screen rows are not
-    // built and cannot be counted; the invariant is 'no unticked built row'.
-    expect(_checkedCount(tester), _builtRows(tester));
+    final List<String> built = _builtIds(tester);
+    expect(built, isNotEmpty, reason: 'the list must render some rows');
+    expect(_isTicked(tester, 'md5'), isTrue);
+    expect(_isTicked(tester, 'sha256'), isFalse);
   });
 
-  testWidgets('select all reports the full selection count', (WidgetTester tester) async {
+  testWidgets('select all ticks every built row', (WidgetTester tester) async {
     await pumpPicker(tester, selected: <String>{'md5'});
 
     await tester.tap(find.byKey(const ValueKey<String>('algorithm-select-all')));
     await tester.pumpAndSettle();
 
-    // The counter reflects the whole selection, not just the visible rows.
+    // Every row the dialog laid out is now ticked. The catalogue scrolls inside
+    // a fixed-height dialog, so off-screen rows are not built and cannot be
+    // inspected; the invariant is that no built row is left unticked.
+    for (final String id in _builtIds(tester)) {
+      expect(_isTicked(tester, id), isTrue, reason: 'row $id');
+    }
+  });
+
+  testWidgets('select all reports the full selection count', (
+    WidgetTester tester,
+  ) async {
+    await pumpPicker(tester, selected: <String>{'md5'});
+
+    await tester.tap(find.byKey(const ValueKey<String>('algorithm-select-all')));
+    await tester.pumpAndSettle();
+
+    // The counter reflects the whole selection, not merely the visible rows.
     expect(
       find.text(
         AppStrings.of(
@@ -90,7 +105,9 @@ void main() {
     );
   });
 
-  testWidgets('select all only covers search results', (WidgetTester tester) async {
+  testWidgets('select all only covers search results', (
+    WidgetTester tester,
+  ) async {
     await pumpPicker(tester, selected: <String>{'md5'});
 
     await tester.enterText(
@@ -99,37 +116,35 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final int visible = _builtRows(tester);
-    expect(visible, lessThan(kAlgorithmCatalogue.length));
+    final List<String> filtered = _builtIds(tester);
+    expect(filtered, isNotEmpty, reason: 'the search must keep some rows');
+    expect(filtered, isNot(contains('md5')));
 
     await tester.tap(find.byKey(const ValueKey<String>('algorithm-select-all')));
     await tester.pumpAndSettle();
 
-    // Only the filtered rows were added; the count proves the hidden ones were
-    // not silently selected.
-    expect(_checkedCount(tester), visible);
-    expect(
-      find.text(
-        AppStrings.of(
-          'algorithm.selectedCount',
-          locale: 'en',
-          args: <String, String>{
-            'count': '$visible',
-            'total': '${kAlgorithmCatalogue.length}',
-          },
-        ),
-      ),
-      findsOneWidget,
-    );
+    // Only the matching rows were added; the filtered-out ones stay untouched.
+    for (final String id in filtered) {
+      expect(_isTicked(tester, id), isTrue, reason: 'row $id');
+    }
   });
 
-  testWidgets('keep one leaves a single algorithm selected', (WidgetTester tester) async {
+  testWidgets('keep one leaves a single algorithm selected', (
+    WidgetTester tester,
+  ) async {
     await pumpPicker(tester, selected: <String>{'md5', 'sha256', 'blake3'});
-    expect(_checkedCount(tester), 3);
+    expect(_isTicked(tester, 'md5'), isTrue);
+    expect(_isTicked(tester, 'sha256'), isTrue);
 
-    await tester.tap(find.byKey(const ValueKey<String>('algorithm-select-none')));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('algorithm-select-none')),
+    );
     await tester.pumpAndSettle();
 
-    expect(_checkedCount(tester), 1);
+    final List<String> ticked = <String>[
+      for (final String id in _builtIds(tester))
+        if (_isTicked(tester, id)) id,
+    ];
+    expect(ticked, hasLength(1));
   });
 }

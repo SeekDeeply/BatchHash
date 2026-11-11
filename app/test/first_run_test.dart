@@ -14,9 +14,7 @@ import 'support/test_helpers.dart';
 /// In-memory stand-in: plan the widget tests so they never await real file I/O,
 /// which the widget-test binding's fake clock does not drive.
 class _FakeFirstRunStore extends FirstRunStore {
-  _FakeFirstRunStore({this.accepted = false});
-
-  bool accepted;
+  bool accepted = false;
 
   @override
   Future<bool> hasAccepted() async => accepted;

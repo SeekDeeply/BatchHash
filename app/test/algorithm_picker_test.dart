@@ -32,14 +32,26 @@ void main() {
     required Set<String> selected,
   }) async {
     setViewSize(tester, const Size(900, 1200));
+    // Mounted through showDialog so the AlertDialog gets a real route and its
+    // own constraints; dropping it straight into a Scaffold body collapses the
+    // scrollable content and no row is ever built.
     await tester.pumpWidget(
       wrapInApp(
-        AlgorithmPickerDialog(
-          catalogue: kAlgorithmCatalogue,
-          selected: selected,
+        Builder(
+          builder: (BuildContext context) => TextButton(
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (BuildContext context) => AlgorithmPickerDialog(
+                catalogue: kAlgorithmCatalogue,
+                selected: selected,
+              ),
+            ),
+            child: const Text('open'),
+          ),
         ),
       ),
     );
+    await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
   }
 

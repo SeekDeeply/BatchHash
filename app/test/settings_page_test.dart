@@ -89,7 +89,10 @@ void main() {
     await tester.tap(
       find.byKey(const ValueKey<String>('settings-history')),
     );
-    await tester.pumpAndSettle();
+    // Not pumpAndSettle: the settings page hosts a hardware panel that keeps a
+    // progress animation running, so the tree never becomes fully idle.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(OperationLogPage), findsOneWidget);
   });
@@ -98,7 +101,8 @@ void main() {
     await pumpSettings(tester);
 
     await tester.tap(find.byKey(const ValueKey<String>('settings-legal')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(LegalPage), findsOneWidget);
   });

@@ -168,6 +168,7 @@ void main() {
     testWidgets('shows a digest per algorithm once a compare runs', (
       WidgetTester tester,
     ) async {
+      setViewSize(tester, const Size(900, 1400));
       final FakeBatchHashService service = FakeBatchHashService();
       await tester.pumpWidget(
         wrapInApp(
@@ -212,6 +213,7 @@ void main() {
     testWidgets('identical text produces identical digests for both sides', (
       WidgetTester tester,
     ) async {
+      setViewSize(tester, const Size(900, 1400));
       final FakeBatchHashService service = FakeBatchHashService();
       await tester.pumpWidget(
         wrapInApp(TextComparePanel(service: service)),
@@ -248,6 +250,9 @@ void main() {
     testWidgets('editing text after a compare clears the digests', (
       WidgetTester tester,
     ) async {
+      // A tall viewport keeps the digest card inside the laid-out area; on the
+      // default 800x600 surface the Expanded diff list squeezes it out.
+      setViewSize(tester, const Size(900, 1400));
       await tester.pumpWidget(
         wrapInApp(TextComparePanel(service: FakeBatchHashService())),
       );

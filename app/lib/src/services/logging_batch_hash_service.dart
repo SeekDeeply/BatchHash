@@ -104,24 +104,25 @@ class LoggingBatchHashService implements BatchHashService {
     // of duplicating it; a batch reports each file once per algorithm set.
     final Map<String, BatchEntry> latestByPath = <String, BatchEntry>{};
 
-    void record({required bool ok, Object? error}) {
+    /// Returns the write, so the stream can stay open until it lands.
+    ///
+    /// Closing the stream first would let a caller read the log before the
+    /// entry exists, which is a real race: a hash run that finishes and is
+    /// followed immediately by a history refresh would show nothing.
+    Future<void> record({required bool ok, Object? error}) {
       watch.stop();
       final List<BatchEntry> finished = latestByPath.values.toList(growable: false);
       final ({List<HashDigestRecord> records, int truncated}) collected =
           collectDigests(finished);
-      unawaited(
-        store.append(
-          OperationLogEntry(
-            kind: 'op.hash',
-            status: ok,
-            startedAt: startedAt,
-            detail: error == null
-                ? '${finished.length} files'
-                : '$error',
-            durationMs: watch.elapsedMilliseconds,
-            hashes: collected.records,
-            hashesTruncated: collected.truncated,
-          ),
+      return store.append(
+        OperationLogEntry(
+          kind: 'op.hash',
+          status: ok,
+          startedAt: startedAt,
+          detail: error == null ? '${finished.length} files' : '$error',
+          durationMs: watch.elapsedMilliseconds,
+          hashes: collected.records,
+          hashesTruncated: collected.truncated,
         ),
       );
     }
@@ -142,12 +143,18 @@ class LoggingBatchHashService implements BatchHashService {
               }
               sink.add(progress);
             },
-            handleDone: (EventSink<HashProgress> sink) {
-              record(ok: true);
+            handleDone: (EventSink<HashProgress> sink) async {
+              // Await the write, then close: the listener's onDone is the
+              // earliest point a caller can reasonably read the log back.
+              await record(ok: true);
               sink.close();
             },
-            handleError: (Object error, StackTrace stack, EventSink<HashProgress> sink) {
-              record(ok: false, error: error);
+            handleError: (
+              Object error,
+              StackTrace stack,
+              EventSink<HashProgress> sink,
+            ) async {
+              await record(ok: false, error: error);
               sink.addError(error, stack);
             },
           ),
@@ -156,36 +163,37 @@ class LoggingBatchHashService implements BatchHashService {
 
   /// Record a stream operation once it completes or fails.
   ///
-  /// The write is deliberately fire-and-forget: a stream listener must not wait
-  /// on disk I/O between samples. [OperationLogStore.append] already swallows
-  /// its own errors, so an unawaited call cannot surface as an unhandled
-  /// exception.
+  /// The write is awaited before the stream closes. Waiting on disk I/O between
+  /// samples would stall the listener, but waiting at the very end costs nothing
+  /// and removes a real race: a caller that refreshes right after `onDone` must
+  /// see the entry it just caused.
+  ///
+  /// [OperationLogStore.append] swallows its own errors, so this cannot turn a
+  /// completed operation into a failure.
   Stream<T> _recordStream<T>(String kind, Stream<T> source) {
     final DateTime startedAt = DateTime.now();
     final Stopwatch watch = Stopwatch()..start();
-    void record({required bool ok, Object? error}) {
+    Future<void> record({required bool ok, Object? error}) {
       watch.stop();
-      unawaited(
-        store.append(
-          OperationLogEntry(
-            kind: kind,
-            status: ok,
-            startedAt: startedAt,
-            detail: error == null ? null : '$error',
-            durationMs: watch.elapsedMilliseconds,
-          ),
+      return store.append(
+        OperationLogEntry(
+          kind: kind,
+          status: ok,
+          startedAt: startedAt,
+          detail: error == null ? null : '$error',
+          durationMs: watch.elapsedMilliseconds,
         ),
       );
     }
 
     return source.transform(
       StreamTransformer<T, T>.fromHandlers(
-        handleDone: (EventSink<T> sink) {
-          record(ok: true);
+        handleDone: (EventSink<T> sink) async {
+          await record(ok: true);
           sink.close();
         },
-        handleError: (Object error, StackTrace stack, EventSink<T> sink) {
-          record(ok: false, error: error);
+        handleError: (Object error, StackTrace stack, EventSink<T> sink) async {
+          await record(ok: false, error: error);
           sink.addError(error, stack);
         },
       ),

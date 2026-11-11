@@ -109,7 +109,7 @@ void main() {
 
     // The demo service reports the files it knows about; any entry with digests
     // must end up in the log, which is the whole point of the feature.
-    final List<BatchEntry> entries = await fake.scanDirectory(fake.demoRoot);
+    final List<BatchEntry> entries = await fake.scanDirectory(FakeBatchHashService.rootPath);
     await service
         .computeHashes(
           entries: entries,

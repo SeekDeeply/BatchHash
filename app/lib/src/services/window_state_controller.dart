@@ -56,6 +56,10 @@ class WindowStateController with WindowListener {
           await windowManager.focus();
         },
       );
+      // The close event is not cancellable by default, so a resize made in the
+      // last second before quitting could be lost. Preventing the close lets
+      // the handler write first and then close for real.
+      await windowManager.setPreventClose(true);
       windowManager.addListener(this);
     } catch (error) {
       debugPrint('window geometry not restored: $error');
@@ -79,13 +83,29 @@ class WindowStateController with WindowListener {
     _debounce = Timer(const Duration(milliseconds: 400), _capture);
   }
 
-  /// Also capture on close: a user who resizes and immediately quits would
-  /// otherwise lose the last size because the debounce never fired.
+  /// Capture on close, then close for real.
+  ///
+  /// The debounce would otherwise swallow the final size when the user resizes
+  /// and quits immediately. Because [attach] set `setPreventClose(true)`, the
+  /// window stays open until the write lands and the close is re-issued;
+  /// without that, quitting mid-write would race the process exit.
+  /// [WindowListener.onWindowClose] returns void, so the write is started here
+  /// and completed on [_pending]; the window stays open because [attach] set
+  /// `setPreventClose(true)`, and it is closed once the write lands.
   @override
   void onWindowClose() {
     _debounce?.cancel();
     _debounce = null;
-    _pending = _pending.then((_) => _capture());
+    _pending = _pending.then((_) => _capture()).then((_) async {
+      // Releasing the guard is unconditional: if the write failed there is no
+      // reason to trap the user in a window that will not close.
+      try {
+        await windowManager.setPreventClose(false);
+        await windowManager.destroy();
+      } catch (error) {
+        debugPrint('window close not completed: $error');
+      }
+    });
   }
 
   Future<void> _capture() async {

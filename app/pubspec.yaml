@@ -21,10 +21,13 @@ dependencies:
   ffi: ^2.1.3
   file_picker: ^8.1.7
   path_provider: ^2.1.4
-  # Desktop window sizing. 0.6.0 requires Flutter >=3.47 and CI pins 3.24.5,
-  # so the range stops before it; 0.5.2 declares flutter >=3.3.0 and is the last
-  # release that builds there. A caret range would resolve to 0.6.0 and fail.
-  window_manager: ">=0.5.0 <0.6.0"
+  # Desktop window sizing. Same trap as dynamic_color above, twice over:
+  # 0.6.0 requires Flutter >=3.47 outright, and 0.5.x declares flutter >=3.3.0
+  # yet calls Color.withValues() in virtual_window_frame.dart, an API that only
+  # exists from Flutter 3.27. CI pins 3.24.5, so anything from 0.5.0 on fails to
+  # compile with "The method 'withValues' isn't defined". 0.4.3 is the newest
+  # release that still builds there and covers the plain resize/persist API.
+  window_manager: ">=0.4.0 <0.5.0"
 
 dev_dependencies:
   flutter_test:

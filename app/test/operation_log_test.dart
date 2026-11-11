@@ -223,7 +223,7 @@ void main() {
     expect(after.first.detail, 'entry-9');
   });
 
-  test('loadRetention falls back when the file is missing or corrupt', () async {
+  test('retention falls back for a missing or corrupt file', () async {
     final OperationLogStore small = OperationLogStore(
       supportDirectory: () async => temp,
       maxEntries: 7,

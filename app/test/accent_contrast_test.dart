@@ -67,11 +67,14 @@ void main() {
     });
 
     test('the shipped default and the sky preset no longer collide', () {
-      // The concrete regression: #00658F vs #66CCFF were ~3 degrees apart and
-      // produced almost the same primary, which is what the user saw.
+      // The concrete regression: #00658F vs #66CCFF produced almost the same
+      // primary, which is what the user saw. They are close in hue by nature,
+      // so lightness has to carry the difference.
       final Color teal = derivedPrimary(const Color(0xFF00658F));
-      final Color sky = derivedPrimary(const Color(0xFF29B6F6));
-      expect(_hueGap(teal, sky), greaterThanOrEqualTo(8));
+      final Color sky = derivedPrimary(const Color(0xFF66CCFF));
+      final double lightGap =
+          (relativeLightness(teal) - relativeLightness(sky)).abs();
+      expect(lightGap, greaterThanOrEqualTo(0.05));
     });
 
     test('derivedPrimary is stable for the same seed', () {

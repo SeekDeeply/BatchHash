@@ -158,8 +158,8 @@ class OperationLogStore {
         flush: true,
       );
     } catch (_) {
-      // Same reasoning as load(): a failed write must not surface as an error in
-      // the operation the user actually asked for.
+      // Same reasoning as load(): a failed write must not surface as an
+      // error in the operation the user actually asked for.
     }
   }
 

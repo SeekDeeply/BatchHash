@@ -122,10 +122,26 @@ void main() {
         null,
         seed: const Color(0xFF66CCFF),
       );
+      // A chosen seed is pinned as primary instead of being re-derived. The
+      // tonal pass used to rewrite it so heavily that two different blues ended
+      // up as the same button colour, which is what the swatches were hiding.
+      expect(built.colorScheme.primary, derivedPrimary(const Color(0xFF66CCFF)));
       expect(
-        built.colorScheme.primary,
-        ColorScheme.fromSeed(seedColor: const Color(0xFF66CCFF)).primary,
+        built.colorScheme.onPrimary,
+        relativeLightness(built.colorScheme.primary) > 0.5
+            ? Colors.black
+            : Colors.white,
       );
+    });
+
+    test('a chosen seed is not collapsed onto the derived tonal tone', () {
+      // Guards the actual regression: these two seeds are close in hue, so the
+      // generated scheme gives them nearly the same primary. Pinning keeps them
+      // visibly apart.
+      final ThemeData teal = AppTheme.light(null, seed: const Color(0xFF00658F));
+      final ThemeData sky = AppTheme.light(null, seed: const Color(0xFF66CCFF));
+      expect(teal.colorScheme.primary, const Color(0xFF00658F));
+      expect(sky.colorScheme.primary, const Color(0xFF66CCFF));
     });
   });
 }

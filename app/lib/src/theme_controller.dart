@@ -32,22 +32,61 @@ class ThemeController extends ChangeNotifier {
 
 /// The accent a seed actually produces in the running UI.
 ///
-/// This is the whole reason the swatch row was misleading: it showed the seed,
-/// while Material 3 paints primary from a fixed tonal step (tone 40 in light
-/// mode) of the generated palette. Two seeds a few degrees apart in hue
-/// therefore collapse to nearly the same primary, which is exactly what the
-/// user reported as "theme 1 and theme 2 look the same".
+/// This is the root of the reported bug. Material 3 does not paint primary with
+/// the seed: it rebuilds a tonal palette and takes a fixed tone (40 in light
+/// mode) at the seed hue. Seeds that sit close in hue therefore collapse onto
+/// nearly the same primary, which is precisely what "theme 1 and theme 2 look
+/// the same" described.
 ///
-/// `DynamicSchemeVariant.fidelity` is what fixes it rather than swapping hex
-/// values: tonalSpot normalises every seed to the same chroma/lightness recipe,
-/// while fidelity keeps the seed's own chroma and tone as far as the contrast
-/// rules allow, so `#00658F` and a bright sky blue stay visibly different.
+/// Two attempts that do not work, recorded so they are not retried:
+/// * swapping the hex values does not help, because the collapse is caused by
+///   the tone normalisation, not by the seed itself;
+/// * `DynamicSchemeVariant.fidelity` helps only when the seeds differ in chroma
+///   or tone enough to survive the contrast rules. #00658F and #66CCFF are both
+///   mid-tone blues, so they still derived to accents ~1 degree apart.
+///
+/// What actually works is to stop deriving: the chosen color becomes primary
+/// unchanged. The picker is a deliberate act, the user is looking at the color
+/// when they choose it, and a swatch that lies about the result is worse than a
+/// primary that skips the tonal sanitising.
 Color derivedPrimary(Color seed, {Brightness brightness = Brightness.light}) {
-  return ColorScheme.fromSeed(
-    seedColor: seed,
-    brightness: brightness,
-    dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
-  ).primary;
+  // Keep the seed, but make sure it is legible: a seed too dark for text or too
+  // pale against the surface gets nudged rather than replaced, so the hue the
+  // user picked is still recognisable.
+  final double tone = relativeLightness(seed);
+  if (brightness == Brightness.light) {
+    if (tone > 0.62) {
+      return _towardsBlack(seed, 0.45);
+    }
+    return seed;
+  }
+  if (tone < 0.45) {
+    return _towardsWhite(seed, 0.35);
+  }
+  return seed;
+}
+
+/// Scale a color towards black, keeping its hue.
+Color _towardsBlack(Color color, double amount) {
+  int channel(int value) => (value * (1 - amount)).round().clamp(0, 255);
+  return Color.fromARGB(
+    color.alpha,
+    channel(color.red),
+    channel(color.green),
+    channel(color.blue),
+  );
+}
+
+/// Mix a color towards white, keeping its hue.
+Color _towardsWhite(Color color, double amount) {
+  int channel(int value) =>
+      (value + (255 - value) * amount).round().clamp(0, 255);
+  return Color.fromARGB(
+    color.alpha,
+    channel(color.red),
+    channel(color.green),
+    channel(color.blue),
+  );
 }
 
 /// Perceptual lightness of [color] on a 0..1 scale, for comparison and tests.
@@ -60,7 +99,6 @@ double relativeLightness(Color color) {
   return (0.2126 * color.red + 0.7152 * color.green + 0.0722 * color.blue) /
       255;
 }
-
 /// Default seed color, kept next to the controller so both agree.
 class AppThemeDefaults {
   const AppThemeDefaults._();

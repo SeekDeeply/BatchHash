@@ -83,7 +83,9 @@ void main() {
 
   test('query matches the kind key case-insensitively', () {
     expect(
-      _kinds(filterLogEntries(<OperationLogEntry>[scan, hashOk], query: 'SCAN')),
+      _kinds(
+        filterLogEntries(<OperationLogEntry>[scan, hashOk], query: 'SCAN'),
+      ),
       <String>['op.scan'],
     );
   });
@@ -91,7 +93,10 @@ void main() {
   test('query matches detail case-insensitively', () {
     expect(
       _kinds(
-        filterLogEntries(<OperationLogEntry>[scan, hashFailed], query: 'denied'),
+        filterLogEntries(
+          <OperationLogEntry>[scan, hashFailed],
+          query: 'denied',
+        ),
       ),
       <String>['op.hash'],
     );
@@ -120,7 +125,10 @@ void main() {
     );
     expect(
       _kinds(
-        filterLogEntries(<OperationLogEntry>[scan, hashOk], query: '  op.scan '),
+        filterLogEntries(
+          <OperationLogEntry>[scan, hashOk],
+          query: '  op.scan ',
+        ),
       ),
       <String>['op.scan'],
     );

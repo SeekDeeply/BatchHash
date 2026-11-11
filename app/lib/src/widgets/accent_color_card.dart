@@ -17,14 +17,13 @@ class AccentColorCard extends StatelessWidget {
 
   /// Presets worth offering directly; typed colors cover everything else.
   ///
-  /// The seeds are chosen so their *derived* accents stay distinguishable. The
-  /// previous pair (`#00658F` and `#66CCFF`) sat ~3 degrees apart in hue, and
-  /// Material 3 pulls primary from a fixed tonal step, so both produced nearly
-  /// the same button color. Sky is now `#29B6F6`, which is far enough to read
-  /// as a different accent rather than a slightly different patch of blue.
+  /// `#66CCFF` is kept because it was explicitly requested as the classic sky
+  /// blue. It used to be indistinguishable from the default teal, but that was a
+  /// theme bug, not a bad preset: the accent is now the chosen color itself, so
+  /// the two differ in lightness by 0.4 and read as clearly different.
   static const List<({String key, Color color})> presets = <({String key, Color color})>[
     (key: 'accent.teal', color: Color(0xFF00658F)),
-    (key: 'accent.sky', color: Color(0xFF29B6F6)),
+    (key: 'accent.sky', color: Color(0xFF66CCFF)),
     (key: 'accent.indigo', color: Color(0xFF3F51B5)),
     (key: 'accent.violet', color: Color(0xFF6750A4)),
     (key: 'accent.rose', color: Color(0xFFB3261E)),
@@ -139,7 +138,12 @@ class AccentColorCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              Row(
+              // Wrap, not Row: the labels are longer in one of the two
+              // languages and a Row would overflow the card instead of
+              // reflowing.
+              Wrap(
+                spacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
                   TextButton.icon(
                     key: const ValueKey<String>('accent-open-manual'),
@@ -147,11 +151,10 @@ class AccentColorCard extends StatelessWidget {
                     icon: const Icon(Icons.edit_outlined, size: 18),
                     label: Text(context.strings('accent.manualEntry')),
                   ),
-                  const SizedBox(width: 4),
                   TextButton(
                     key: const ValueKey<String>('accent-reset'),
                     onPressed: controller.isDefault ? null : controller.reset,
-                    child: Text(context.strings('accent.resetToDefault')),
+                    child: Text(context.strings('accent.reset')),
                   ),
                 ],
               ),

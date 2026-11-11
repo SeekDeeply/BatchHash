@@ -53,7 +53,8 @@ List<OperationLogEntry> filterLogEntries(
   final List<MapEntry<int, OperationLogEntry>> selected =
       <MapEntry<int, OperationLogEntry>>[
         for (int i = 0; i < entries.length; i++)
-          if (matches(entries[i])) MapEntry<int, OperationLogEntry>(i, entries[i]),
+          if (matches(entries[i]))
+            MapEntry<int, OperationLogEntry>(i, entries[i]),
       ];
   selected.sort((
     MapEntry<int, OperationLogEntry> a,

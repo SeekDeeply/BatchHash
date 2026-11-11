@@ -28,16 +28,7 @@ class AppTheme {
   /// experience keeps following the system.
   static ThemeData light(ColorScheme? dynamicScheme, {Color? seed}) {
     if (_isUserChoice(seed)) {
-      // fidelity, not the default tonalSpot: tonalSpot reshapes every seed to
-      // one fixed chroma/tone recipe, so two seeds of similar hue produced the
-      // same primary and the setting looked like it did nothing. fidelity keeps
-      // the chosen color recognisable, which is the point of picking it.
-      return _themeFrom(
-        ColorScheme.fromSeed(
-          seedColor: seed!,
-          dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
-        ),
-      );
+      return _themeFrom(_schemeFromChoice(seed!));
     }
     return _themeFrom(
       dynamicScheme ?? ColorScheme.fromSeed(seedColor: seed ?? seedColor),
@@ -48,11 +39,7 @@ class AppTheme {
   static ThemeData dark(ColorScheme? dynamicScheme, {Color? seed}) {
     if (_isUserChoice(seed)) {
       return _themeFrom(
-        ColorScheme.fromSeed(
-          seedColor: seed!,
-          brightness: Brightness.dark,
-          dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
-        ),
+        _schemeFromChoice(seed!, brightness: Brightness.dark),
       );
     }
     return _themeFrom(
@@ -62,6 +49,29 @@ class AppTheme {
             brightness: Brightness.dark,
           ),
     );
+  }
+
+  /// Colour scheme for a deliberate choice.
+  ///
+  /// The seed is generated first and then overridden on `primary` and its
+  /// companions. Deriving alone cannot keep the promise the picker makes: the
+  /// tonal pass rewrites the hue neighbours into one tone, so two mid-tone blues
+  /// arrived at nearly the same primary and the setting looked broken. Pinning
+  /// the primary to the chosen colour makes the swatch honest, while everything
+  /// else (surfaces, containers, error roles) still comes from the generated
+  /// scheme so contrast and dark mode keep working.
+  static ColorScheme _schemeFromChoice(
+    Color seed, {
+    Brightness brightness = Brightness.light,
+  }) {
+    final ColorScheme base = ColorScheme.fromSeed(
+      seedColor: seed,
+      brightness: brightness,
+    );
+    final Color primary = derivedPrimary(seed, brightness: brightness);
+    final Color onPrimary =
+        relativeLightness(primary) > 0.5 ? Colors.black : Colors.white;
+    return base.copyWith(primary: primary, onPrimary: onPrimary);
   }
 
   static ThemeData _themeFrom(ColorScheme scheme) {

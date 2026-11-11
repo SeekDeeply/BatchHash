@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_strings.dart';
 import '../l10n/app_strings_scope.dart';
+import '../app_info.dart';
 import '../services/batch_hash_service.dart';
 import '../services/operation_log_store.dart';
 import '../theme.dart';
@@ -181,7 +182,97 @@ class SettingsPage extends StatelessWidget {
               },
             ),
           ),
+          const SizedBox(height: 24),
+          // Project identity lives at the bottom of Settings, not buried in
+          // About: the version and the Star ask are what people look for after
+          // using the app for a while, and About needs a tap to reach.
+          const _ProjectFooter(),
         ],
+      ),
+    );
+  }
+}
+
+/// Version, one-line pitch and the Star call to action.
+class _ProjectFooter extends StatelessWidget {
+  const _ProjectFooter();
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    return Card(
+      key: const ValueKey<String>('settings-project-footer'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.fingerprint, color: scheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    context.strings('settings.projectTitle'),
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+                Text(
+                  '${context.strings('settings.version')} $kAppVersion',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              context.strings('settings.projectBody'),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              context.strings('settings.starDetail'),
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                FilledButton.tonalIcon(
+                  key: const ValueKey<String>('settings-star'),
+                  onPressed: () async {
+                    final bool opened = await openProjectUrl();
+                    if (!context.mounted) {
+                      return;
+                    }
+                    // When no handler exists, show the URL instead of leaving
+                    // the button looking broken.
+                    if (!opened) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text(kProjectUrl)),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.star_border, size: 18),
+                  label: Text(context.strings('settings.starAction')),
+                ),
+                SelectableText(
+                  kProjectUrl,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

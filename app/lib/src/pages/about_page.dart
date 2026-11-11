@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../app_info.dart';
 import '../l10n/app_strings_scope.dart';
 import '../services/batch_hash_service.dart';
 import '../widgets/hardware_panel.dart';
@@ -35,7 +36,7 @@ class AboutPage extends StatelessWidget {
                         style: theme.textTheme.headlineSmall,
                       ),
                       Text(
-                        '$versionLabel 0.1.0 (P0 preview)',
+                        '$versionLabel $kAppVersion',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),

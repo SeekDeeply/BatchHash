@@ -38,7 +38,7 @@ class FirstRunDialog extends StatelessWidget {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(kProjectUrl)),
+      const SnackBar(content: Text(kProjectUrl)),
     );
   }
 
@@ -90,7 +90,7 @@ class FirstRunDialog extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              _TermsSection(
+              const _TermsSection(
                 titleKey: 'legal.disclaimerTitle',
                 bodyKeys: <String>[
                   'legal.disclaimerBody1',
@@ -98,7 +98,7 @@ class FirstRunDialog extends StatelessWidget {
                   'legal.disclaimerBody3',
                 ],
               ),
-              _TermsSection(
+              const _TermsSection(
                 titleKey: 'legal.termsTitle',
                 bodyKeys: <String>[
                   'legal.termsBody1',
@@ -107,14 +107,14 @@ class FirstRunDialog extends StatelessWidget {
                   'legal.termsBody4',
                 ],
               ),
-              _TermsSection(
+              const _TermsSection(
                 titleKey: 'legal.privacyTitle',
                 bodyKeys: <String>[
                   'legal.privacyBody1',
                   'legal.privacyBody2',
                 ],
               ),
-              _TermsSection(
+              const _TermsSection(
                 titleKey: 'legal.licenseTitle',
                 bodyKeys: <String>[
                   'legal.licenseBody1',

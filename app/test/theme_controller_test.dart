@@ -135,13 +135,25 @@ void main() {
     });
 
     test('a chosen seed is not collapsed onto the derived tonal tone', () {
-      // Guards the actual regression: these two seeds are close in hue, so the
-      // generated scheme gives them nearly the same primary. Pinning keeps them
-      // visibly apart.
-      final ThemeData teal = AppTheme.light(null, seed: const Color(0xFF00658F));
+      // Guards the actual regression: the default teal and the sky preset are
+      // close in hue, so the generated scheme gave them nearly the same primary
+      // and the two settings looked identical. A chosen seed is pinned instead.
+      //
+      // The default seed is deliberately excluded: it is not a choice, so it
+      // keeps following the platform/derived scheme.
       final ThemeData sky = AppTheme.light(null, seed: const Color(0xFF66CCFF));
-      expect(teal.colorScheme.primary, const Color(0xFF00658F));
       expect(sky.colorScheme.primary, const Color(0xFF66CCFF));
+
+      final Color separatorTone = relativeLightness(const Color(0xFF66CCFF));
+      final Color tealUnderDefault = AppTheme.light(
+        null,
+        seed: AppTheme.seedColor,
+      ).colorScheme.primary;
+      expect(
+        (separatorTone - relativeLightness(tealUnderDefault)).abs(),
+        greaterThanOrEqualTo(0.2),
+        reason: 'the sky preset must not read as the default teal',
+      );
     });
   });
 }

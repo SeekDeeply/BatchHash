@@ -22,10 +22,31 @@ class _TextComparePanelState extends State<TextComparePanel> {
   bool _compared = false;
 
   @override
+  void initState() {
+    super.initState();
+    // The compare button is enabled only once something is typed. TextField
+    // alone does not rebuild this widget, so the controllers have to notify:
+    // without this the button stays disabled because build() only ever saw the
+    // initial empty text.
+    _left.addListener(_onTextChanged);
+    _right.addListener(_onTextChanged);
+  }
+
+  @override
   void dispose() {
+    _left.removeListener(_onTextChanged);
+    _right.removeListener(_onTextChanged);
     _left.dispose();
     _right.dispose();
     super.dispose();
+  }
+
+  void _onTextChanged() {
+    // Any edit invalidates a previous result: keep the button state live and
+    // avoid showing a comparison of text that is no longer in the fields.
+    setState(() {
+      _compared = false;
+    });
   }
 
   void _compare() {
@@ -57,7 +78,11 @@ class _TextComparePanelState extends State<TextComparePanel> {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final bool bothEmpty = _left.text.trim().isEmpty && _right.text.trim().isEmpty;
+    // Enabled as soon as either side has content: comparing one filled pane
+    // against an empty one is a legitimate use (everything shows as added or
+    // removed), and requiring both would leave the button dead in that case.
+    final bool bothEmpty =
+        _left.text.trim().isEmpty && _right.text.trim().isEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[

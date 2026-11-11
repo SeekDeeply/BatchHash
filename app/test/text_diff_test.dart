@@ -1,7 +1,10 @@
+import 'package:batchhash/src/models/models.dart';
+import 'package:batchhash/src/widgets/text_compare_panel.dart';
+import 'package:batchhash/src/widgets/text_diff.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:batchhash/src/models/models.dart';
-import 'package:batchhash/src/widgets/text_diff.dart';
+import 'support/test_helpers.dart';
 
 void main() {
   group('diffLines', () {
@@ -104,6 +107,59 @@ void main() {
         }
       }
       expect(total, kAlgorithmCatalogue.length);
+    });
+  });
+
+  group('TextComparePanel button state', () {
+    testWidgets('compare button enables once either pane has text', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(wrapInApp(const TextComparePanel()));
+
+      final Finder button = find.byKey(
+        const ValueKey<String>('text-compare-run'),
+      );
+      FilledButton widget() => tester.widget<FilledButton>(button);
+
+      // Both panes empty: nothing to compare yet.
+      expect(widget().onPressed, isNull);
+
+      // Typing in one pane must enable it. This is the regression guard: the
+      // button used to stay disabled because nothing rebuilt on input.
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('text-compare-left')),
+        'alpha',
+      );
+      await tester.pump();
+      expect(widget().onPressed, isNotNull);
+    });
+
+    testWidgets('comparing shows the row list and a summary', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(wrapInApp(const TextComparePanel()));
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('text-compare-left')),
+        'a\\nb',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey<String>('text-compare-right')),
+        'a\\nB',
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey<String>('text-compare-run')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey<String>('text-compare-rows')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey<String>('text-compare-summary')),
+        findsOneWidget,
+      );
     });
   });
 }

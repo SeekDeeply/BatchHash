@@ -144,7 +144,7 @@ void main() {
       final ThemeData sky = AppTheme.light(null, seed: const Color(0xFF66CCFF));
       expect(sky.colorScheme.primary, const Color(0xFF66CCFF));
 
-      final Color separatorTone = relativeLightness(const Color(0xFF66CCFF));
+      final double separatorTone = relativeLightness(const Color(0xFF66CCFF));
       final Color tealUnderDefault = AppTheme.light(
         null,
         seed: AppTheme.seedColor,

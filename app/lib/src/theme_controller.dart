@@ -49,7 +49,7 @@ Color? parseColorInput(String input) {
     return null;
   }
   final RegExp rgbPattern = RegExp(
-    r'^rgba?\\(\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})\\s*(?:,\\s*([0-9]*\\.?[0-9]+)\\s*)?\\)$',
+    r'^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([0-9]*\.?[0-9]+)\s*)?\)$',
     caseSensitive: false,
   );
   final RegExpMatch? rgbMatch = rgbPattern.firstMatch(text);

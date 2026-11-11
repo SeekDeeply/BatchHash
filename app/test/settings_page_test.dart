@@ -30,7 +30,7 @@ void main() {
   });
 
   Future<void> pumpSettings(WidgetTester tester) async {
-    setViewSize(tester, const Size(1000, 2000));
+    setViewSize(tester, const Size(1000, 4000));
     await tester.pumpWidget(
       wrapInApp(
         SettingsPage(
@@ -86,7 +86,9 @@ void main() {
   testWidgets('history entry opens the operation log', (WidgetTester tester) async {
     await pumpSettings(tester);
 
-    await tester.tap(find.byKey(const ValueKey<String>('settings-history')));
+    await tester.tap(
+      find.byKey(const ValueKey<String>('settings-history')),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(OperationLogPage), findsOneWidget);

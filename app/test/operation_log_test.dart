@@ -40,8 +40,10 @@ void main() {
       inner: FakeBatchHashService(),
       store: store,
     );
+    // The fake refuses to scan anything except its demo root, which is the
+    // simplest way to provoke a failure through the real service surface.
     await expectLater(
-      service.importReport('${temp.path}/definitely-missing.json'),
+      service.scanDirectory('${temp.path}/not-the-demo-root'),
       throwsA(anything),
     );
 

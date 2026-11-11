@@ -198,8 +198,14 @@ void main() {
         text: 'alpha',
         algorithms: const <String>['sha256', 'blake3'],
       );
+      final Finder card = find.byKey(
+        const ValueKey<String>('text-compare-hashes'),
+      );
       for (final TextHashResult result in expectedLeft) {
-        expect(find.text(result.digest), findsWidgets);
+        expect(
+          find.descendant(of: card, matching: find.text(result.digest)),
+          findsWidgets,
+        );
       }
     });
 
@@ -226,8 +232,16 @@ void main() {
         text: 'same',
         algorithms: const <String>['sha256', 'blake3'],
       );
+      // Scope to the digest card: the same string can also live inside an
+      // EditableText, and a bare text finder would match those too.
+      final Finder card = find.byKey(
+        const ValueKey<String>('text-compare-hashes'),
+      );
       for (final TextHashResult result in left) {
-        expect(find.text(result.digest), findsOneWidget);
+        expect(
+          find.descendant(of: card, matching: find.text(result.digest)),
+          findsWidgets,
+        );
       }
     });
 

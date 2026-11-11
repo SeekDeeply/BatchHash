@@ -77,10 +77,14 @@ class _AlgorithmPickerDialogState extends State<AlgorithmPickerDialog> {
   /// active, so "select all" means "all of these results" rather than silently
   /// adding algorithms the user filtered away.
   void _selectAll() {
+    final Set<String> next = <String>{..._selected};
+    for (final AlgorithmInfo info in _visible) {
+      next.add(info.id);
+    }
     setState(() {
-      for (final AlgorithmInfo info in _visible) {
-        _selected.add(info.id);
-      }
+      // Replacing the set (rather than mutating it) keeps the state change
+      // obvious and avoids any identity-equality surprise downstream.
+      _selected = next;
     });
   }
 

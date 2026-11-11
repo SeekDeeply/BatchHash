@@ -7,6 +7,15 @@ import 'package:batchhash/src/services/logging_batch_hash_service.dart';
 import 'package:batchhash/src/services/operation_log_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+OperationLogEntry _entry(int index) {
+  return OperationLogEntry(
+    kind: 'op.test',
+    status: true,
+    startedAt: DateTime(2026, 1, 1, 0, 0, index),
+    detail: 'entry-$index',
+  );
+}
+
 void main() {
   late Directory temp;
   late OperationLogStore store;
@@ -171,5 +180,70 @@ void main() {
         collectDigests(entries, limit: 2);
     expect(capped.records, hasLength(2));
     expect(capped.truncated, 3);
+  });
+
+  test('retention defaults to 500 entries', () {
+    expect(store.maxEntries, 500);
+    expect(OperationLogStore.defaultMaxEntries, 500);
+  });
+
+  test('append truncates at the configured maxEntries', () async {
+    final OperationLogStore small = OperationLogStore(
+      supportDirectory: () async => temp,
+      maxEntries: 3,
+    );
+    for (int i = 0; i < 6; i++) {
+      await small.append(_entry(i));
+    }
+
+    final List<OperationLogEntry> entries = await small.load();
+    expect(entries, hasLength(3));
+    expect(
+      <String>[for (final OperationLogEntry e in entries) e.detail!],
+      <String>['entry-5', 'entry-4', 'entry-3'],
+    );
+  });
+
+  test('saved retention is persisted and drives later appends', () async {
+    await store.saveRetention(2);
+    expect(await store.loadRetention(), 2);
+    for (int i = 0; i < 4; i++) {
+      await store.append(_entry(i));
+    }
+    expect(await store.load(), hasLength(2));
+
+    // A fresh store (next process) must pick the value back up.
+    final OperationLogStore reopened = OperationLogStore(
+      supportDirectory: () async => temp,
+    );
+    expect(await reopened.loadRetention(), 2);
+    await reopened.append(_entry(9));
+    final List<OperationLogEntry> after = await reopened.load();
+    expect(after, hasLength(2));
+    expect(after.first.detail, 'entry-9');
+  });
+
+  test('loadRetention falls back when the file is missing or corrupt', () async {
+    final OperationLogStore small = OperationLogStore(
+      supportDirectory: () async => temp,
+      maxEntries: 7,
+    );
+    expect(await small.loadRetention(), 7);
+
+    final Directory historyDir = Directory('${temp.path}/history');
+    await historyDir.create(recursive: true);
+    await File(
+      '${historyDir.path}/retention.json',
+    ).writeAsString('{not json');
+    expect(await small.loadRetention(), 7);
+  });
+
+  test('clearing the log keeps the retention preference', () async {
+    await store.saveRetention(3);
+    await store.append(_entry(1));
+    await store.clear();
+
+    expect(await store.load(), isEmpty);
+    expect(await store.loadRetention(), 3);
   });
 }

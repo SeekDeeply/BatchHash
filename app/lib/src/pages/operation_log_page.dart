@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings_scope.dart';
 import '../models/operation_log.dart';
+import '../models/operation_log_filter.dart';
 import '../services/operation_log_store.dart';
 import '../util/formatting.dart';
 import '../widgets/empty_state.dart';
@@ -21,36 +24,116 @@ class OperationLogPage extends StatefulWidget {
   State<OperationLogPage> createState() => _OperationLogPageState();
 }
 
+/// Retention choices offered by the page.
+const List<int> _retentionChoices = <int>[200, 500, 1000, 5000];
+
+// Empty strings stand in for "no filter" instead of null: a DropdownButton with
+// a null value renders the hint rather than a selectable "All" row, and the row
+// has to stay visible so the filter can be reset.
+const String _allTypes = '';
+const String _statusAll = 'all';
+const String _statusOk = 'ok';
+const String _statusFailed = 'failed';
+
 class _OperationLogPageState extends State<OperationLogPage> {
-  late Future<List<OperationLogEntry>> _future;
+  List<OperationLogEntry>? _entries;
+  Object? _error;
+  int _retention = OperationLogStore.defaultMaxEntries;
+  String _query = '';
+  String _typeFilter = _allTypes;
+  String _statusFilter = _statusAll;
+  bool _newestFirst = true;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.store.load();
+    unawaited(_reload());
+    unawaited(_loadRetention());
   }
 
-  void _reload() {
+  Future<void> _loadRetention() async {
+    final int value = await widget.store.loadRetention();
+    if (!mounted) {
+      return;
+    }
     setState(() {
-      _future = widget.store.load();
+      _retention = value;
     });
   }
 
-  Future<void> _clear() async {
+  Future<void> _reload() async {
+    try {
+      final List<OperationLogEntry> entries = await widget.store.load();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _entries = entries;
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+      });
+    }
+  }
+
+  Future<void> _setRetention(int? value) async {
+    if (value == null) {
+      return;
+    }
+    setState(() {
+      _retention = value;
+    });
+    await widget.store.saveRetention(value);
+  }
+
+  Future<void> _confirmClear(int total) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: Text(dialogContext.strings('log.clearConfirmTitle')),
+        content: Text(
+          dialogContext.strings(
+            'log.clearConfirmBody',
+            args: <String, String>{'count': '$total'},
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            key: const ValueKey<String>('operation-log-clear-cancel'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(dialogContext.strings('common.cancel')),
+          ),
+          // The destructive button reuses the toolbar's own "clear" label so
+          // the dialog copy cannot drift from the action that opened it.
+          TextButton(
+            key: const ValueKey<String>('operation-log-clear-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(dialogContext.strings('history.clear')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) {
+      return;
+    }
     await widget.store.clear();
     if (!mounted) {
       return;
     }
-    _reload();
+    await _reload();
   }
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
+    final List<OperationLogEntry>? entries = _entries;
     return Scaffold(
       appBar: AppBar(
-        title: Text(context.strings('history.operationsTitle')),
+        title: Text(context.strings('log.title')),
         actions: <Widget>[
           IconButton(
             key: const ValueKey<String>('operation-log-refresh'),
@@ -61,142 +144,345 @@ class _OperationLogPageState extends State<OperationLogPage> {
           IconButton(
             key: const ValueKey<String>('operation-log-clear'),
             tooltip: context.strings('history.clear'),
-            onPressed: _clear,
+            onPressed: entries == null || entries.isEmpty
+                ? null
+                : () => _confirmClear(entries.length),
             icon: const Icon(Icons.delete_outline),
           ),
         ],
       ),
-      body: FutureBuilder<List<OperationLogEntry>>(
-        future: _future,
-        builder: (
-          BuildContext context,
-          AsyncSnapshot<List<OperationLogEntry>> snapshot,
-        ) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Text(
-                context.strings(
-                  'history.operationsFailed',
-                  args: <String, String>{'error': '${snapshot.error}'},
+      body: _buildBody(context),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    final Object? error = _error;
+    if (error != null) {
+      return Center(
+        child: Text(
+          context.strings(
+            'history.operationsFailed',
+            args: <String, String>{'error': '$error'},
+          ),
+        ),
+      );
+    }
+    final List<OperationLogEntry>? entries = _entries;
+    if (entries == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final List<OperationLogEntry> visible = filterLogEntries(
+      entries,
+      query: _query,
+      kind: _typeFilter == _allTypes ? null : _typeFilter,
+      ok: _statusFilter == _statusAll ? null : _statusFilter == _statusOk,
+      newestFirst: _newestFirst,
+      kindLabel: (String kind) => context.strings(kind),
+    );
+    final List<String> kinds = <String>[];
+    for (final OperationLogEntry entry in entries) {
+      if (!kinds.contains(entry.kind)) {
+        kinds.add(entry.kind);
+      }
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                context.strings('log.subtitle'),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
-            );
-          }
-          final List<OperationLogEntry> entries =
-              snapshot.data ?? const <OperationLogEntry>[];
-          if (entries.isEmpty) {
-            return EmptyState(
-              icon: Icons.history_toggle_off,
-              title: context.strings('history.operationsEmptyTitle'),
-              message: context.strings('history.operationsEmptyBody'),
-            );
-          }
-          return ListView.separated(
-            key: const ValueKey<String>('operation-log-list'),
-            padding: const EdgeInsets.all(16),
-            itemCount: entries.length,
-            separatorBuilder: (BuildContext context, int index) =>
-                const Divider(height: 1),
-            itemBuilder: (BuildContext context, int index) {
-              final OperationLogEntry entry = entries[index];
-              final Widget tile = ListTile(
-                dense: true,
-                leading: Icon(
-                  entry.status ? Icons.check_circle : Icons.error,
-                  color: entry.status ? scheme.tertiary : scheme.error,
-                  size: 20,
+              const SizedBox(height: 12),
+              TextField(
+                key: const ValueKey<String>('operation-log-search'),
+                onChanged: (String value) => setState(() => _query = value),
+                decoration: InputDecoration(
+                  hintText: context.strings('log.searchHint'),
+                  prefixIcon: const Icon(Icons.search),
+                  isDense: true,
+                  border: const OutlineInputBorder(),
                 ),
-                title: Text(
-                  context.strings(entry.kind),
-                  style: theme.textTheme.bodyMedium,
-                ),
-                subtitle: Text(
-                  <String>[
-                    formatTimestamp(entry.startedAt),
-                    if (entry.durationMs != null)
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 16,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  _typeControl(context, kinds),
+                  _statusControl(context),
+                  OutlinedButton.icon(
+                    key: const ValueKey<String>('operation-log-sort'),
+                    onPressed: () =>
+                        setState(() => _newestFirst = !_newestFirst),
+                    icon: const Icon(Icons.swap_vert),
+                    label: Text(
                       context.strings(
-                        'history.operationDuration',
-                        args: <String, String>{
-                          'ms': '${entry.durationMs}',
-                        },
+                        _newestFirst ? 'log.sortNewest' : 'log.sortOldest',
                       ),
-                    if (entry.detail != null) entry.detail!,
-                  ].join('  ·  '),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: entry.status ? scheme.onSurfaceVariant : scheme.error,
+                    ),
+                  ),
+                  _retentionControl(context),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                context.strings(
+                  'log.matchCount',
+                  args: <String, String>{
+                    'count': '${visible.length}',
+                    'total': '${entries.length}',
+                  },
+                ),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(child: _list(context, entries, visible)),
+      ],
+    );
+  }
+
+  Widget _typeControl(BuildContext context, List<String> kinds) {
+    // The active filter is re-added when the loaded entries no longer contain
+    // it, otherwise the DropdownButton would assert after a clear or reload.
+    final List<String> values = <String>[_allTypes, ...kinds];
+    if (!values.contains(_typeFilter)) {
+      values.add(_typeFilter);
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(context.strings('log.filterType')),
+        const SizedBox(width: 8),
+        DropdownButton<String>(
+          key: const ValueKey<String>('operation-log-type-filter'),
+          value: _typeFilter,
+          items: <DropdownMenuItem<String>>[
+            for (final String value in values)
+              DropdownMenuItem<String>(
+                value: value,
+                child: Text(
+                  value == _allTypes
+                      ? context.strings('log.filterAll')
+                      : context.strings(value),
+                ),
+              ),
+          ],
+          onChanged: (String? value) {
+            if (value != null) {
+              setState(() => _typeFilter = value);
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _statusControl(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(context.strings('log.filterStatus')),
+        const SizedBox(width: 8),
+        DropdownButton<String>(
+          key: const ValueKey<String>('operation-log-status-filter'),
+          value: _statusFilter,
+          items: <DropdownMenuItem<String>>[
+            DropdownMenuItem<String>(
+              value: _statusAll,
+              child: Text(context.strings('log.filterAll')),
+            ),
+            DropdownMenuItem<String>(
+              value: _statusOk,
+              child: Text(context.strings('log.statusOk')),
+            ),
+            DropdownMenuItem<String>(
+              value: _statusFailed,
+              child: Text(context.strings('log.statusFailed')),
+            ),
+          ],
+          onChanged: (String? value) {
+            if (value != null) {
+              setState(() => _statusFilter = value);
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _retentionControl(BuildContext context) {
+    // A hand-edited retention.json may hold a value that is not in the menu;
+    // adding it keeps the dropdown truthful instead of asserting.
+    final Set<int> values = <int>{..._retentionChoices, _retention};
+    final List<int> choices = values.toList()..sort();
+    return Tooltip(
+      message: context.strings('log.retentionDetail'),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(context.strings('log.retention')),
+          const SizedBox(width: 8),
+          DropdownButton<int>(
+            key: const ValueKey<String>('operation-log-retention'),
+            value: _retention,
+            items: <DropdownMenuItem<int>>[
+              for (final int value in choices)
+                DropdownMenuItem<int>(
+                  value: value,
+                  child: Text(
+                    context.strings(
+                      'log.retentionOption',
+                      args: <String, String>{'count': '$value'},
+                    ),
                   ),
                 ),
-              );
-              if (entry.hashes.isEmpty) {
-                return tile;
-              }
-              // Digests are the verifiable payload, so they are shown but kept
-              // collapsed: a batch can hold hundreds of them.
-              return ExpansionTile(
-                key: ValueKey<String>('operation-log-hashes-$index'),
-                tilePadding: EdgeInsets.zero,
-                childrenPadding: const EdgeInsets.only(left: 40, bottom: 8),
-                expandedCrossAxisAlignment: CrossAxisAlignment.start,
-                title: tile,
-                children: <Widget>[
-                  for (final HashDigestRecord record in entry.hashes)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Row(
+            ],
+            onChanged: _setRetention,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _list(
+    BuildContext context,
+    List<OperationLogEntry> entries,
+    List<OperationLogEntry> visible,
+  ) {
+    if (entries.isEmpty) {
+      return EmptyState(
+        icon: Icons.history_toggle_off,
+        title: context.strings('history.operationsEmptyTitle'),
+        message: context.strings('history.operationsEmptyBody'),
+      );
+    }
+    if (visible.isEmpty) {
+      return EmptyState(
+        icon: Icons.search_off,
+        title: context.strings('log.noMatches'),
+        message: context.strings('log.noMatchesBody'),
+      );
+    }
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    return ListView.separated(
+      key: const ValueKey<String>('operation-log-list'),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      itemCount: visible.length,
+      separatorBuilder: (BuildContext context, int index) =>
+          const Divider(height: 1),
+      itemBuilder: (BuildContext context, int index) {
+        final OperationLogEntry entry = visible[index];
+        final Widget tile = ListTile(
+          dense: true,
+          leading: Icon(
+            entry.status ? Icons.check_circle : Icons.error,
+            color: entry.status ? scheme.tertiary : scheme.error,
+            size: 20,
+          ),
+          title: Text(
+            context.strings(entry.kind),
+            style: theme.textTheme.bodyMedium,
+          ),
+          subtitle: Text(
+            <String>[
+              formatTimestamp(entry.startedAt),
+              if (entry.durationMs != null)
+                context.strings(
+                  'history.operationDuration',
+                  args: <String, String>{'ms': '${entry.durationMs}'},
+                ),
+              if (entry.detail != null) entry.detail!,
+            ].join('  ·  '),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: entry.status ? scheme.onSurfaceVariant : scheme.error,
+            ),
+          ),
+        );
+        if (entry.hashes.isEmpty) {
+          return tile;
+        }
+        // Digests are the verifiable payload, so they stay collapsed: a batch
+        // can hold hundreds of them. The key mixes content with the row index
+        // so filtering or reordering cannot move an expanded section onto a
+        // different operation.
+        return ExpansionTile(
+          key: ValueKey<String>(
+            'operation-log-hashes-${entry.kind}-'
+            '${entry.startedAt.microsecondsSinceEpoch}-$index',
+          ),
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(left: 40, bottom: 8),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          title: tile,
+          children: <Widget>[
+            for (final HashDigestRecord record in entry.hashes)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    SizedBox(
+                      width: 90,
+                      child: Text(
+                        record.algorithm,
+                        style: theme.textTheme.labelSmall,
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          SizedBox(
-                            width: 90,
-                            child: Text(
-                              record.algorithm,
-                              style: theme.textTheme.labelSmall,
-                            ),
+                          Text(
+                            record.path,
+                            style: theme.textTheme.bodySmall,
                           ),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Text(
-                                  record.path,
-                                  style: theme.textTheme.bodySmall,
-                                ),
-                                SelectableText(
-                                  record.digest,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontFamily: 'monospace',
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
+                          SelectableText(
+                            record.digest,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              fontFamily: 'monospace',
+                              color: scheme.onSurfaceVariant,
                             ),
                           ),
                         ],
                       ),
                     ),
-                  if (entry.hashesTruncated > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        context.strings(
-                          'history.operationHashesTruncated',
-                          args: <String, String>{
-                            'count': '${entry.hashesTruncated}',
-                          },
-                        ),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                ],
-              );
-            },
-          );
-        },
-      ),
+                  ],
+                ),
+              ),
+            if (entry.hashesTruncated > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  context.strings(
+                    'history.operationHashesTruncated',
+                    args: <String, String>{
+                      'count': '${entry.hashesTruncated}',
+                    },
+                  ),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

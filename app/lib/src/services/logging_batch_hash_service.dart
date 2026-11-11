@@ -170,9 +170,22 @@ class LoggingBatchHashService implements BatchHashService {
   ///
   /// [OperationLogStore.append] swallows its own errors, so this cannot turn a
   /// completed operation into a failure.
-  Stream<T> _recordStream<T>(String kind, Stream<T> source) {
+  ///
+  /// [detail] and [digests] turn the last samples into a log line, which is
+  /// what lets a streamed operation record its *outcome* rather than just that
+  /// it ran. [collect] decides whether a sample is worth keeping, since
+  /// progress events can be empty and the final one carries the result.
+  Stream<T> _recordStream<T>(
+    String kind,
+    Stream<T> source, {
+    bool Function(T sample)? collect,
+    String Function(List<T> samples)? detail,
+    List<HashDigestRecord> Function(List<T> samples)? digests,
+  }) {
     final DateTime startedAt = DateTime.now();
     final Stopwatch watch = Stopwatch()..start();
+    final List<T> samples = <T>[];
+
     Future<void> record({required bool ok, Object? error}) {
       watch.stop();
       return store.append(
@@ -180,14 +193,27 @@ class LoggingBatchHashService implements BatchHashService {
           kind: kind,
           status: ok,
           startedAt: startedAt,
-          detail: error == null ? null : '$error',
+          detail: ok
+              ? (detail == null ? null : detail(samples))
+              : '$error',
           durationMs: watch.elapsedMilliseconds,
+          hashes: ok && digests != null
+              ? digests(samples)
+              : const <HashDigestRecord>[],
         ),
       );
     }
 
     return source.transform(
       StreamTransformer<T, T>.fromHandlers(
+        handleData: (T sample, EventSink<T> sink) {
+          if (collect == null || collect(sample)) {
+            samples
+              ..clear()
+              ..add(sample);
+          }
+          sink.add(sample);
+        },
         handleDone: (EventSink<T> sink) async {
           await record(ok: true);
           sink.close();
@@ -301,64 +327,27 @@ class LoggingBatchHashService implements BatchHashService {
     bool recursive = false,
   }) {
     // A verification is only useful in the log if it says what it found. The
-    // previous record pointed at the directory and nothing else, so history
-    // showed "compared" without ever answering "did it match?".
-    final DateTime startedAt = DateTime.now();
-    final Stopwatch watch = Stopwatch()..start();
-    final List<DiffRowModel> latest = <DiffRowModel>[];
-
-    Future<void> record({required bool ok, Object? error}) async {
-      watch.stop();
-      final String detail = ok
-          ? describeVerification(latest, directory: directory)
-          : '$error';
-      await store.append(
-        OperationLogEntry(
-          kind: 'op.compareDirectory',
-          status: ok,
-          startedAt: startedAt,
-          detail: detail,
-          durationMs: watch.elapsedMilliseconds,
-          hashes: ok
-              ? digestsFromDiff(latest)
-              : const <HashDigestRecord>[],
-        ),
-      );
-    }
-
-    return inner
-        .compareReportWithDirectory(
-          report: report,
-          directory: directory,
-          recursive: recursive,
-        )
-        .transform(
-          StreamTransformer<DiffProgress, DiffProgress>.fromHandlers(
-            handleData: (DiffProgress progress, EventSink<DiffProgress> sink) {
-              // Keep the newest sample: rows are only complete once done.
-              if (progress.rows.isNotEmpty) {
-                latest
-                  ..clear()
-                  ..addAll(progress.rows);
-              }
-              sink.add(progress);
-            },
-            handleDone: (EventSink<DiffProgress> sink) async {
-              await record(ok: true);
-              sink.close();
-            },
-            handleError: (
-              Object error,
-              StackTrace stack,
-              EventSink<DiffProgress> sink,
-            ) async {
-              await record(ok: false, error: error);
-              sink.addError(error, stack);
-            },
-          ),
-        );
+    // previous record named the directory and nothing else, so history showed
+    // "compared" without ever answering "did it match?".
+    return _recordStream<DiffProgress>(
+      'op.compareDirectory',
+      inner.compareReportWithDirectory(
+        report: report,
+        directory: directory,
+        recursive: recursive,
+      ),
+      // Only the last sample has the complete row set; earlier ones are
+      // partial and would understate the match count.
+      collect: (DiffProgress progress) => progress.rows.isNotEmpty,
+      detail: (List<DiffProgress> samples) => describeVerification(
+        samples.isEmpty ? const <DiffRowModel>[] : samples.last.rows,
+        directory: directory,
+      ),
+      digests: (List<DiffProgress> samples) => digestsFromDiff(
+        samples.isEmpty ? const <DiffRowModel>[] : samples.last.rows,
+      ),
+    );
   }
-
   /// One-line verdict for a verification run.
   ///
   /// The wording is derived from the row statuses rather than from the report

@@ -44,7 +44,7 @@ void main() {
     // step, so seeds that are close in hue collapse to the same accent. These
     // assertions pin the guarantee that each preset is visibly its own color.
     test('every pair of presets differs in hue or in lightness', () {
-      final List<({String key, Color color})> presets =
+      const List<({String key, Color color})> presets =
           AccentColorCard.presets;
       expect(presets, hasLength(greaterThanOrEqualTo(6)));
 

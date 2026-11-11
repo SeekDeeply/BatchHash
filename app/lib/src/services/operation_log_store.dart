@@ -8,23 +8,36 @@ import 'app_config_store.dart';
 
 /// Append-only store for [OperationLogEntry] records.
 ///
-/// Backed by one small JSON file next to the other app support files. The store
-/// is deliberately simple: history is a human-facing audit trail, so losing the
-/// newest entry on a crash costs nothing, while a database would add a
-/// dependency and a migration path for data that is read by eye.
+/// Backed by two small JSON files in one `history` directory next to the other
+/// app support files. The store is deliberately simple: history is a
+/// human-facing audit trail, so losing the newest entry on a crash costs
+/// nothing, while a database would add a dependency and a migration path for
+/// data that is read by eye.
 class OperationLogStore {
-  OperationLogStore({SupportDirectoryResolver? supportDirectory})
-    : _supportDirectory = supportDirectory ?? getApplicationSupportDirectory;
+  OperationLogStore({
+    SupportDirectoryResolver? supportDirectory,
+    this.maxEntries = defaultMaxEntries,
+  }) : assert(maxEntries > 0, 'maxEntries must be positive'),
+       _supportDirectory = supportDirectory ?? getApplicationSupportDirectory;
+
+  /// Retention used when nothing has been persisted yet.
+  ///
+  /// The log page lets the user change it; the chosen value then lives in
+  /// `retention.json` so it survives a restart, and this field is only the
+  /// fallback for a fresh install or an unreadable preference file.
+  static const int defaultMaxEntries = 500;
+
+  /// Fallback retention when no value has been saved.
+  final int maxEntries;
 
   final SupportDirectoryResolver _supportDirectory;
 
-  /// Newest entries are kept; older ones drop off so the file stays small.
-  static const int maxEntries = 500;
-
+  Directory? _cachedDirectory;
   File? _cachedFile;
+  File? _cachedRetentionFile;
 
-  Future<File> _file() async {
-    final File? cached = _cachedFile;
+  Future<Directory> _historyDirectory() async {
+    final Directory? cached = _cachedDirectory;
     if (cached != null) {
       return cached;
     }
@@ -35,11 +48,73 @@ class OperationLogStore {
     if (!await target.exists()) {
       await target.create(recursive: true);
     }
+    _cachedDirectory = target;
+    return target;
+  }
+
+  Future<File> _file() async {
+    final File? cached = _cachedFile;
+    if (cached != null) {
+      return cached;
+    }
+    final Directory target = await _historyDirectory();
     final File file = File(
       '${target.path}${Platform.pathSeparator}operations.json',
     );
     _cachedFile = file;
     return file;
+  }
+
+  Future<File> _retentionFile() async {
+    final File? cached = _cachedRetentionFile;
+    if (cached != null) {
+      return cached;
+    }
+    final Directory target = await _historyDirectory();
+    final File file = File(
+      '${target.path}${Platform.pathSeparator}retention.json',
+    );
+    _cachedRetentionFile = file;
+    return file;
+  }
+
+  /// Retention currently in force: the persisted choice, else [maxEntries].
+  Future<int> loadRetention() async {
+    try {
+      final File file = await _retentionFile();
+      if (!await file.exists()) {
+        return maxEntries;
+      }
+      final Object? decoded = jsonDecode(await file.readAsString());
+      if (decoded is Map<String, Object?>) {
+        final Object? value = decoded['max_entries'];
+        if (value is int && value > 0) {
+          return value;
+        }
+      }
+      return maxEntries;
+    } catch (_) {
+      // A corrupt preference must not make the log unusable, so degrading to
+      // the constructor default is the conservative choice.
+      return maxEntries;
+    }
+  }
+
+  /// Persist [value] as the retention used by later appends.
+  Future<void> saveRetention(int value) async {
+    if (value <= 0) {
+      return;
+    }
+    try {
+      final File file = await _retentionFile();
+      await file.writeAsString(
+        jsonEncode(<String, Object?>{'max_entries': value}),
+        flush: true,
+      );
+    } catch (_) {
+      // Same reasoning as loadRetention(): retention is a convenience, not a
+      // guarantee, and must never fail the operation that triggered the write.
+    }
   }
 
   /// Every recorded entry, newest first.
@@ -66,14 +141,15 @@ class OperationLogStore {
     }
   }
 
-  /// Append [entry], keeping the newest [maxEntries].
+  /// Append [entry], keeping the newest entries per [loadRetention].
   Future<void> append(OperationLogEntry entry) async {
     try {
+      final int retention = await loadRetention();
       final List<OperationLogEntry> existing = await load();
       final List<OperationLogEntry> next = <OperationLogEntry>[
         entry,
         ...existing,
-      ].take(maxEntries).toList(growable: false);
+      ].take(retention).toList(growable: false);
       final File file = await _file();
       await file.writeAsString(
         jsonEncode(<Object?>[
@@ -87,7 +163,7 @@ class OperationLogStore {
     }
   }
 
-  /// Delete every recorded entry.
+  /// Delete every recorded entry. The retention preference is kept.
   Future<void> clear() async {
     try {
       final File file = await _file();

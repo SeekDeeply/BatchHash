@@ -49,46 +49,14 @@ class ThemeController extends ChangeNotifier {
 /// unchanged. The picker is a deliberate act, the user is looking at the color
 /// when they choose it, and a swatch that lies about the result is worse than a
 /// primary that skips the tonal sanitising.
-Color derivedPrimary(Color seed, {Brightness brightness = Brightness.light}) {
-  // Keep the seed, but make sure it is legible: a seed too dark for text or too
-  // pale against the surface gets nudged rather than replaced, so the hue the
-  // user picked is still recognisable.
-  final double tone = relativeLightness(seed);
-  if (brightness == Brightness.light) {
-    if (tone > 0.62) {
-      return _towardsBlack(seed, 0.45);
-    }
-    return seed;
-  }
-  if (tone < 0.45) {
-    return _towardsWhite(seed, 0.35);
-  }
+Color derivedPrimary(Color seed) {
+  // Unchanged, deliberately. An earlier version darkened pale seeds to keep
+  // white text legible, which reintroduced the original complaint in a subtler
+  // form: #66CCFF came back as #38708C, so the swatch still lied. Contrast is
+  // the job of onPrimary, which is chosen from the resulting lightness, not a
+  // reason to repaint the colour the user just picked.
   return seed;
 }
-
-/// Scale a color towards black, keeping its hue.
-Color _towardsBlack(Color color, double amount) {
-  int channel(int value) => (value * (1 - amount)).round().clamp(0, 255);
-  return Color.fromARGB(
-    color.alpha,
-    channel(color.red),
-    channel(color.green),
-    channel(color.blue),
-  );
-}
-
-/// Mix a color towards white, keeping its hue.
-Color _towardsWhite(Color color, double amount) {
-  int channel(int value) =>
-      (value + (255 - value) * amount).round().clamp(0, 255);
-  return Color.fromARGB(
-    color.alpha,
-    channel(color.red),
-    channel(color.green),
-    channel(color.blue),
-  );
-}
-
 /// Perceptual lightness of [color] on a 0..1 scale, for comparison and tests.
 ///
 /// Uses the standard luminance weights so "is this noticeably lighter" is

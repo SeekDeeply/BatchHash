@@ -68,7 +68,7 @@ class AppTheme {
       seedColor: seed,
       brightness: brightness,
     );
-    final Color primary = derivedPrimary(seed, brightness: brightness);
+    final Color primary = derivedPrimary(seed);
     final Color onPrimary =
         relativeLightness(primary) > 0.5 ? Colors.black : Colors.white;
     return base.copyWith(primary: primary, onPrimary: onPrimary);

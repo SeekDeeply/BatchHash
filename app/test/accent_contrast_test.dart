@@ -84,13 +84,5 @@ void main() {
         derivedPrimary(seed).value,
       );
     });
-
-    test('a dark scheme derives a different accent than a light one', () {
-      const Color seed = Color(0xFF3F51B5);
-      expect(
-        derivedPrimary(seed, brightness: Brightness.dark).value,
-        isNot(derivedPrimary(seed).value),
-      );
-    });
   });
 }

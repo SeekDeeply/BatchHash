@@ -1,11 +1,19 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart' show FilePicker;
 
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings_scope.dart';
 import '../models/operation_log.dart';
 import '../models/operation_log_filter.dart';
+import '../services/archive_export.dart';
+import '../services/operation_log_export.dart';
 import '../services/operation_log_store.dart';
+import '../widgets/log_export_dialog.dart';
 import '../util/formatting.dart';
 import '../widgets/empty_state.dart';
 
@@ -142,6 +150,14 @@ class _OperationLogPageState extends State<OperationLogPage> {
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
+            key: const ValueKey<String>('operation-log-export'),
+            tooltip: context.strings('log.export'),
+            onPressed: entries == null || entries.isEmpty
+                ? null
+                : () => _export(entries),
+            icon: const Icon(Icons.ios_share),
+          ),
+          IconButton(
             key: const ValueKey<String>('operation-log-clear'),
             tooltip: context.strings('history.clear'),
             onPressed: entries == null || entries.isEmpty
@@ -155,6 +171,110 @@ class _OperationLogPageState extends State<OperationLogPage> {
     );
   }
 
+  /// Entries that survive the current filters, newest-first as configured.
+  ///
+  /// Shared with the export so the file always matches what the list shows:
+  /// exporting more than the user can see is a way to leak records they
+  /// filtered out on purpose.
+  List<OperationLogEntry> _visibleEntries(
+    BuildContext context,
+    List<OperationLogEntry> entries,
+  ) {
+    return filterLogEntries(
+      entries,
+      query: _query,
+      kind: _typeFilter == _allTypes ? null : _typeFilter,
+      ok: _statusFilter == _statusAll ? null : _statusFilter == _statusOk,
+      newestFirst: _newestFirst,
+      kindLabel: (String kind) => context.strings(kind),
+    );
+  }
+
+  /// Ask for the export options, then write the file.
+  Future<void> _export(List<OperationLogEntry> entries) async {
+    final List<OperationLogEntry> visible = _visibleEntries(context, entries);
+    final ExportOptions? options = await showDialog<ExportOptions>(
+      context: context,
+      builder: (BuildContext context) =>
+          LogExportDialog(count: visible.length),
+    );
+    if (options == null || !mounted) {
+      return;
+    }
+    if (visible.isEmpty) {
+      _snack(context.strings('log.exportNoEntries'));
+      return;
+    }
+    final String? directory = await _pickDirectory();
+    if (directory == null || !mounted) {
+      return;
+    }
+    try {
+      final String stamp = exportTimestamp();
+      final String body = options.format == ExportFormat.json
+          ? encodeLogAsJson(visible)
+          : encodeLogAsMarkdown(visible);
+      final String extension = options.format == ExportFormat.json
+          ? '.json'
+          : '.md';
+      final String base = 'batchhash-operation-log-$stamp';
+
+      // The digest belongs to whatever file the user ends up with, so it has to
+      // be computed after packing, not on the raw text: a ZIP named with the
+      // digest of its contents cannot be checked with a stock hashing tool.
+      final Uint8List? zipped = options.zip
+          ? zipBytes(
+              <String, List<int>>{
+                '$base$extension': utf8.encode(body),
+              },
+              password: options.password,
+            )
+          : null;
+      final List<int> payload = zipped ?? utf8.encode(body);
+      final String? digest = options.sha256
+          ? sha256Hex(payload)
+          : null;
+      final String name = exportFileName(
+        base,
+        digest: digest,
+        extension: zipped == null ? extension : '.zip',
+      );
+      final File file = File('$directory/$name');
+      await file.writeAsBytes(payload, flush: true);
+      if (!mounted) {
+        return;
+      }
+      _snack(
+        context.strings('log.exportDone', args: <String, String>{'name': name}),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _snack(
+        context.strings(
+          'log.exportFailed',
+          args: <String, String>{'error': '$error'},
+        ),
+      );
+    }
+  }
+
+  Future<String?> _pickDirectory() async {
+    try {
+      final String? picked = await FilePicker.platform.getDirectoryPath();
+      if (picked == null || picked.trim().isEmpty) {
+      return null;
+      }
+      return picked.trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
   Widget _buildBody(BuildContext context) {
     final Object? error = _error;
     if (error != null) {
@@ -173,14 +293,7 @@ class _OperationLogPageState extends State<OperationLogPage> {
     }
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final List<OperationLogEntry> visible = filterLogEntries(
-      entries,
-      query: _query,
-      kind: _typeFilter == _allTypes ? null : _typeFilter,
-      ok: _statusFilter == _statusAll ? null : _statusFilter == _statusOk,
-      newestFirst: _newestFirst,
-      kindLabel: (String kind) => context.strings(kind),
-    );
+    final List<OperationLogEntry> visible = _visibleEntries(context, entries);
     final List<String> kinds = <String>[];
     for (final OperationLogEntry entry in entries) {
       if (!kinds.contains(entry.kind)) {

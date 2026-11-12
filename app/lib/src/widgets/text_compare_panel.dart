@@ -1,8 +1,14 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart' show FilePicker;
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
+import '../services/archive_export.dart';
 import '../services/batch_hash_service.dart';
+import '../services/text_compare_export.dart';
 import 'text_diff.dart';
 
 /// Side-by-side line comparison of two pasted texts.
@@ -118,6 +124,93 @@ class _TextComparePanelState extends State<TextComparePanel> {
     }
   }
 
+  /// Snapshot the current comparison in the shape the exporters expect.
+  TextCompareExportData _exportData() {
+    final TextDiffSummary summary = TextDiffSummary.of(_rows);
+    return TextCompareExportData(
+      leftText: _left.text,
+      rightText: _right.text,
+      leftHashes: <({String algorithm, String digest})>[
+        for (final TextHashResult hash in _leftHashes)
+          (algorithm: hash.algorithmId, digest: hash.digest),
+      ],
+      rightHashes: <({String algorithm, String digest})>[
+        for (final TextHashResult hash in _rightHashes)
+          (algorithm: hash.algorithmId, digest: hash.digest),
+      ],
+      identical: summary.isIdentical,
+      differingLines: summary.added + summary.removed + summary.changed,
+      totalLines: _rows.length,
+    );
+  }
+
+  Future<void> _export() async {
+    final TextCompareExportData data = _exportData();
+    if (data.isEmpty) {
+      _snack(context.strings('textCompare.exportEmpty'));
+      return;
+    }
+    final _ExportFormatKind? format = await showDialog<_ExportFormatKind>(
+      context: context,
+      builder: (BuildContext context) => const _TextExportDialog(),
+    );
+    if (format == null || !mounted) {
+      return;
+    }
+    final String? directory = await _pickDirectory();
+    if (directory == null || !mounted) {
+      return;
+    }
+    try {
+      final String body = switch (format) {
+        _ExportFormatKind.txt => encodeTextCompareAsTxt(data),
+        _ExportFormatKind.markdown => encodeTextCompareAsMarkdown(data),
+        _ExportFormatKind.json => encodeTextCompareAsJson(data),
+      };
+      final String extension = switch (format) {
+        _ExportFormatKind.txt => '.txt',
+        _ExportFormatKind.markdown => '.md',
+        _ExportFormatKind.json => '.json',
+      };
+      final String name = 'batchhash-text-compare-${exportTimestamp()}$extension';
+      await File('$directory/$name').writeAsString(body, flush: true);
+      if (!mounted) {
+        return;
+      }
+      _snack(
+        context.strings(
+          'textCompare.exportDone',
+          args: <String, String>{'name': name},
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _snack(
+        context.strings(
+          'textCompare.exportFailed',
+          args: <String, String>{'error': '$error'},
+        ),
+      );
+    }
+  }
+
+  Future<String?> _pickDirectory() async {
+    try {
+      final String? picked = await FilePicker.platform.getDirectoryPath();
+      if (picked == null || picked.trim().isEmpty) {
+        return null;
+      }
+      return picked.trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
   Color? _rowColor(BuildContext context, TextDiffKind kind) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     return switch (kind) {
@@ -186,6 +279,15 @@ class _TextComparePanelState extends State<TextComparePanel> {
               onPressed: bothEmpty ? null : _compare,
               icon: const Icon(Icons.compare_arrows),
               label: Text(context.strings('compare.textRun')),
+            ),
+            const SizedBox(width: 12),
+            // Enabled only after a comparison ran: exporting the raw panes
+            // without the diff would not be "the comparison result".
+            OutlinedButton.icon(
+              key: const ValueKey<String>('text-compare-export'),
+              onPressed: _compared ? _export : null,
+              icon: const Icon(Icons.ios_share, size: 18),
+              label: Text(context.strings('textCompare.export')),
             ),
             const SizedBox(width: 12),
             if (_compared)
@@ -409,6 +511,64 @@ class _HashLine extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Formats offered for a comparison export.
+enum _ExportFormatKind { txt, markdown, json }
+
+/// Format picker for exporting a comparison.
+class _TextExportDialog extends StatefulWidget {
+  const _TextExportDialog();
+
+  @override
+  State<_TextExportDialog> createState() => _TextExportDialogState();
+}
+
+class _TextExportDialogState extends State<_TextExportDialog> {
+  _ExportFormatKind _format = _ExportFormatKind.markdown;
+
+  String _label(BuildContext context, _ExportFormatKind kind) {
+    return switch (kind) {
+      _ExportFormatKind.txt => context.strings('textCompare.exportTxt'),
+      _ExportFormatKind.markdown => context.strings('textCompare.exportMarkdown'),
+      _ExportFormatKind.json => context.strings('textCompare.exportJson'),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: const ValueKey<String>('text-compare-export-dialog'),
+      title: Text(context.strings('textCompare.exportTitle')),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          for (final _ExportFormatKind kind in _ExportFormatKind.values)
+            RadioListTile<_ExportFormatKind>(
+              value: kind,
+              groupValue: _format,
+              onChanged: (_ExportFormatKind? value) =>
+                  setState(() => _format = value ?? _format),
+              title: Text(_label(context, kind)),
+              contentPadding: EdgeInsets.zero,
+            ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          key: const ValueKey<String>('text-compare-export-cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.strings('common.cancel')),
+        ),
+        FilledButton(
+          key: const ValueKey<String>('text-compare-export-confirm'),
+          onPressed: () => Navigator.of(context).pop(_format),
+          child: Text(context.strings('textCompare.export')),
+        ),
+      ],
     );
   }
 }

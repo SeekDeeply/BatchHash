@@ -17,7 +17,6 @@ class AppSettings {
   const AppSettings({
     this.locale,
     this.seedArgb,
-    this.dynamicColor,
     this.algorithms,
   });
 
@@ -27,11 +26,13 @@ class AppSettings {
   /// Accent seed as 0xAARRGGBB; null means never chosen.
   final int? seedArgb;
 
-  /// Whether wallpaper dynamic colour is allowed when no accent was chosen.
-  final bool? dynamicColor;
 
   /// Algorithms the user last selected.
   final List<String>? algorithms;
+
+  /// There is deliberately no field for wallpaper dynamic colour: it is a
+  /// build-time switch (`BatchHashApp.enableDynamicColor`), not a user setting,
+  /// and storing a value nothing reads would look like a setting that works.
 
   /// Accent seed as a [Color], or null when nothing was stored.
   Color? get seed => seedArgb == null ? null : Color(seedArgb!);
@@ -39,13 +40,11 @@ class AppSettings {
   AppSettings copyWith({
     String? locale,
     int? seedArgb,
-    bool? dynamicColor,
     List<String>? algorithms,
   }) {
     return AppSettings(
       locale: locale ?? this.locale,
       seedArgb: seedArgb ?? this.seedArgb,
-      dynamicColor: dynamicColor ?? this.dynamicColor,
       algorithms: algorithms ?? this.algorithms,
     );
   }
@@ -53,7 +52,6 @@ class AppSettings {
   Map<String, Object?> toJson() => <String, Object?>{
     if (locale != null) 'locale': locale,
     if (seedArgb != null) 'seed_argb': seedArgb,
-    if (dynamicColor != null) 'dynamic_color': dynamicColor,
     if (algorithms != null) 'algorithms': algorithms,
   };
 
@@ -67,14 +65,12 @@ class AppSettings {
     }
     final Object? locale = raw['locale'];
     final Object? seed = raw['seed_argb'];
-    final Object? dynamic = raw['dynamic_color'];
     final Object? algorithms = raw['algorithms'];
     return AppSettings(
       locale: locale is String && locale.trim().isNotEmpty
           ? locale.trim()
           : null,
       seedArgb: seed is int ? seed : null,
-      dynamicColor: dynamic is bool ? dynamic : null,
       algorithms: algorithms is List
           ? <String>[
               for (final Object? entry in algorithms)

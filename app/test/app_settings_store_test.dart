@@ -25,7 +25,6 @@ void main() {
       const AppSettings settings = AppSettings(
         locale: 'en',
         seedArgb: 0xFF29B6F6,
-        dynamicColor: false,
         algorithms: <String>['blake3', 'sha256'],
       );
       final AppSettings decoded = AppSettings.fromJson(
@@ -33,7 +32,6 @@ void main() {
       );
       expect(decoded.locale, 'en');
       expect(decoded.seedArgb, 0xFF29B6F6);
-      expect(decoded.dynamicColor, isFalse);
       expect(decoded.algorithms, <String>['blake3', 'sha256']);
       expect(decoded.seed, const Color(0xFF29B6F6));
     });
@@ -51,12 +49,10 @@ void main() {
       final AppSettings decoded = AppSettings.fromJson(<String, Object?>{
         'locale': 'en',
         'seed_argb': 'not-a-number',
-        'dynamic_color': 42,
         'algorithms': <Object?>['blake3', 7, ''],
       });
       expect(decoded.locale, 'en');
       expect(decoded.seedArgb, isNull);
-      expect(decoded.dynamicColor, isNull);
       expect(decoded.algorithms, <String>['blake3']);
     });
 

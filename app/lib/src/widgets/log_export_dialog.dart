@@ -88,11 +88,11 @@ class _LogExportDialogState extends State<LogExportDialog> {
                 segments: const <ButtonSegment<ExportFormat>>[
                   ButtonSegment<ExportFormat>(
                     value: ExportFormat.json,
-                    label: const Text('JSON'),
+                    label: Text('JSON'),
                   ),
                   ButtonSegment<ExportFormat>(
                     value: ExportFormat.markdown,
-                    label: const Text('Markdown'),
+                    label: Text('Markdown'),
                   ),
                 ],
                 selected: <ExportFormat>{_format},

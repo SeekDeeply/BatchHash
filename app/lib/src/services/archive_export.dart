@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -7,34 +6,6 @@ import 'package:crypto/crypto.dart';
 /// Hex SHA-256 of [bytes].
 String sha256Hex(List<int> bytes) => sha256.convert(bytes).toString();
 
-/// Hex SHA-256 of a file already on disk.
-///
-/// Streamed through the digest sink instead of reading the file into memory: an
-/// exported log carrying hundreds of digests is not huge, but there is no reason
-/// to hold a second copy just to hash it.
-Future<String> sha256HexFile(File file) async {
-  final _DigestCollector collector = _DigestCollector();
-  final ByteConversionSink sink = sha256.startChunkedConversion(collector);
-  await for (final List<int> chunk in file.openRead()) {
-    sink.add(chunk);
-  }
-  sink.close();
-  final Digest? digest = collector.digest;
-  return digest == null ? '' : digest.toString();
-}
-
-/// Captures the single [Digest] the chunked SHA-256 conversion emits.
-class _DigestCollector implements Sink<Digest> {
-  Digest? digest;
-
-  @override
-  void add(Digest data) {
-    digest = data;
-  }
-
-  @override
-  void close() {}
-}
 /// Pack [files] into a ZIP archive.
 ///
 /// A non-empty [password] produces a WinZip AES archive (AE-1/AE-2), which the

@@ -10,18 +10,12 @@ import '../l10n/app_strings_scope.dart';
 /// the user can navigate away from would let them accept copy they never saw.
 /// The body scrolls: the legal text is longer than any phone screen.
 class FirstRunDialog extends StatelessWidget {
-  const FirstRunDialog({
-    super.key,
-    required this.onAccept,
-    required this.onDecline,
-  });
+  const FirstRunDialog({super.key, required this.onAccept});
 
   /// Called when the user accepts, right before the dialog closes. The caller
   /// owns persisting the acceptance.
   final VoidCallback onAccept;
 
-  /// Called when the user declines; the default wiring leaves the app.
-  final VoidCallback onDecline;
 
   /// Width cap for the scrolling body, so the text keeps a readable measure on
   /// a wide desktop window.
@@ -125,15 +119,12 @@ class FirstRunDialog extends StatelessWidget {
           ),
         ),
       ),
+      // No decline action: declining cannot leave the app usable, and the
+      // button that used to sit here popped the dialog while the gate simply
+      // showed it again, so it looked broken. Consent is now the single
+      // affirmative path; closing the window instead of consenting is handled by
+      // the platform, not by a button that pretends to do something.
       actions: <Widget>[
-        TextButton(
-          key: const ValueKey<String>('first-run-decline'),
-          onPressed: () {
-            Navigator.of(context).pop();
-            onDecline();
-          },
-          child: Text(context.strings('firstRun.decline')),
-        ),
         FilledButton(
           key: const ValueKey<String>('first-run-accept'),
           onPressed: () {

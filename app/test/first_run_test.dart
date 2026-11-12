@@ -103,7 +103,6 @@ void main() {
     await tester.pumpWidget(
       BatchHashApp(
         firstRunStore: store,
-        onDecline: () {},
         enableDynamicColor: false,
         locale: 'en',
       ),
@@ -125,34 +124,49 @@ void main() {
     );
   });
 
-  testWidgets('declining runs the injected callback and closes the dialog', (
+  testWidgets('consent is the only action; there is no decline button', (
     WidgetTester tester,
   ) async {
     setViewSize(tester, const Size(800, 1200));
-    bool declined = false;
     final _FakeFirstRunStore store = _FakeFirstRunStore();
     await tester.pumpWidget(
       BatchHashApp(
         firstRunStore: store,
-        onDecline: () => declined = true,
         enableDynamicColor: false,
         locale: 'en',
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey<String>('first-run-decline')));
-    await tester.pumpAndSettle();
+    final Finder dialog = find.byKey(
+      const ValueKey<String>('first-run-dialog'),
+    );
+    expect(dialog, findsOneWidget);
 
-    expect(declined, isTrue);
-    expect(store.accepted, isFalse);
+    // The old decline button popped the dialog while the gate immediately
+    // showed it again, so it looked broken. Consent is now the single path, and
+    // the dialog must not be dismissable by tapping outside either.
     expect(
-      find.byKey(const ValueKey<String>('first-run-dialog')),
+      find.byKey(const ValueKey<String>('first-run-decline')),
       findsNothing,
     );
+    expect(
+      find.descendant(of: dialog, matching: find.byType(TextButton)),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('first-run-accept')),
+      findsOneWidget,
+    );
+
+    // A barrier tap must not leave the app reachable without consent.
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(dialog, findsOneWidget);
+    expect(store.accepted, isFalse);
   });
 
-  testWidgets('the dialog scrolls through the terms and offers both choices', (
+  testWidgets('the dialog scrolls through the terms and offers consent', (
     WidgetTester tester,
   ) async {
     setViewSize(tester, const Size(800, 1200));
@@ -163,10 +177,8 @@ void main() {
           builder: (BuildContext context) => TextButton(
             onPressed: () => showDialog<void>(
               context: context,
-              builder: (BuildContext dialogContext) => FirstRunDialog(
-                onAccept: () => accepted = true,
-                onDecline: () {},
-              ),
+              builder: (BuildContext dialogContext) =>
+                  FirstRunDialog(onAccept: () => accepted = true),
             ),
             child: const Text('open'),
           ),

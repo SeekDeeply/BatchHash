@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app_state.dart';
@@ -59,7 +58,6 @@ class BatchHashApp extends StatefulWidget {
     this.enableDynamicColor = true,
     this.locale,
     this.firstRunStore,
-    this.onDecline,
   });
 
   final BatchHashService? service;
@@ -72,12 +70,6 @@ class BatchHashApp extends StatefulWidget {
   /// Source of the first-run acceptance; injectable so a test can point at a
   /// temporary directory. Defaults to a [FirstRunStore].
   final FirstRunStore? firstRunStore;
-
-  /// Called when the user declines the first-run terms.
-  ///
-  /// Tests inject a callback here: the default leaves the app through
-  /// [SystemNavigator.pop] and would tear the test host down.
-  final VoidCallback? onDecline;
 
   @override
   State<BatchHashApp> createState() => _BatchHashAppState();
@@ -221,22 +213,9 @@ class _BatchHashAppState extends State<BatchHashApp> {
     if (widget.service != null) {
       return home;
     }
-    return _FirstRunGate(
-      store: _firstRunStore,
-      onDecline: _declineFirstRun,
-      child: home,
-    );
+    return _FirstRunGate(store: _firstRunStore, child: home);
   }
 
-  Future<void> _declineFirstRun() async {
-    final VoidCallback? onDecline = widget.onDecline;
-    if (onDecline != null) {
-      onDecline();
-      return;
-    }
-    // The default leaves the app; tests inject onDecline instead.
-    await SystemNavigator.pop();
-  }
 }
 
 /// Runs the first-run gate once, from a context below the Navigator.
@@ -244,14 +223,9 @@ class _BatchHashAppState extends State<BatchHashApp> {
 /// It sits inside `home` on purpose: `MaterialApp.builder` is above the
 /// Navigator, where `showDialog` has no navigator to push a route onto.
 class _FirstRunGate extends StatefulWidget {
-  const _FirstRunGate({
-    required this.store,
-    required this.onDecline,
-    required this.child,
-  });
+  const _FirstRunGate({required this.store, required this.child});
 
   final FirstRunStore store;
-  final VoidCallback onDecline;
   final Widget child;
 
   @override
@@ -283,10 +257,7 @@ class _FirstRunGateState extends State<_FirstRunGate> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (BuildContext context) => FirstRunDialog(
-        onAccept: _accept,
-        onDecline: widget.onDecline,
-      ),
+      builder: (BuildContext context) => FirstRunDialog(onAccept: _accept),
     );
   }
 

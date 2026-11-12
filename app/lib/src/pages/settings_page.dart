@@ -8,7 +8,6 @@ import '../services/operation_log_store.dart';
 import '../theme.dart';
 import '../theme_controller.dart';
 import '../widgets/accent_color_card.dart';
-import '../widgets/hardware_panel.dart';
 import 'about_page.dart';
 import 'legal_page.dart';
 import 'operation_log_page.dart';
@@ -112,21 +111,14 @@ class SettingsPage extends StatelessWidget {
                   )
                 else
                   AccentColorCard(controller: themeController),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.memory_outlined),
-                  title: Text(context.strings('settings.acceleration')),
-                  subtitle: Text(
-                    context.strings('settings.accelerationDetail'),
-                  ),
-                ),
               ],
             ),
           ),
           const SizedBox(height: 16),
-          HardwarePanelLoader(service: service),
-          const SizedBox(height: 16),
-          const SizedBox(height: 16),
+          // The hardware panel lives on the About page only. It was rendered in
+          // both places, together with a one-line "acceleration" description
+          // that said the same thing as the panel itself, so Settings showed the
+          // same facts twice and About showed them again.
           Card(
             child: Column(
               children: <Widget>[
@@ -165,7 +157,8 @@ class SettingsPage extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 16),          Card(
+          const SizedBox(height: 16),
+          Card(
             child: ListTile(
               key: const ValueKey<String>('settings-about'),
               leading: const Icon(Icons.info_outline),

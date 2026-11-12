@@ -102,7 +102,8 @@ void main() {
       final Map<String, dynamic> first =
           (decoded['entries'] as List<dynamic>).first as Map<String, dynamic>;
       expect(first['kind'], 'op.hash');
-      expect(first['status'], isTrue);
+      // The stored schema names the verdict `ok`, not `status`.
+      expect(first['ok'], isTrue);
     });
 
     test('Markdown carries the verdict, the digests and the truncation note', () {

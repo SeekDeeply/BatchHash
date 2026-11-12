@@ -20,6 +20,12 @@ dependencies:
   dynamic_color: ">=1.7.0 <1.8.0"
   ffi: ^2.1.3
   file_picker: ^8.1.7
+  # ZIP packing for log export. 4.x is required for password support: the
+  # encoder writes WinZip AES (AE-1/AE-2), which the OS archive tools prompt
+  # for, while 3.x could only read encrypted archives.
+  archive: ^4.6.0
+  # SHA-256 for the optional digest suffix on exported file names.
+  crypto: ^3.0.8
   path_provider: ^2.1.4
   # Desktop window sizing. Same trap as dynamic_color above, twice over:
   # 0.6.0 requires Flutter >=3.47 outright, and 0.5.x declares flutter >=3.3.0

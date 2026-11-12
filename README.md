@@ -138,7 +138,6 @@ scripts/              CI 构建辅助脚本
 
 以下几点请在使用前知悉：
 
-- **界面语言不持久化**：切换只在当前会话有效，重启回到默认中文。
 - **错误信息语言**：Rust 核心返回的错误文本是英文（`kind` 如 `invalid_request` / `scan` / `log`），
   界面只本地化固定文案，不翻译 Rust 消息。
 - **二进制未签名**：Windows 未接入代码签名，SmartScreen 会提示；macOS 为 ad-hoc 签名、未公证，

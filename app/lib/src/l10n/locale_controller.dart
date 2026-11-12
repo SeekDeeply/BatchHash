@@ -7,8 +7,11 @@ import 'app_strings.dart';
 /// The app ships Chinese-first: [AppStrings.defaultLocale] is the initial value
 /// regardless of the platform language, so a first run is always Chinese. The
 /// settings page switches it at runtime and every listener is rebuilt through
-/// [notifyListeners]. Nothing is persisted yet, so the choice lasts for the
-/// session only; adding persistence later only touches this class.
+/// [notifyListeners].
+///
+/// Persistence lives in the app shell rather than here: the shell already owns
+/// the settings file for the accent, and keeping one writer for the whole
+/// settings payload avoids two objects racing to rewrite the same JSON.
 class LocaleController extends ChangeNotifier {
   LocaleController({String? initial})
     : _locale = AppStrings.normalize(initial);
@@ -20,6 +23,14 @@ class LocaleController extends ChangeNotifier {
 
   /// Whether the active language is Chinese.
   bool get isChinese => _locale == 'zh';
+
+  /// Apply a stored language without notifying.
+  ///
+  /// Used once during start-up, before anything listens: notifying there would
+  /// schedule a rebuild of a tree that has not been built yet.
+  void restore(String? locale) {
+    _locale = AppStrings.normalize(locale);
+  }
 
   /// Switch the active language; unknown codes fall back to Chinese.
   void select(String locale) {

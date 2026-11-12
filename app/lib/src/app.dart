@@ -8,11 +8,13 @@ import 'app_state.dart';
 import 'l10n/app_strings.dart';
 import 'l10n/app_strings_scope.dart';
 import 'l10n/locale_controller.dart';
+import 'models/models.dart';
 import 'pages/compare_page.dart';
 import 'pages/hash_page.dart';
 import 'pages/rename_page.dart';
 import 'pages/report_page.dart';
 import 'pages/settings_page.dart';
+import 'services/app_settings_store.dart';
 import 'services/batch_hash_service.dart';
 import 'services/fake_batch_hash_service.dart';
 import 'services/first_run_store.dart';
@@ -58,6 +60,7 @@ class BatchHashApp extends StatefulWidget {
     this.enableDynamicColor = true,
     this.locale,
     this.firstRunStore,
+    this.settingsStore,
   });
 
   final BatchHashService? service;
@@ -71,6 +74,9 @@ class BatchHashApp extends StatefulWidget {
   /// temporary directory. Defaults to a [FirstRunStore].
   final FirstRunStore? firstRunStore;
 
+  /// Where language and accent are remembered; injectable for tests.
+  final AppSettingsStore? settingsStore;
+
   @override
   State<BatchHashApp> createState() => _BatchHashAppState();
 }
@@ -83,7 +89,18 @@ class _BatchHashAppState extends State<BatchHashApp> {
   late final OperationLogStore _logStore;
   late final List<AppSection> _sections;
   late final FirstRunStore _firstRunStore;
+  late final AppSettingsStore _settingsStore;
   late final bool _usingDemoData;
+
+  /// Tail of the settings write chain; see [_persistSettings].
+  Future<void> _writeQueue = Future<void>.value();
+
+  /// True while the stored payload is being applied.
+  ///
+  /// Restoring the algorithm selection notifies its listeners, which would fire
+  /// a write of the very values just read. Skipping saves during restoration
+  /// keeps start-up from rewriting the file it only just read.
+  bool _restoring = false;
   int _selectedIndex = 0;
 
   @override
@@ -102,9 +119,20 @@ class _BatchHashAppState extends State<BatchHashApp> {
     _service = widget.service == null
         ? LoggingBatchHashService(inner: core, store: _logStore)
         : core;
+    _settingsStore = widget.settingsStore ?? AppSettingsStore();
     _localeController = LocaleController(initial: widget.locale);
     _themeController = ThemeController();
+    // _appState must exist before anything below reads its notifiers; touching
+    // it earlier threw a LateInitializationError at start-up.
     _appState = BatchHashAppState(service: _service);
+    // Load persisted choices, then mirror every later change back to disk.
+    unawaited(_restoreSettings());
+    _localeController.addListener(_persistSettings);
+    _themeController.addListener(_persistSettings);
+    // The picker writes straight into this notifier, so persistence has to hang
+    // off the notifier rather than off the picker: a future caller that changes
+    // the selection another way must still be remembered.
+    _appState.algorithms.addListener(_persistSettings);
     _sections = <AppSection>[
       AppSection(
         key: 'nav.hash',
@@ -140,8 +168,73 @@ class _BatchHashAppState extends State<BatchHashApp> {
     ];
   }
 
+  /// Apply the stored language and accent once at start-up.
+  ///
+  /// An explicitly injected [BatchHashApp.locale] wins over the stored value:
+  /// tests and embedders pin the language, and a leftover file must not
+  /// override that.
+  Future<void> _restoreSettings() async {
+    final AppSettings stored = await _settingsStore.load();
+    if (!mounted) {
+      return;
+    }
+    _restoring = true;
+    if (widget.locale == null) {
+      _localeController.restore(stored.locale);
+    }
+    _themeController.restore(stored.seed);
+    final List<String>? storedAlgorithms = stored.algorithms;
+    if (storedAlgorithms != null && storedAlgorithms.isNotEmpty) {
+      // Filtered against the live catalogue: an id that a previous version
+      // offered but this build no longer has would otherwise fail the whole
+      // hashing call instead of just being dropped.
+      final Set<String> available = <String>{
+        for (final AlgorithmInfo algorithm in kAlgorithmCatalogue)
+          algorithm.id,
+      };
+      final Set<String> kept = <String>{
+        for (final String id in storedAlgorithms)
+          if (available.contains(id)) id,
+      };
+      if (kept.isNotEmpty) {
+        _appState.algorithms.value = kept;
+      }
+    }
+    _restoring = false;
+    // Rebuild once so the first painted frame already uses the stored values.
+    setState(() {});
+  }
+
+  /// Write the current language, accent and selection back to disk.
+  ///
+  /// Read-modify-write on purpose: this file also holds fields this widget does
+  /// not own, and rewriting the payload from a stale snapshot would erase them.
+  ///
+  /// Chained onto [_writeQueue] so two quick changes cannot interleave:
+  /// switching the language and the accent in the same second used to start two
+  /// overlapping cycles on one file.
+  Future<void> _persistSettings() {
+    if (_restoring) {
+      return _writeQueue;
+    }
+    _writeQueue = _writeQueue.then((_) async {
+      final AppSettings stored = await _settingsStore.load();
+      await _settingsStore.save(
+        stored.copyWith(
+          locale: _localeController.locale,
+          seedArgb: _themeController.seed.value,
+          algorithms: _appState.algorithms.value.toList()..sort(),
+        ),
+      );
+    });
+    return _writeQueue;
+  }
+
   @override
   void dispose() {
+    _localeController.removeListener(_persistSettings);
+    _themeController.removeListener(_persistSettings);
+    _appState.algorithms.removeListener(_persistSettings);
     _localeController.dispose();
     _themeController.dispose();
     _appState.dispose();

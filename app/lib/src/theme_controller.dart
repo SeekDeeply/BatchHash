@@ -26,6 +26,17 @@ class ThemeController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Apply a stored seed without notifying.
+  ///
+  /// Start-up only: the first build reads the value directly, so announcing a
+  /// change there would rebuild a tree that is not attached yet.
+  void restore(Color? color) {
+    if (color == null) {
+      return;
+    }
+    _seed = color;
+  }
+
   /// Restore the shipped default seed.
   void reset() => select(AppThemeDefaults.seed);
 }

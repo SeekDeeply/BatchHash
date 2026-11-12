@@ -5,7 +5,7 @@ import 'dart:io';
 /// A compile-time constant because reading the real package version would need
 /// a package_info plugin; bump it together with `version:` in pubspec.yaml so
 /// the About page and the first-run record never disagree.
-const String kAppVersion = '1.5.0';
+const String kAppVersion = '1.6.0';
 
 /// Project repository the Star buttons point at.
 const String kProjectUrl = 'https://github.com/SeekDeeply/BatchHash';

@@ -141,7 +141,7 @@ void main() {
     // The summary counts every entry, not only the hashed ones.
     expect(text, contains('Summary:'));
     expect(text, contains('Total: 3'));
-    expect(text, contains('failed: 1'));
+    expect(text, contains('Failed: 1'));
     expect(text, contains('Total bytes: 216'));
   });
 

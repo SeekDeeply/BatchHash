@@ -224,11 +224,14 @@ class _TreeNode {
       () => _TreeNode(name),
     );
     if (isDirectory) {
-      // A directory stays a directory even if the report also lists a file
-      // with the same name: dropping the children would hide real entries.
       child.isDirectory = true;
     } else {
-      child.isDirectory = false;
+      // A leaf only demotes a node that has no children yet. When a report
+      // lists both `a` and `a/b`, the subtree must survive: turning the node
+      // into a file would drop every entry underneath it.
+      if (child._children.isEmpty) {
+        child.isDirectory = false;
+      }
       child.entry = entry;
     }
     return child;

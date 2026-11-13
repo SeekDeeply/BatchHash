@@ -246,6 +246,67 @@ void main() {
       expect(csv, startsWith('path,size,mtime,status'));
     });
 
+    test('exports a localized tree, machine formats stay fixed',
+        () async {
+      File('$root/a.txt').writeAsStringSync('alpha');
+      final entries = await service.scanDirectory(root);
+      final progress = await service
+          .computeHashes(entries: entries, algorithms: <String>['sha256'])
+          .toList();
+      final report = ReportModel(
+        root: root,
+        generatedAt: DateTime.utc(2026, 1, 1),
+        algorithms: const <String>['sha256'],
+        entries: progress.last.entries,
+      );
+
+      // The human readable formats follow the requested language.
+      final zh = await service.exportReport(
+        report: report,
+        formats: <ReportFormat>{ReportFormat.tree, ReportFormat.markdown},
+        directory: '$root/out-zh',
+        locale: 'zh-CN',
+      );
+      expect(zh, hasLength(2));
+      final tree = zh
+          .firstWhere((item) => item.format == ReportFormat.tree)
+          .path;
+      expect(File(tree).existsSync(), isTrue);
+      expect(tree, endsWith('.txt'));
+      final treeText = File(tree).readAsStringSync();
+      expect(treeText, contains('a.txt'));
+      expect(treeText, contains('sha256:'));
+      expect(treeText, contains('汇总'));
+
+      // The same report in English renders different labels.
+      final en = await service.exportReport(
+        report: report,
+        formats: <ReportFormat>{ReportFormat.tree},
+        directory: '$root/out-en',
+        locale: 'en',
+      );
+      final enText = File(en.single.path).readAsStringSync();
+      expect(enText, isNot(equals(treeText)));
+
+      // JSON carries no localized text, so the locale must not change it.
+      final jsonZh = await service.exportReport(
+        report: report,
+        formats: <ReportFormat>{ReportFormat.json},
+        directory: '$root/out-json-zh',
+        locale: 'zh',
+      );
+      final jsonEn = await service.exportReport(
+        report: report,
+        formats: <ReportFormat>{ReportFormat.json},
+        directory: '$root/out-json-en',
+        locale: 'en',
+      );
+      expect(
+        File(jsonZh.single.path).readAsStringSync(),
+        File(jsonEn.single.path).readAsStringSync(),
+      );
+    });
+
     test('imports a report and diffs it against the directory', () async {
       File('$root/a.txt').writeAsStringSync('alpha');
       final entries = await service.scanDirectory(root);

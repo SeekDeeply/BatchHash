@@ -1,5 +1,4 @@
 import 'package:batchhash/src/app_state.dart';
-import 'package:batchhash/src/models/models.dart';
 import 'package:batchhash/src/pages/hash_page.dart';
 import 'package:batchhash/src/services/fake_batch_hash_service.dart';
 import 'package:flutter/material.dart';

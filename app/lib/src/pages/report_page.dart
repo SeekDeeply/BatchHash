@@ -91,6 +91,9 @@ class _ReportPageState extends State<ReportPage> {
             report: report,
             formats: Set<ReportFormat>.of(_formats),
             directory: directory.isEmpty ? null : directory,
+            // The human-readable formats follow the UI language; the machine
+            // formats ignore it, so passing the active code is always correct.
+            locale: Localizations.localeOf(context).languageCode,
           );
       if (!mounted) {
         return;
@@ -390,6 +393,7 @@ class _ReportPageState extends State<ReportPage> {
     ReportFormat.txt => Icons.text_snippet,
     ReportFormat.md5sum => Icons.tag,
     ReportFormat.bsd => Icons.checklist,
+    ReportFormat.tree => Icons.account_tree_outlined,
   };
 }
 

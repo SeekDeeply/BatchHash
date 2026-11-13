@@ -459,6 +459,13 @@ class AppStrings {
     'textCompare.exportDone': '已导出 {name}',
     'textCompare.exportFailed': '导出失败：{error}',
     'textCompare.exportEmpty': '两侧都是空的，没有可导出的内容。',
+    'report.formatDesc.json': '带 schema 版本的机器可读报告。',
+    'report.formatDesc.csv': '固定列，便于表格软件处理。',
+    'report.formatDesc.markdown': '人类可读表格，超过 500 行会截断。',
+    'report.formatDesc.txt': '对齐的纯文本，超过 500 行会截断。',
+    'report.formatDesc.md5sum': '兼容 GNU coreutils 的摘要列表。',
+    'report.formatDesc.bsd': 'BSD 风格摘要列表。',
+    'report.formatDesc.tree': '文件树结构，每个文件旁标注校验值，便于人眼核对。',
 };
 
   static const Map<String, String> _en = <String, String>{
@@ -865,5 +872,12 @@ class AppStrings {
     'textCompare.exportDone': 'Exported {name}',
     'textCompare.exportFailed': 'Export failed: {error}',
     'textCompare.exportEmpty': 'Both sides are empty, so there is nothing to export.',
+    'report.formatDesc.json': 'Canonical machine readable report with a schema version.',
+    'report.formatDesc.csv': 'Fixed columns for spreadsheets.',
+    'report.formatDesc.markdown': 'Human readable table, truncated at 500 rows.',
+    'report.formatDesc.txt': 'Aligned plain text, truncated at 500 rows.',
+    'report.formatDesc.md5sum': 'GNU coreutils compatible digest list.',
+    'report.formatDesc.bsd': 'BSD style digest list.',
+    'report.formatDesc.tree': 'File tree with the digests shown next to each file, for reading.',
 };
 }

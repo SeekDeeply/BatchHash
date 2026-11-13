@@ -47,7 +47,7 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 | `bh_scan` | `{"root": "...", "follow_links": bool}` | 只扫描不哈希 |
 | `bh_run_batch` | `BatchRequestDto` | 扫描 → 哈希 → 可选写名 → 报告 → SQLite 日志 |
 | `bh_undo` | `{"db": "...", "batch_id"?: "...", "apply": bool}` | 撤销计划/执行 |
-| `bh_export_report` | `{"report_json": "...", "format": "csv"}` | 报告格式转换 |
+| `bh_export_report` | `{"report_json": "...", "format": "csv", "locale"?: "zh"}` | 报告格式转换；`locale` 可选，只影响人读格式（Markdown / TXT / Tree），缺省英文 |
 | `bh_job_start` | `{"action": "batch"\|"hash_entries"\|"diff_directory", "payload": {...}}` | 立刻返回 `job_id`，工作在原生线程执行 |
 | `bh_job_poll` | `{"job_id": "..."}` | 当前状态、最新进度样本、完成后的 `result_json` |
 | `bh_job_cancel` | `{"job_id": "..."}` | 请求停止；任务仍通过 poll 报告终态 |
@@ -95,6 +95,18 @@ JSON C ABI 的每一层都能被 CI 直接测试：
 `category` 取值为 `crypto` | `checksum` | `fast` | `legacy`，由
 `batchhash_types::AlgorithmSpec` 定义——FFI 只做透传，不在这一层做任何分类判断。
 Dart 侧不要硬编码算法清单，一律用服务下发的这份数据（含分类，供 UI 分组）。
+
+### 导出格式与 locale
+
+`bh_export_report` 的 `format` 取 `json` / `csv` / `markdown` / `txt` / `md5sum` /
+`bsd` / `tree`（`md` 视为 `markdown`）。
+
+- **机器格式不翻译**：`json` / `csv` / `md5sum` / `bsd` 的键名与列头恒为英文，
+  是与外部工具（包括 `md5sum -c`）和 Dart 解析器之间的契约。
+- **人读格式跟随 `locale`**：`markdown` / `txt` / `tree` 用 `locale` 选标签。
+  接受 `zh` / `zh-CN` / `zh-Hans` 与 `en` / `en-US`；其它值（含缺省）一律回落英文，
+  因此**老客户端不传 `locale` 时输出与之前逐字节相同**。
+- `tree` 是给人看的目录树，`can_import = false`、`can_diff = false`，扩展名复用 `txt`。
 
 `BatchRequestDto` 的两个可选字段决定「这次到底处理哪些文件」，UI 必须显式传：
 

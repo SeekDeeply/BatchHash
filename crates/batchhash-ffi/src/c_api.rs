@@ -128,7 +128,11 @@ pub unsafe extern "C" fn bh_undo(request: *const c_char) -> *mut c_char {
     })
 }
 
-/// Re-export report JSON. Request: {"report_json": "...", "format": "csv"}.
+/// Re-export report JSON.
+///
+/// Request: {"report_json": "...", "format": "csv", "locale": "zh"}.
+/// `locale` is optional and only affects the human readable formats; omitting it
+/// keeps the historical English output, so older clients are unaffected.
 ///
 /// # Safety
 /// request must be a valid NUL-terminated UTF-8 string; the result must be freed
@@ -140,9 +144,15 @@ pub unsafe extern "C" fn bh_export_report(request: *const c_char) -> *mut c_char
         struct ExportRequest {
             report_json: String,
             format: String,
+            #[serde(default)]
+            locale: Option<String>,
         }
         let parsed: ExportRequest = parse_request(request, false)?;
-        let text = api::export(&parsed.report_json, &parsed.format)?;
+        let text = api::export(
+            &parsed.report_json,
+            &parsed.format,
+            parsed.locale.as_deref(),
+        )?;
         Ok(json!({ "text": text }))
     })
 }

@@ -84,10 +84,16 @@ abstract class BatchHashService {
   ///
   /// Without [directory], the implementation picks a stable per-user location
   /// (never the system temp directory, which the OS may clear).
+  ///
+  /// [locale] selects the language of the human readable formats (Markdown,
+  /// TXT, Tree). The machine readable formats (JSON, CSV, md5sum, BSD) never
+  /// translate their keys or columns, because those are a parsing contract.
+  /// Omit it to keep the historical English output.
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,
     String? directory,
+    String? locale,
   });
 
   Future<ReportModel> importReport(String path);

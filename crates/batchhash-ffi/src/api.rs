@@ -13,6 +13,7 @@ use batchhash_rename::log_store::{apply_undo, LogStore, OperationState, UndoResu
 use batchhash_rename::planner::{RenameRowStatus, StdFsBackend, StdRenameFs};
 use batchhash_rename::suffix::{SuffixFormat, SuffixParseResult};
 use batchhash_report::format::{detect_report_format, export_report, import_report, ReportFormat};
+use batchhash_report::{export_report_with, ExportLocale};
 use batchhash_types::{
     AlgorithmId, BackendPolicy, EntryStatus, ErrorKind, FileEntry, HardwareReport, HexCase, Report,
 };
@@ -734,11 +735,20 @@ pub fn undo(request: &UndoRequestDto) -> Result<UndoResultDto, ApiError> {
 }
 
 /// Re-export a report JSON document into another format.
-pub fn export(report_json: &str, format: &str) -> Result<String, ApiError> {
+///
+/// `locale` only affects the human readable formats (Markdown, TXT, Tree); the
+/// machine formats keep their English keys because those are a parsing
+/// contract. An absent or unknown code falls back to English, so a client that
+/// never learned about locales keeps getting byte-identical output to before.
+pub fn export(report_json: &str, format: &str, locale: Option<&str>) -> Result<String, ApiError> {
     let report: Report = serde_json::from_str(report_json)
         .map_err(|error| ApiError::new("invalid_report", error.to_string()))?;
     let format = parse_format(format)?;
-    export_report(&report, format).map_err(|error| ApiError::new("export", error.to_string()))
+    let locale = locale
+        .and_then(ExportLocale::from_code)
+        .unwrap_or(ExportLocale::En);
+    export_report_with(&report, format, locale)
+        .map_err(|error| ApiError::new("export", error.to_string()))
 }
 
 /// Parse a canonical suffix out of a single file name.

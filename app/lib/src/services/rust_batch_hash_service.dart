@@ -574,6 +574,7 @@ class RustBatchHashService implements BatchHashService {
     required ReportModel report,
     required Set<ReportFormat> formats,
     String? directory,
+    String? locale,
   }) async {
     final reportJson = _reportJson(report);
     final target = Directory(await _exportDirectory(directory));
@@ -586,6 +587,9 @@ class RustBatchHashService implements BatchHashService {
       final text = native.exportReport(
         reportJson: reportJson,
         format: format.name,
+        // Only the human readable formats use it; passing it for the machine
+        // formats too costs nothing and keeps the call site uniform.
+        locale: locale,
       );
       final File file = _claimExportFile(dirPath, format.fileExtension, text);
       written.add(ExportedReport(format: format, path: file.path));

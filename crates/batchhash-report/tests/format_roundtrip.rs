@@ -8,9 +8,10 @@
 
 use batchhash_report::diff::{diff_reports, DiffOptions};
 use batchhash_report::format::{
-    detect_report_format, export_diff, export_report, import_report, ExportError, ImportError,
-    ReportFormat,
+    detect_report_format, export_diff, export_diff_with, export_report, export_report_with,
+    import_report, ExportError, ImportError, ReportFormat, MAX_TABLE_ROWS,
 };
+use batchhash_report::labels::ExportLocale;
 use batchhash_types::{
     AlgorithmId, BackendPolicy, DiffStatus, EntryStatus, ErrorKind, HardwareReport, Report,
     ReportEntry, ReportValidationError, RootKind, SuffixConfig,
@@ -341,12 +342,18 @@ fn import_rejects_path_traversal_and_future_schema() {
 
 #[test]
 fn unsupported_import_formats_are_rejected() {
-    for format in [ReportFormat::Markdown, ReportFormat::Txt] {
+    // Tree 也在此列：它是渲染结果，反解析要处理"文件名含树线"和"树被截断"
+    // 两类歧义，因此和 Markdown/TXT 一样只导出不导入。
+    for format in [
+        ReportFormat::Markdown,
+        ReportFormat::Txt,
+        ReportFormat::Tree,
+    ] {
         let error = import_report(b"", format).unwrap_err();
-        assert!(matches!(
-            error,
-            ImportError::UnsupportedFormat(ReportFormat::Markdown | ReportFormat::Txt)
-        ));
+        assert!(
+            matches!(error, ImportError::UnsupportedFormat(_)),
+            "{format}: {error}"
+        );
     }
 }
 
@@ -555,4 +562,174 @@ fn diff_reports_incomplete_hashes_as_unknown() {
         vec![AlgorithmId::Sha256, AlgorithmId::Blake3]
     );
     assert_eq!(diff.summary.unchanged, 1);
+}
+
+// ---------------------------------------------------------------------------
+// 语言化与文件树（task-24）
+// ---------------------------------------------------------------------------
+
+const ZH_MARKDOWN_BITS: [&str; 5] = ["# BatchHash 报告", "## 汇总", "## 条目", "生成时间", "路径"];
+
+#[test]
+fn markdown_export_is_localized_by_locale() {
+    let report = sample_report();
+
+    let en = export_report_with(&report, ReportFormat::Markdown, ExportLocale::En)
+        .expect("English Markdown");
+    let zh = export_report_with(&report, ReportFormat::Markdown, ExportLocale::Zh)
+        .expect("Chinese Markdown");
+
+    // 英文输出必须与历史 export_report 完全一致：默认语言不能悄悄改变输出。
+    let historical = export_report(&report, ReportFormat::Markdown).expect("Markdown export");
+    assert_eq!(en, historical);
+
+    assert!(en.starts_with("# BatchHash Report\n"));
+    assert!(en.contains("## Summary"));
+    assert!(en.contains("## Entries"));
+    assert!(en.contains("Generated at"));
+    for bit in ZH_MARKDOWN_BITS {
+        assert!(zh.contains(bit), "missing {bit} in:\n{zh}");
+    }
+    // 列名确实不同，而不是只换了标题。
+    assert!(en.contains("| Path |") || en.contains(" Path | Size |"));
+    assert!(
+        !zh.contains("## Summary"),
+        "zh must not keep the English section"
+    );
+    assert_ne!(en, zh);
+}
+
+#[test]
+fn txt_export_is_localized_and_keeps_machine_formats_english() {
+    let report = sample_report();
+
+    let en = export_report_with(&report, ReportFormat::Txt, ExportLocale::En).expect("English TXT");
+    let zh = export_report_with(&report, ReportFormat::Txt, ExportLocale::Zh).expect("Chinese TXT");
+    assert_eq!(
+        en,
+        export_report(&report, ReportFormat::Txt).expect("TXT export")
+    );
+    assert!(en.starts_with("BatchHash Report\n"));
+    assert!(en.contains("\nSummary\n"));
+    assert!(zh.contains("BatchHash 报告"));
+    assert!(zh.contains("汇总"));
+
+    // JSON / CSV 是机器契约：无论 locale 是什么，输出都必须逐字节相同。
+    for format in [ReportFormat::Json, ReportFormat::Csv] {
+        let with_en = export_report_with(&report, format, ExportLocale::En).expect("en");
+        let with_zh = export_report_with(&report, format, ExportLocale::Zh).expect("zh");
+        assert_eq!(
+            with_en, with_zh,
+            "{format} must stay byte-identical across locales"
+        );
+    }
+}
+
+#[test]
+fn diff_export_is_localized_by_locale() {
+    let left = sample_report();
+    let right = sample_report();
+    let options = DiffOptions::default().with_generated_at("2026-10-20T00:00:00Z");
+    let diff = diff_reports(&left, &right, &options).expect("diff");
+
+    let en = export_diff_with(&diff, ReportFormat::Markdown, ExportLocale::En).expect("en diff");
+    let zh = export_diff_with(&diff, ReportFormat::Markdown, ExportLocale::Zh).expect("zh diff");
+    assert_eq!(
+        en,
+        export_diff(&diff, ReportFormat::Markdown).expect("diff")
+    );
+    assert!(en.starts_with("# BatchHash Diff\n"));
+    assert!(zh.contains("BatchHash 对比"));
+    assert!(zh.contains("对比明细"));
+
+    // Tree 不能表达对比文档。
+    let error = export_diff_with(&diff, ReportFormat::Tree, ExportLocale::Zh).unwrap_err();
+    assert!(matches!(
+        error,
+        ExportError::UnsupportedDiffFormat(ReportFormat::Tree)
+    ));
+}
+
+#[test]
+fn tree_renders_structure_with_ascii_branches() {
+    let mut report = Report::new(
+        "/data/media",
+        RootKind::Fs,
+        false,
+        vec![AlgorithmId::Crc32],
+        HardwareReport::default(),
+    );
+    report.generated_at = "2026-10-20T00:00:00Z".to_string();
+    report.entries = vec![
+        record(
+            "b.mkv",
+            30,
+            vec![(AlgorithmId::Crc32, digest(AlgorithmId::Crc32, '3'))],
+        ),
+        record(
+            "sub/z.mkv",
+            10,
+            vec![(AlgorithmId::Crc32, digest(AlgorithmId::Crc32, '1'))],
+        ),
+        record(
+            "sub/a.mkv",
+            20,
+            vec![(AlgorithmId::Crc32, digest(AlgorithmId::Crc32, '2'))],
+        ),
+    ];
+    report.recompute_summary();
+
+    let tree =
+        export_report_with(&report, ReportFormat::Tree, ExportLocale::En).expect("tree export");
+    let lines: Vec<&str> = tree.lines().collect();
+
+    // 目录在前、同级按名称升序：b.mkv（文件）排在 sub/（目录）之后。
+    assert_eq!(lines[0], "BatchHash Report");
+    assert_eq!(lines[1], "|- sub");
+    assert_eq!(lines[2], "|  |- a.mkv  crc32:22222222");
+    assert_eq!(lines[3], "|  \\- z.mkv  crc32:11111111");
+    assert_eq!(lines[4], "\\- b.mkv  crc32:33333333");
+
+    // 树后用同一套标签渲染汇总。
+    assert!(tree.contains("\nSummary:\n"));
+    assert!(tree.contains("  Total: 3"));
+    assert!(tree.contains("  Total bytes: 60"));
+
+    // 多算法时按报告顺序输出 algo:hash，两个空格分隔。
+    let mut multi = Report::new(
+        "/data/media",
+        RootKind::Fs,
+        false,
+        vec![AlgorithmId::Sha256, AlgorithmId::Blake3],
+        HardwareReport::default(),
+    );
+    multi.generated_at = "2026-10-20T00:00:00Z".to_string();
+    multi.entries = vec![record(
+        "a.mkv",
+        10,
+        vec![
+            (AlgorithmId::Sha256, digest(AlgorithmId::Sha256, 'a')),
+            (AlgorithmId::Blake3, digest(AlgorithmId::Blake3, 'b')),
+        ],
+    )];
+    multi.recompute_summary();
+    let tree = export_report_with(&multi, ReportFormat::Tree, ExportLocale::Zh).expect("tree");
+    assert!(tree.contains("BatchHash 报告"));
+    let expected = format!(
+        "sha256:{}  blake3:{}",
+        digest(AlgorithmId::Sha256, 'a'),
+        digest(AlgorithmId::Blake3, 'b')
+    );
+    assert!(tree.contains(&expected), "tree:\n{tree}");
+    assert!(tree.contains("汇总:"));
+}
+
+#[test]
+fn tree_truncates_at_five_hundred_rows() {
+    let report = big_report(MAX_TABLE_ROWS + 1);
+    let tree = export_report(&report, ReportFormat::Tree).expect("tree export");
+    assert!(tree.contains("Truncated: showing 500 of 501 entries (truncated=true)."));
+    // 平铺目录下最多渲染 500 个文件行。
+    let file_lines = tree.lines().filter(|line| line.contains("crc32:")).count();
+    assert_eq!(file_lines, MAX_TABLE_ROWS);
 }

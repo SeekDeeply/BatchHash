@@ -339,10 +339,19 @@ class BatchHashNative {
       _callList('bh_list_batches', <String, Object?>{'db': db});
 
   /// Re-export a report JSON document in another format.
-  String exportReport({required String reportJson, required String format}) {
+  ///
+  /// [locale] picks the language of the human readable formats. The field is
+  /// only sent when set, so an older native library that does not know it keeps
+  /// working and simply renders English.
+  String exportReport({
+    required String reportJson,
+    required String format,
+    String? locale,
+  }) {
     final data = _callMap('bh_export_report', <String, Object?>{
       'report_json': reportJson,
       'format': format,
+      if (locale != null && locale.isNotEmpty) 'locale': locale,
     });
     return data['text'] as String? ?? '';
   }

@@ -1,9 +1,17 @@
 //! Report export/import formats (report schema v1, project plan §3.6).
 //!
-//! Exports: canonical JSON, RFC 4180 CSV, Markdown, aligned TXT, md5sum and BSD
-//! checksum listings. Imports: JSON, CSV, md5sum and BSD — all untrusted input,
-//! so sizes, entry counts, schema versions and relative paths are validated
-//! before a [`Report`] is handed back to the application.
+//! Exports: canonical JSON, RFC 4180 CSV, Markdown, aligned TXT, md5sum, BSD
+//! checksum listings and the human-oriented file tree. Imports: JSON, CSV,
+//! md5sum and BSD — all untrusted input, so sizes, entry counts, schema
+//! versions and relative paths are validated before a [`Report`] is handed
+//! back to the application.
+//!
+//! # 语言化边界
+//!
+//! Markdown、TXT 和文件树是**给人看**的，接受 [`ExportLocale`]；JSON、CSV、
+//! md5sum、BSD 是**机器契约**，键名与列名恒定英文，不参与语言化。理由：
+//! 这些格式的输出会被 `md5sum -c`、CI 脚本和 FFI/Dart 解析器按固定键名读取，
+//! 翻译任何一个键都是对下游的破坏性变更。
 //!
 //! JSON and CSV exports are canonical: entries are sorted by path, algorithm
 //! columns follow the registry order and JSON hashes follow the report's
@@ -14,11 +22,16 @@ use std::fmt;
 use std::path::Path;
 
 use batchhash_types::{
-    is_hex, validate_relative_path, AlgorithmId, EntryStatus, ErrorKind, HardwareReport, HexCase,
-    Report, ReportEntry, ReportValidationError, RootKind, MAX_IMPORT_BYTES, MAX_IMPORT_ENTRIES,
+    is_hex, validate_relative_path, AlgorithmId, EntryStatus, ErrorKind, HardwareReport, Report,
+    ReportEntry, ReportValidationError, RootKind, MAX_IMPORT_BYTES, MAX_IMPORT_ENTRIES,
     REPORT_SCHEMA_VERSION,
 };
 use indexmap::IndexMap;
+
+use crate::labels::{
+    DiffMetaField, DiffSummaryField, EntryField, ExportLocale, LabelStyle, Labels, MetaField,
+    SummaryField,
+};
 
 /// Maximum number of entries rendered by Markdown and TXT table exports.
 ///
@@ -41,17 +54,26 @@ pub enum ReportFormat {
     Md5sum,
     /// BSD `ALGO (path) = hex` checksum listing.
     Bsd,
+    /// 给人看的缩进文件树；只能导出，不能导入，也不代表对比文档。
+    ///
+    /// 它存在的理由是可读性：Checksum 列表丢掉了目录结构，表格在深目录下
+    /// 也难以扫读。注意它**不是**可再导入的格式，导入端会直接拒绝。
+    Tree,
 }
 
 impl ReportFormat {
     /// Every supported format, in menu order.
-    pub const ALL: [ReportFormat; 6] = [
+    ///
+    /// Tree 排在最后：它是最"人类"的一项，前面的顺序是历史菜单顺序，
+    /// 改动会让设置里保存的下标错位。
+    pub const ALL: [ReportFormat; 7] = [
         ReportFormat::Json,
         ReportFormat::Csv,
         ReportFormat::Markdown,
         ReportFormat::Txt,
         ReportFormat::Md5sum,
         ReportFormat::Bsd,
+        ReportFormat::Tree,
     ];
 
     /// Stable identifier used in diagnostics and settings.
@@ -63,10 +85,14 @@ impl ReportFormat {
             ReportFormat::Txt => "txt",
             ReportFormat::Md5sum => "md5sum",
             ReportFormat::Bsd => "bsd",
+            ReportFormat::Tree => "tree",
         }
     }
 
     /// Conventional lowercase file extension (without the dot).
+    ///
+    /// Tree 复用 `txt`：它同样是人读纯文本，给它单独的扩展名只会让文件管理器
+    /// 无法双击打开。检测时靠内容（树线）而非扩展名区分。
     pub const fn extension(self) -> &'static str {
         match self {
             ReportFormat::Json => "json",
@@ -75,10 +101,15 @@ impl ReportFormat {
             ReportFormat::Txt => "txt",
             ReportFormat::Md5sum => "md5",
             ReportFormat::Bsd => "bsd",
+            ReportFormat::Tree => "txt",
         }
     }
 
     /// Whether [`import_report`] accepts this format.
+    ///
+    /// Tree 不可导入：它是渲染结果而非数据载体，反解析只会引入歧义
+    /// （文件名里含 `|- ` 怎么办、被截断的树怎么区分）。需要可导入的
+    /// 结构化输出请用 JSON 或 CSV。
     pub const fn can_import(self) -> bool {
         matches!(
             self,
@@ -87,10 +118,23 @@ impl ReportFormat {
     }
 
     /// Whether [`export_diff`] can represent a diff document in this format.
+    ///
+    /// Tree 不在此列：树表达的是"一份报告的目录结构"，而对比是两份报告的
+    /// 逐行连接结果，强行塞进树里只会制造没人能解析的混合格式。
     pub const fn can_diff(self) -> bool {
         matches!(
             self,
             ReportFormat::Json | ReportFormat::Csv | ReportFormat::Markdown | ReportFormat::Txt
+        )
+    }
+
+    /// Whether this format is localized for human readers.
+    ///
+    /// 机器格式（JSON / CSV / md5sum / BSD）恒为 `false`，这是契约。
+    pub const fn is_localized(self) -> bool {
+        matches!(
+            self,
+            ReportFormat::Markdown | ReportFormat::Txt | ReportFormat::Tree
         )
     }
 }
@@ -280,7 +324,21 @@ const DIFF_CSV_HEADER: [&str; 13] = [
 /// entries, registry algorithm order), so repeated export of the same report is
 /// byte-identical.
 pub fn export_report(report: &Report, format: ReportFormat) -> Result<String, ExportError> {
+    export_report_with(report, format, ExportLocale::En)
+}
+
+/// Export a report with an explicit display locale.
+///
+/// JSON / CSV / md5sum / BSD 忽略 `locale`：它们的键名是与外部工具和 FFI
+/// 之间的契约，翻译会直接破坏 `md5sum -c`、CI 脚本与 Dart 侧解析器。
+/// 语言化只作用于 Markdown、TXT 与文件树。
+pub fn export_report_with(
+    report: &Report,
+    format: ReportFormat,
+    locale: ExportLocale,
+) -> Result<String, ExportError> {
     let report = canonical_report(report)?;
+    let labels = locale.labels();
     match format {
         ReportFormat::Json => {
             let mut text = serde_json::to_string_pretty(&report)?;
@@ -288,8 +346,9 @@ pub fn export_report(report: &Report, format: ReportFormat) -> Result<String, Ex
             Ok(text)
         }
         ReportFormat::Csv => export_csv(&report),
-        ReportFormat::Markdown => Ok(export_markdown(&report)),
-        ReportFormat::Txt => Ok(export_txt(&report)),
+        ReportFormat::Markdown => Ok(export_markdown(&report, labels)),
+        ReportFormat::Txt => Ok(export_txt(&report, labels)),
+        ReportFormat::Tree => Ok(export_tree(&report, labels)),
         ReportFormat::Md5sum => export_md5sum(&report),
         ReportFormat::Bsd => export_bsd(&report),
     }
@@ -310,7 +369,11 @@ pub fn import_report(bytes: &[u8], format: ReportFormat) -> Result<Report, Impor
         ReportFormat::Csv => import_csv(bytes),
         ReportFormat::Md5sum => import_checksum(bytes, ReportFormat::Md5sum),
         ReportFormat::Bsd => import_checksum(bytes, ReportFormat::Bsd),
-        ReportFormat::Markdown | ReportFormat::Txt => Err(ImportError::UnsupportedFormat(format)),
+        // Tree 是渲染结果，不是数据载体：反解析必须处理"文件名里含树线"
+        // 和"树被截断"两类歧义，代价高于收益。要可导入的结构化输出请用 JSON/CSV。
+        ReportFormat::Markdown | ReportFormat::Txt | ReportFormat::Tree => {
+            Err(ImportError::UnsupportedFormat(format))
+        }
     }
 }
 
@@ -337,6 +400,19 @@ pub fn export_diff(
     diff: &batchhash_types::DiffReport,
     format: ReportFormat,
 ) -> Result<String, ExportError> {
+    export_diff_with(diff, format, ExportLocale::En)
+}
+
+/// Export a diff document with an explicit display locale.
+///
+/// 与 [`export_report_with`] 同样的边界：只有 Markdown / TXT 会用到 `locale`，
+/// JSON / CSV 保持机器契约不翻译。
+pub fn export_diff_with(
+    diff: &batchhash_types::DiffReport,
+    format: ReportFormat,
+    locale: ExportLocale,
+) -> Result<String, ExportError> {
+    let labels = locale.labels();
     match format {
         ReportFormat::Json => {
             let mut text = serde_json::to_string_pretty(diff)?;
@@ -344,9 +420,11 @@ pub fn export_diff(
             Ok(text)
         }
         ReportFormat::Csv => export_diff_csv(diff),
-        ReportFormat::Markdown => Ok(export_diff_markdown(diff)),
-        ReportFormat::Txt => Ok(export_diff_txt(diff)),
-        ReportFormat::Md5sum | ReportFormat::Bsd => Err(ExportError::UnsupportedDiffFormat(format)),
+        ReportFormat::Markdown => Ok(export_diff_markdown(diff, labels)),
+        ReportFormat::Txt => Ok(export_diff_txt(diff, labels)),
+        ReportFormat::Tree | ReportFormat::Md5sum | ReportFormat::Bsd => {
+            Err(ExportError::UnsupportedDiffFormat(format))
+        }
     }
 }
 
@@ -418,58 +496,115 @@ fn export_csv(report: &Report) -> Result<String, ExportError> {
     String::from_utf8(bytes).map_err(|error| ExportError::Csv(error.to_string()))
 }
 
-fn export_markdown(report: &Report) -> String {
+fn export_markdown(report: &Report, labels: &Labels) -> String {
+    let table = LabelStyle::Table;
     let mut out = String::new();
-    out.push_str("# BatchHash Report\n\n");
+    out.push_str("# ");
+    out.push_str(labels.report_title);
+    out.push_str("\n\n");
 
     out.push_str("| Field | Value |\n| --- | --- |\n");
-    push_markdown_row(&mut out, "Generated at", &report.generated_at);
-    push_markdown_row(&mut out, "Tool", &report.tool);
-    push_markdown_row(&mut out, "Tool version", &report.tool_version);
     push_markdown_row(
         &mut out,
-        "Schema version",
+        labels.meta(MetaField::GeneratedAt, table),
+        &report.generated_at,
+    );
+    push_markdown_row(&mut out, labels.meta(MetaField::Tool, table), &report.tool);
+    push_markdown_row(
+        &mut out,
+        labels.meta(MetaField::ToolVersion, table),
+        &report.tool_version,
+    );
+    push_markdown_row(
+        &mut out,
+        labels.meta(MetaField::SchemaVersion, table),
         &report.schema_version.to_string(),
     );
-    push_markdown_row(&mut out, "Root", &report.root);
-    push_markdown_row(&mut out, "Root kind", report.root_kind.as_str());
-    push_markdown_row(&mut out, "Case sensitive", bool_str(report.case_sensitive));
-    push_markdown_row(&mut out, "Algorithms", &algorithm_list(&report.algorithms));
+    push_markdown_row(&mut out, labels.meta(MetaField::Root, table), &report.root);
     push_markdown_row(
         &mut out,
-        "Suffix algorithm",
+        labels.meta(MetaField::RootKind, table),
+        report.root_kind.as_str(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.meta(MetaField::CaseSensitive, table),
+        labels.boolean(report.case_sensitive),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.meta(MetaField::Algorithms, table),
+        &algorithm_list(&report.algorithms),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.meta(MetaField::SuffixAlgorithm, table),
         report.suffix_config.algorithm.stable_id(),
     );
     push_markdown_row(
         &mut out,
-        "Suffix length",
+        labels.meta(MetaField::SuffixLength, table),
         &report.suffix_config.length.to_string(),
     );
     push_markdown_row(
         &mut out,
-        "Suffix case",
-        match report.suffix_config.case {
-            HexCase::Upper => "upper",
-            HexCase::Lower => "lower",
-        },
+        labels.meta(MetaField::SuffixCase, table),
+        labels.hex_case(report.suffix_config.case),
     );
 
-    out.push_str("\n## Summary\n\n");
+    out.push_str("\n## ");
+    out.push_str(labels.summary_section);
+    out.push_str("\n\n");
     out.push_str("| Metric | Value |\n| --- | --- |\n");
-    push_markdown_row(&mut out, "Total", &report.summary.total.to_string());
-    push_markdown_row(&mut out, "Ok", &report.summary.ok.to_string());
-    push_markdown_row(&mut out, "Failed", &report.summary.failed.to_string());
-    push_markdown_row(&mut out, "Skipped", &report.summary.skipped.to_string());
     push_markdown_row(
         &mut out,
-        "Total bytes",
+        labels.summary(SummaryField::Total, table),
+        &report.summary.total.to_string(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.summary(SummaryField::Ok, table),
+        &report.summary.ok.to_string(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.summary(SummaryField::Failed, table),
+        &report.summary.failed.to_string(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.summary(SummaryField::Skipped, table),
+        &report.summary.skipped.to_string(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.summary(SummaryField::TotalBytes, table),
         &report.summary.total_bytes.to_string(),
     );
-    push_markdown_row(&mut out, "Truncated", bool_str(report.summary.truncated));
+    push_markdown_row(
+        &mut out,
+        labels.summary(SummaryField::Truncated, table),
+        labels.boolean(report.summary.truncated),
+    );
 
-    out.push_str("\n## Entries\n\n");
+    out.push_str("\n## ");
+    out.push_str(labels.entries_section);
+    out.push_str("\n\n");
     out.push('|');
-    out.push_str(" Path | Size | Mtime | Status | Error kind | Suffix applied | Suffix algorithm | Renamed to |");
+    for field in [
+        EntryField::Path,
+        EntryField::Size,
+        EntryField::Mtime,
+        EntryField::Status,
+        EntryField::ErrorKind,
+        EntryField::SuffixApplied,
+        EntryField::SuffixAlgorithm,
+        EntryField::RenamedTo,
+    ] {
+        out.push(' ');
+        out.push_str(labels.entry(field, table));
+        out.push_str(" |");
+    }
     for algorithm in &report.algorithms {
         out.push(' ');
         out.push_str(algorithm.stable_id());
@@ -493,7 +628,7 @@ fn export_markdown(report: &Report) -> String {
         out.push_str(" | ");
         out.push_str(&markdown_cell(entry.mtime.as_deref().unwrap_or("")));
         out.push_str(" | ");
-        out.push_str(entry_status_str(entry.status));
+        out.push_str(labels.status(entry.status));
         out.push_str(" | ");
         out.push_str(&markdown_cell(
             entry.error_kind.map(ErrorKind::as_str).unwrap_or(""),
@@ -526,7 +661,7 @@ fn export_markdown(report: &Report) -> String {
         out.push('\n');
     }
 
-    if let Some(note) = truncation_note(report.entries.len()) {
+    if let Some(note) = truncation_note(labels, report.entries.len()) {
         out.push('\n');
         out.push_str("> ");
         out.push_str(&note);
@@ -535,99 +670,169 @@ fn export_markdown(report: &Report) -> String {
     out
 }
 
-fn export_txt(report: &Report) -> String {
+fn export_txt(report: &Report, labels: &Labels) -> String {
+    let text = LabelStyle::Text;
     let mut out = String::new();
-    out.push_str("BatchHash Report\n");
-    out.push_str("================\n");
-    push_txt_line(&mut out, "tool", &report.tool);
-    push_txt_line(&mut out, "tool_version", &report.tool_version);
+    let title = labels.report_title;
+    out.push_str(title);
+    out.push('\n');
+    // 下划线长度按标题的**显示宽度**算：中文标题按字符数会明显偏短，
+    // 用 `chars().count()` 得到的宽字符数在等宽字体下约为实际宽度的一半，
+    // 所以按字符数补足后至少和英文观感一致，不会短于标题本身。
+    out.push_str(&"=".repeat(title.chars().count()));
+    out.push('\n');
+    push_txt_line(&mut out, labels.meta(MetaField::Tool, text), &report.tool);
     push_txt_line(
         &mut out,
-        "schema_version",
+        labels.meta(MetaField::ToolVersion, text),
+        &report.tool_version,
+    );
+    push_txt_line(
+        &mut out,
+        labels.meta(MetaField::SchemaVersion, text),
         &report.schema_version.to_string(),
     );
-    push_txt_line(&mut out, "generated_at", &report.generated_at);
-    push_txt_line(&mut out, "root", &report.root);
-    push_txt_line(&mut out, "root_kind", report.root_kind.as_str());
-    push_txt_line(&mut out, "case_sensitive", bool_str(report.case_sensitive));
-    push_txt_line(&mut out, "algorithms", &algorithm_list(&report.algorithms));
     push_txt_line(
         &mut out,
-        "suffix_algorithm",
+        labels.meta(MetaField::GeneratedAt, text),
+        &report.generated_at,
+    );
+    push_txt_line(&mut out, labels.meta(MetaField::Root, text), &report.root);
+    push_txt_line(
+        &mut out,
+        labels.meta(MetaField::RootKind, text),
+        report.root_kind.as_str(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.meta(MetaField::CaseSensitive, text),
+        labels.boolean(report.case_sensitive),
+    );
+    push_txt_line(
+        &mut out,
+        labels.meta(MetaField::Algorithms, text),
+        &algorithm_list(&report.algorithms),
+    );
+    push_txt_line(
+        &mut out,
+        labels.meta(MetaField::SuffixAlgorithm, text),
         report.suffix_config.algorithm.stable_id(),
     );
     push_txt_line(
         &mut out,
-        "suffix_length",
+        labels.meta(MetaField::SuffixLength, text),
         &report.suffix_config.length.to_string(),
     );
 
     out.push('\n');
-    out.push_str("Summary\n");
-    out.push_str("-------\n");
-    push_txt_line(&mut out, "total", &report.summary.total.to_string());
-    push_txt_line(&mut out, "ok", &report.summary.ok.to_string());
-    push_txt_line(&mut out, "failed", &report.summary.failed.to_string());
-    push_txt_line(&mut out, "skipped", &report.summary.skipped.to_string());
+    let summary_section = labels.summary_section;
+    out.push_str(summary_section);
+    out.push('\n');
+    out.push_str(&"-".repeat(summary_section.chars().count()));
+    out.push('\n');
     push_txt_line(
         &mut out,
-        "total_bytes",
+        labels.summary(SummaryField::Total, text),
+        &report.summary.total.to_string(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.summary(SummaryField::Ok, text),
+        &report.summary.ok.to_string(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.summary(SummaryField::Failed, text),
+        &report.summary.failed.to_string(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.summary(SummaryField::Skipped, text),
+        &report.summary.skipped.to_string(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.summary(SummaryField::TotalBytes, text),
         &report.summary.total_bytes.to_string(),
     );
-    push_txt_line(&mut out, "truncated", bool_str(report.summary.truncated));
+    push_txt_line(
+        &mut out,
+        labels.summary(SummaryField::Truncated, text),
+        labels.boolean(report.summary.truncated),
+    );
 
     out.push('\n');
-    out.push_str("Entries\n");
-    out.push_str("-------\n");
+    let entries_section = labels.entries_section;
+    out.push_str(entries_section);
+    out.push('\n');
+    out.push_str(&"-".repeat(entries_section.chars().count()));
+    out.push('\n');
 
-    let mut labels: Vec<&str> = vec![
-        "path",
-        "size",
-        "mtime",
-        "status",
-        "error_kind",
-        "suffix_applied",
-        "suffix_algorithm",
-        "renamed_to",
+    let entry_fields = [
+        EntryField::Path,
+        EntryField::Size,
+        EntryField::Mtime,
+        EntryField::Status,
+        EntryField::ErrorKind,
+        EntryField::SuffixApplied,
+        EntryField::SuffixAlgorithm,
+        EntryField::RenamedTo,
     ];
-    labels.extend(
+    let mut width = entry_fields
+        .iter()
+        .map(|field| labels.entry(*field, text).chars().count())
+        .max()
+        .unwrap_or(0);
+    width = width.max(
         report
             .algorithms
             .iter()
-            .map(|algorithm| algorithm.stable_id()),
+            .map(|algorithm| algorithm.stable_id().chars().count())
+            .max()
+            .unwrap_or(0),
     );
-    let width = labels
-        .iter()
-        .map(|label| label.chars().count())
-        .max()
-        .unwrap_or(0);
 
     let rendered = report.entries.len().min(MAX_TABLE_ROWS);
     for entry in report.entries.iter().take(rendered) {
-        push_txt_aligned(&mut out, "path", &entry.path, width);
-        push_txt_aligned(&mut out, "size", &entry.size.to_string(), width);
         push_txt_aligned(
             &mut out,
-            "mtime",
+            labels.entry(EntryField::Path, text),
+            &entry.path,
+            width,
+        );
+        push_txt_aligned(
+            &mut out,
+            labels.entry(EntryField::Size, text),
+            &entry.size.to_string(),
+            width,
+        );
+        push_txt_aligned(
+            &mut out,
+            labels.entry(EntryField::Mtime, text),
             entry.mtime.as_deref().unwrap_or(""),
             width,
         );
-        push_txt_aligned(&mut out, "status", entry_status_str(entry.status), width);
         push_txt_aligned(
             &mut out,
-            "error_kind",
+            labels.entry(EntryField::Status, text),
+            labels.status(entry.status),
+            width,
+        );
+        push_txt_aligned(
+            &mut out,
+            labels.entry(EntryField::ErrorKind, text),
             entry.error_kind.map(ErrorKind::as_str).unwrap_or(""),
             width,
         );
         push_txt_aligned(
             &mut out,
-            "suffix_applied",
+            labels.entry(EntryField::SuffixApplied, text),
             entry.suffix_applied.as_deref().unwrap_or(""),
             width,
         );
         push_txt_aligned(
             &mut out,
-            "suffix_algorithm",
+            labels.entry(EntryField::SuffixAlgorithm, text),
             entry
                 .suffix_algorithm
                 .map(AlgorithmId::stable_id)
@@ -636,7 +841,7 @@ fn export_txt(report: &Report) -> String {
         );
         push_txt_aligned(
             &mut out,
-            "renamed_to",
+            labels.entry(EntryField::RenamedTo, text),
             entry.renamed_to.as_deref().unwrap_or(""),
             width,
         );
@@ -655,7 +860,7 @@ fn export_txt(report: &Report) -> String {
         out.push('\n');
     }
 
-    if let Some(note) = truncation_note(report.entries.len()) {
+    if let Some(note) = truncation_note(labels, report.entries.len()) {
         out.push_str(&note);
         out.push('\n');
     }
@@ -1194,32 +1399,77 @@ fn export_diff_csv(diff: &batchhash_types::DiffReport) -> Result<String, ExportE
     String::from_utf8(bytes).map_err(|error| ExportError::Csv(error.to_string()))
 }
 
-fn export_diff_markdown(diff: &batchhash_types::DiffReport) -> String {
+fn export_diff_markdown(diff: &batchhash_types::DiffReport, labels: &Labels) -> String {
+    let table = LabelStyle::Table;
     let mut out = String::new();
-    out.push_str("# BatchHash Diff\n\n");
+    out.push_str("# ");
+    out.push_str(labels.diff_title);
+    out.push_str("\n\n");
     out.push_str("| Field | Value |\n| --- | --- |\n");
-    push_markdown_row(&mut out, "Generated at", &diff.generated_at);
-    push_markdown_row(&mut out, "Schema version", &diff.schema_version.to_string());
-    push_markdown_row(&mut out, "Mode", diff_mode_str(diff.strategy.mode));
     push_markdown_row(
         &mut out,
-        "Case sensitive",
-        bool_str(diff.strategy.case_sensitive),
+        labels.diff_meta(DiffMetaField::GeneratedAt, table),
+        &diff.generated_at,
     );
     push_markdown_row(
         &mut out,
-        "Algorithms compared",
+        labels.diff_meta(DiffMetaField::SchemaVersion, table),
+        &diff.schema_version.to_string(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.diff_meta(DiffMetaField::Mode, table),
+        diff_mode_str(diff.strategy.mode),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.diff_meta(DiffMetaField::CaseSensitive, table),
+        labels.boolean(diff.strategy.case_sensitive),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.diff_meta(DiffMetaField::AlgorithmsCompared, table),
         &algorithm_list(&diff.strategy.algorithms_compared),
     );
-    push_markdown_row(&mut out, "Left", &diff.strategy.left.label);
-    push_markdown_row(&mut out, "Right", &diff.strategy.right.label);
-    push_markdown_row(&mut out, "Total", &diff.summary.total.to_string());
-    push_markdown_row(&mut out, "Changed", &diff.summary.changed.to_string());
-    push_markdown_row(&mut out, "Added", &diff.summary.added.to_string());
-    push_markdown_row(&mut out, "Removed", &diff.summary.removed.to_string());
-    push_markdown_row(&mut out, "Incomplete", bool_str(diff.summary.incomplete));
+    push_markdown_row(
+        &mut out,
+        labels.diff_meta(DiffMetaField::Left, table),
+        &diff.strategy.left.label,
+    );
+    push_markdown_row(
+        &mut out,
+        labels.diff_meta(DiffMetaField::Right, table),
+        &diff.strategy.right.label,
+    );
+    push_markdown_row(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Total, table),
+        &diff.summary.total.to_string(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Changed, table),
+        &diff.summary.changed.to_string(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Added, table),
+        &diff.summary.added.to_string(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Removed, table),
+        &diff.summary.removed.to_string(),
+    );
+    push_markdown_row(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Incomplete, table),
+        labels.boolean(diff.summary.incomplete),
+    );
 
-    out.push_str("\n## Rows\n\n");
+    out.push_str("\n## ");
+    out.push_str(labels.diff_rows_section);
+    out.push_str("\n\n");
     out.push_str("| Key | Status | Reason | Changed algorithms | Left path | Left size | Right path | Right size |\n");
     out.push_str("| --- | --- | --- | --- | --- | --- | --- | --- |\n");
     let rendered = diff.rows.len().min(MAX_TABLE_ROWS);
@@ -1262,7 +1512,7 @@ fn export_diff_markdown(diff: &batchhash_types::DiffReport) -> String {
         );
         out.push_str(" |\n");
     }
-    if let Some(note) = truncation_note(diff.rows.len()) {
+    if let Some(note) = truncation_note(labels, diff.rows.len()) {
         out.push('\n');
         out.push_str("> ");
         out.push_str(&note);
@@ -1271,29 +1521,76 @@ fn export_diff_markdown(diff: &batchhash_types::DiffReport) -> String {
     out
 }
 
-fn export_diff_txt(diff: &batchhash_types::DiffReport) -> String {
+fn export_diff_txt(diff: &batchhash_types::DiffReport, labels: &Labels) -> String {
+    let text = LabelStyle::Text;
     let mut out = String::new();
-    out.push_str("BatchHash Diff\n");
-    out.push_str("==============\n");
-    push_txt_line(&mut out, "generated_at", &diff.generated_at);
-    push_txt_line(&mut out, "schema_version", &diff.schema_version.to_string());
-    push_txt_line(&mut out, "mode", diff_mode_str(diff.strategy.mode));
+    let title = labels.diff_title;
+    out.push_str(title);
+    out.push('\n');
+    out.push_str(&"=".repeat(title.chars().count()));
+    out.push('\n');
     push_txt_line(
         &mut out,
-        "algorithms_compared",
+        labels.diff_meta(DiffMetaField::GeneratedAt, text),
+        &diff.generated_at,
+    );
+    push_txt_line(
+        &mut out,
+        labels.diff_meta(DiffMetaField::SchemaVersion, text),
+        &diff.schema_version.to_string(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.diff_meta(DiffMetaField::Mode, text),
+        diff_mode_str(diff.strategy.mode),
+    );
+    push_txt_line(
+        &mut out,
+        labels.diff_meta(DiffMetaField::AlgorithmsCompared, text),
         &algorithm_list(&diff.strategy.algorithms_compared),
     );
-    push_txt_line(&mut out, "left", &diff.strategy.left.label);
-    push_txt_line(&mut out, "right", &diff.strategy.right.label);
-    push_txt_line(&mut out, "total", &diff.summary.total.to_string());
-    push_txt_line(&mut out, "changed", &diff.summary.changed.to_string());
-    push_txt_line(&mut out, "added", &diff.summary.added.to_string());
-    push_txt_line(&mut out, "removed", &diff.summary.removed.to_string());
-    push_txt_line(&mut out, "incomplete", bool_str(diff.summary.incomplete));
+    push_txt_line(
+        &mut out,
+        labels.diff_meta(DiffMetaField::Left, text),
+        &diff.strategy.left.label,
+    );
+    push_txt_line(
+        &mut out,
+        labels.diff_meta(DiffMetaField::Right, text),
+        &diff.strategy.right.label,
+    );
+    push_txt_line(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Total, text),
+        &diff.summary.total.to_string(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Changed, text),
+        &diff.summary.changed.to_string(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Added, text),
+        &diff.summary.added.to_string(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Removed, text),
+        &diff.summary.removed.to_string(),
+    );
+    push_txt_line(
+        &mut out,
+        labels.diff_summary(DiffSummaryField::Incomplete, text),
+        labels.boolean(diff.summary.incomplete),
+    );
 
     out.push('\n');
-    out.push_str("Rows\n");
-    out.push_str("----\n");
+    let rows_section = labels.diff_rows_section;
+    out.push_str(rows_section);
+    out.push('\n');
+    out.push_str(&"-".repeat(rows_section.chars().count()));
+    out.push('\n');
     let width = 11;
     let rendered = diff.rows.len().min(MAX_TABLE_ROWS);
     for row in diff.rows.iter().take(rendered) {
@@ -1326,13 +1623,215 @@ fn export_diff_txt(diff: &batchhash_types::DiffReport) -> String {
         );
         out.push('\n');
     }
-    if let Some(note) = truncation_note(diff.rows.len()) {
+    if let Some(note) = truncation_note(labels, diff.rows.len()) {
         out.push_str(&note);
         out.push('\n');
     }
     out
 }
 
+/// 文件树渲染。
+///
+/// 设计取舍：树线用 **ASCII**（`|- `、`\- `、`|  `、`   `）而不是 Unicode 制表符。
+/// 理由是树会出现在 Windows 控制台、CI 日志、SSH 会话和 diff 工具里，
+/// 其中任何一个环节编码没对齐都会把制表符变成乱码方块；ASCII 在所有场景下
+/// 都能正确显示，视觉损失极小。
+///
+/// 这套规则与 Dart 侧测试替身 app/lib/src/services/report_rendering.dart 的
+/// renderReportTree **严格一致**（缩进两空格、目录先于文件、同级按名称升序、
+/// 四种 ASCII 前缀、多摘要用两个空格分隔），**改动必须两边同步**，
+/// 否则 widget 测试看到的结构会和真实产物漂移。
+fn export_tree(report: &Report, labels: &Labels) -> String {
+    // 截断发生在建树阶段而不是渲染阶段：entries 已按 path 排序，取前
+    // MAX_TABLE_ROWS 个就是稳定的前缀截断，且不会出现"目录还在、子项被砍光"
+    // 的半截子树。总条数超过上限时另行追加截断提示。
+    let mut root = TreeNode::default();
+    let mut inserted = 0usize;
+    for (index, entry) in report.entries.iter().enumerate() {
+        if inserted >= MAX_TABLE_ROWS {
+            break;
+        }
+        let relative = relative_to_root(&entry.path, &report.root);
+        if relative.is_empty() {
+            continue;
+        }
+        let segments: Vec<&str> = relative.split('/').filter(|s| !s.is_empty()).collect();
+        root.insert(&segments, index);
+        inserted += 1;
+    }
+
+    let mut out = String::new();
+    out.push_str(labels.report_title);
+    out.push('\n');
+    render_tree_children(&mut out, &root, &[], report, labels);
+
+    out.push('\n');
+    render_tree_summary(&mut out, report, labels);
+
+    if let Some(note) = truncation_note(labels, report.entries.len()) {
+        out.push_str(&note);
+        out.push('\n');
+    }
+    out
+}
+
+/// 路径相对根目录的部分；不在根下时原样返回。
+///
+/// 报告 root 可能为空（校验和格式导入的结果），也可能带尾部分隔符，
+/// 所以这里按“归一化后去掉根前缀”处理，而不是假设某个固定形状。
+fn relative_to_root(path: &str, root: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    if root.is_empty() {
+        return normalized;
+    }
+    let root = root.replace('\\', "/");
+    let root = root.trim_end_matches('/');
+    if normalized == root {
+        return String::new();
+    }
+    match normalized.strip_prefix(root) {
+        Some(rest) => rest.trim_start_matches('/').to_string(),
+        None => normalized,
+    }
+}
+
+/// 树的一个节点；目录本身不带条目，叶子通过下标引用 Report.entries。
+#[derive(Debug, Default)]
+struct TreeNode {
+    name: String,
+    is_directory: bool,
+    entry_index: Option<usize>,
+    children: std::collections::BTreeMap<String, TreeNode>,
+}
+
+impl TreeNode {
+    fn insert(&mut self, segments: &[&str], entry_index: usize) {
+        let Some((head, rest)) = segments.split_first() else {
+            return;
+        };
+        let child = self.children.entry((*head).to_string()).or_default();
+        child.name = (*head).to_string();
+        if rest.is_empty() {
+            // 只有当该节点还没有子节点时才降级为叶子：同名目录先到的情况
+            // （"a" 与 "a/b"）必须保留目录身份，否则子树会被整个丢掉。
+            if child.children.is_empty() {
+                child.is_directory = false;
+            }
+            child.entry_index = Some(entry_index);
+        } else {
+            child.is_directory = true;
+            child.insert(rest, entry_index);
+        }
+    }
+
+    /// 目录在前、文件在后，同类按名称升序。
+    fn sorted_children(&self) -> Vec<&TreeNode> {
+        let mut children: Vec<&TreeNode> = self.children.values().collect();
+        children.sort_by(
+            |left, right| match (left.is_directory, right.is_directory) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => left.name.cmp(&right.name),
+            },
+        );
+        children
+    }
+}
+
+/// 子节点的分支前缀：末项无后续，其余带垂线。
+fn tree_branch(is_last: bool) -> &'static str {
+    if is_last {
+        "\\- "
+    } else {
+        "|- "
+    }
+}
+
+/// 子节点后代要重复的前缀：父级还有兄弟时画垂线，否则留空白。
+fn tree_continuation(is_last: bool) -> &'static str {
+    if is_last {
+        "   "
+    } else {
+        "|  "
+    }
+}
+
+/// 递归渲染一层子节点；ancestors_are_last 记录每一级祖先是否为末项。
+fn render_tree_children(
+    out: &mut String,
+    node: &TreeNode,
+    ancestors_are_last: &[bool],
+    report: &Report,
+    labels: &Labels,
+) {
+    let children = node.sorted_children();
+    for (index, child) in children.iter().enumerate() {
+        let is_last = index + 1 == children.len();
+        for ancestor_last in ancestors_are_last {
+            out.push_str(tree_continuation(*ancestor_last));
+        }
+        out.push_str(tree_branch(is_last));
+        if child.is_directory {
+            out.push_str(&child.name);
+            out.push('\n');
+            let mut next = ancestors_are_last.to_vec();
+            next.push(is_last);
+            render_tree_children(out, child, &next, report, labels);
+        } else {
+            out.push_str(&child.name);
+            if let Some(entry) = child.entry_index.and_then(|i| report.entries.get(i)) {
+                let digests = tree_digest_columns(entry, &report.algorithms);
+                if !digests.is_empty() {
+                    out.push_str("  ");
+                    out.push_str(&digests);
+                }
+                if let Some(note) = labels.status_note(entry.status) {
+                    out.push_str("  ");
+                    out.push_str(note);
+                }
+            }
+            out.push('\n');
+        }
+    }
+}
+
+/// 按报告声明的算法顺序拼 algo:hash，两空格分隔。
+///
+/// 顺序取自报告而非 map：同一份报告两次渲染必须逐字节一致。
+fn tree_digest_columns(entry: &ReportEntry, algorithms: &[AlgorithmId]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for algorithm in algorithms {
+        if let Some(digest) = entry.hashes.get(algorithm) {
+            if !digest.is_empty() {
+                parts.push(format!("{}:{}", algorithm.stable_id(), digest));
+            }
+        }
+    }
+    parts.join("  ")
+}
+
+/// 树尾部的汇总块，标签与表格导出共用同一套。
+///
+/// 计数直接读 summary 而不是重新扫描 entries：报告在导出前已通过 validate()，
+/// 两者必然一致，重扫只会让两处逻辑有机会走偏。
+fn render_tree_summary(out: &mut String, report: &Report, labels: &Labels) {
+    out.push_str(labels.summary_section);
+    out.push_str(":\n");
+    let rows = [
+        (SummaryField::Total, report.summary.total),
+        (SummaryField::Ok, report.summary.ok),
+        (SummaryField::Failed, report.summary.failed),
+        (SummaryField::Skipped, report.summary.skipped),
+        (SummaryField::TotalBytes, report.summary.total_bytes),
+    ];
+    for (field, value) in rows {
+        out.push_str("  ");
+        out.push_str(labels.tree_summary(field));
+        out.push_str(": ");
+        out.push_str(&value.to_string());
+        out.push('\n');
+    }
+}
 fn sniff_report_format(bytes: &[u8]) -> Option<ReportFormat> {
     let text = std::str::from_utf8(bytes).ok()?;
     let trimmed = text.trim_start_matches('\u{feff}').trim_start();
@@ -1410,12 +1909,9 @@ fn markdown_cell(value: &str) -> String {
         .replace(['\r', '\n'], " ")
 }
 
-fn truncation_note(total: usize) -> Option<String> {
+fn truncation_note(labels: &Labels, total: usize) -> Option<String> {
     if total > MAX_TABLE_ROWS {
-        Some(format!(
-            "Truncated: showing {} of {} entries (truncated=true).",
-            MAX_TABLE_ROWS, total
-        ))
+        Some(labels.truncation(MAX_TABLE_ROWS, total))
     } else {
         None
     }
@@ -1445,14 +1941,6 @@ fn diff_mode_str(mode: batchhash_types::DiffMode) -> &'static str {
     }
 }
 
-fn bool_str(value: bool) -> &'static str {
-    if value {
-        "true"
-    } else {
-        "false"
-    }
-}
-
 fn record_field(record: &csv::StringRecord, index: Option<usize>) -> &str {
     index
         .and_then(|position| record.get(position))
@@ -1476,14 +1964,37 @@ mod tests {
         for format in ReportFormat::ALL {
             assert_eq!(
                 format.can_import(),
-                !matches!(format, ReportFormat::Markdown | ReportFormat::Txt)
+                !matches!(
+                    format,
+                    ReportFormat::Markdown | ReportFormat::Txt | ReportFormat::Tree
+                ),
+                "{format} import capability"
             );
             assert_eq!(
                 format.can_diff(),
-                !matches!(format, ReportFormat::Md5sum | ReportFormat::Bsd)
+                !matches!(
+                    format,
+                    ReportFormat::Md5sum | ReportFormat::Bsd | ReportFormat::Tree
+                ),
+                "{format} diff capability"
             );
             assert!(!format.as_str().is_empty());
             assert!(!format.extension().is_empty());
+        }
+    }
+
+    #[test]
+    fn only_human_formats_are_localized() {
+        // 机器格式的键名是与 coreutils / CI / FFI 的契约，翻译即破坏性变更。
+        for format in ReportFormat::ALL {
+            assert_eq!(
+                format.is_localized(),
+                matches!(
+                    format,
+                    ReportFormat::Markdown | ReportFormat::Txt | ReportFormat::Tree
+                ),
+                "{format} localization"
+            );
         }
     }
 

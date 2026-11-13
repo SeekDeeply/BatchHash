@@ -291,6 +291,7 @@ class LoggingBatchHashService implements BatchHashService {
     required ReportModel report,
     required Set<ReportFormat> formats,
     String? directory,
+    String? locale,
   }) {
     return _record(
       'op.export',
@@ -298,6 +299,7 @@ class LoggingBatchHashService implements BatchHashService {
         report: report,
         formats: formats,
         directory: directory,
+        locale: locale,
       ),
       detail: (List<ExportedReport> files) => '${files.length}',
     );

@@ -1,6 +1,7 @@
 import '../models/models.dart';
 import '../platform/rendering_hardware.dart';
 import 'batch_hash_service.dart';
+import 'report_rendering.dart';
 
 /// Raised when the fake is asked to scan a path it does not model.
 ///
@@ -356,12 +357,32 @@ class FakeBatchHashService implements BatchHashService {
     );
   }
 
+  /// Locale handed to the most recent export, or null when the caller omitted
+  /// it. Lets a widget test prove the page forwards the active UI language.
+  String? lastExportLocale;
+
+  /// Rendered text of the most recent export, keyed by format name.
+  ///
+  /// The fake writes no files, so without this a test could only assert that
+  /// a path came back; it could never look at what a format actually renders.
+  final Map<String, String> lastExportContents = <String, String>{};
+
   @override
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,
     String? directory,
+    String? locale,
   }) async {
+    lastExportLocale = locale;
+    lastExportContents.clear();
+    for (final ReportFormat format in formats) {
+      lastExportContents[format.name] = renderReport(
+        report,
+        format,
+        locale: locale,
+      );
+    }
     // Without an explicit directory the real service writes into the user's
     // exports folder rather than the repo or the system temp dir; the fake
     // reports an equivalent placeholder path so the UI sees the same shape.

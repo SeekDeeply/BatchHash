@@ -36,11 +36,13 @@
 
 pub mod diff;
 pub mod format;
+pub mod labels;
 pub mod pathnorm;
 
 pub use diff::{diff_report_vs_entries, diff_reports, DiffOptions, StreamingDiff};
 pub use format::{
-    detect_report_format, export_diff, export_report, import_report, ExportError, ImportError,
-    ReportFormat,
+    detect_report_format, export_diff, export_diff_with, export_report, export_report_with,
+    import_report, ExportError, ImportError, ReportFormat,
 };
+pub use labels::{EntryField, ExportLocale, LabelStyle, Labels, MetaField, SummaryField};
 pub use pathnorm::{NormalizeError, NormalizeMode, PathNormalizer};

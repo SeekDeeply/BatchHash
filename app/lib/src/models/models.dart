@@ -596,13 +596,18 @@ enum DiffStatus {
 enum AccelerationState { detected, softwareFallback, unknown }
 
 /// Report export and import formats supported by the core.
+///
+/// The declaration order is the order the UI lists the formats in, so new
+/// values are appended after the existing ones and never inserted in between.
+/// [ReportFormat.name] is the wire value the native layer parses.
 enum ReportFormat {
   json,
   csv,
   markdown,
   txt,
   md5sum,
-  bsd;
+  bsd,
+  tree;
 
   String get label => switch (this) {
     ReportFormat.json => 'JSON',
@@ -611,8 +616,14 @@ enum ReportFormat {
     ReportFormat.txt => 'TXT',
     ReportFormat.md5sum => 'md5sum',
     ReportFormat.bsd => 'BSD',
+    ReportFormat.tree => 'Tree',
   };
 
+  /// English fallback copy.
+  ///
+  /// The pages render localized descriptions from the string table
+  /// (`report.format.<name>`); this getter only exists for callers that have no
+  /// `BuildContext`, such as logs and error messages.
   String get description => switch (this) {
     ReportFormat.json =>
       'Canonical machine readable report with a schema version.',
@@ -621,8 +632,13 @@ enum ReportFormat {
     ReportFormat.txt => 'Aligned plain text, truncated at 500 rows.',
     ReportFormat.md5sum => 'GNU coreutils compatible digest list.',
     ReportFormat.bsd => 'BSD style digest list.',
+    ReportFormat.tree => 'Indented directory tree with each file digest.',
   };
 
+  /// Suffix used for the exported file name.
+  ///
+  /// [ReportFormat.tree] shares `txt` with [ReportFormat.txt]: both are plain
+  /// text a person reads, and the core reports the same extension for them.
   String get fileExtension => switch (this) {
     ReportFormat.json => 'json',
     ReportFormat.csv => 'csv',
@@ -630,7 +646,64 @@ enum ReportFormat {
     ReportFormat.txt => 'txt',
     ReportFormat.md5sum => 'md5',
     ReportFormat.bsd => 'bsd',
+    ReportFormat.tree => 'txt',
   };
+
+  /// Whether the core can read this format back into a report.
+  ///
+  /// Mirrors `ReportFormat::can_import` in the core: only the structured and
+  /// checksum formats round-trip. Markdown and TXT are renderings (they
+  /// truncate and they lose fields), and Tree is a drawn view, so none of the
+  /// three may be offered as an import source.
+  bool get canImport => switch (this) {
+    ReportFormat.json => true,
+    ReportFormat.csv => true,
+    ReportFormat.markdown => false,
+    ReportFormat.txt => false,
+    ReportFormat.md5sum => true,
+    ReportFormat.bsd => true,
+    ReportFormat.tree => false,
+  };
+
+  /// Whether the text of this format depends on the export `locale`.
+  ///
+  /// The machine formats keep fixed English keys and columns whatever the UI
+  /// language is: translating them would break every consumer that parses them.
+  /// Only the human readable renderings follow the locale.
+  bool get isLocalized => switch (this) {
+    ReportFormat.json => false,
+    ReportFormat.csv => false,
+    ReportFormat.markdown => true,
+    ReportFormat.txt => true,
+    ReportFormat.md5sum => false,
+    ReportFormat.bsd => false,
+    ReportFormat.tree => true,
+  };
+
+  /// Parse a wire name or a file extension.
+  ///
+  /// Accepts the enum name (`tree`), the core's format string (the same value)
+  /// and the file extension (`md`, `txt`). The Markdown alias `md` is
+  /// included because the native parser accepts it too.
+  static ReportFormat? fromName(String? value) {
+    final String name = (value ?? '').trim().toLowerCase();
+    if (name.isEmpty) {
+      return null;
+    }
+    for (final ReportFormat format in ReportFormat.values) {
+      if (format.name == name) {
+        return format;
+      }
+    }
+    // Extensions are not unique across formats (txt and tree share one), so
+    // the exact wire name is always tried first.
+    for (final ReportFormat format in ReportFormat.values) {
+      if (format.fileExtension == name) {
+        return format;
+      }
+    }
+    return name == 'md' ? ReportFormat.markdown : null;
+  }
 }
 
 /// One scanned or hashed file.

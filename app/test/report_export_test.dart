@@ -35,14 +35,17 @@ class _FixedExportService extends FakeBatchHashService {
 
   final List<ExportedReport> written;
   String? lastDirectory;
+  String? lastLocale;
 
   @override
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,
     String? directory,
+    String? locale,
   }) async {
     lastDirectory = directory;
+    lastLocale = locale;
     return written;
   }
 }

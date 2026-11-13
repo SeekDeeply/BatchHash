@@ -387,6 +387,104 @@ fn c_abi_scan_and_batch() {
     assert_eq!(run["entries"].as_array().expect("entries").len(), 1);
 }
 
+/// Build a one-entry canonical report JSON for the export tests.
+fn tiny_report(root: &std::path::Path) -> serde_json::Value {
+    let batch = serde_json::json!({
+        "root": root.to_string_lossy(),
+        "algorithms": ["sha256"],
+    });
+    let batch_text = CString::new(serde_json::to_string(&batch).expect("json")).expect("cstr");
+    let run = call_ok(unsafe { c_api::bh_run_batch(batch_text.as_ptr()) });
+    let report_json = run["report_json"].as_str().expect("report_json");
+    serde_json::from_str(report_json).expect("report json")
+}
+
+fn export(report: &serde_json::Value, format: &str, locale: Option<&str>) -> String {
+    let mut request = serde_json::json!({
+        "report_json": report.to_string(),
+        "format": format,
+    });
+    if let Some(locale) = locale {
+        request["locale"] = serde_json::Value::String(locale.to_string());
+    }
+    let text = CString::new(request.to_string()).expect("cstr");
+    let data = call_ok(unsafe { c_api::bh_export_report(text.as_ptr()) });
+    data["text"].as_str().expect("text").to_string()
+}
+
+#[test]
+fn c_abi_export_report_localizes_human_formats_only() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("a.txt"), b"alpha");
+    let report = tiny_report(temp.path());
+
+    // The locale is optional: a client that never sends it keeps the exact
+    // English output the previous release produced.
+    let default_markdown = export(&report, "markdown", None);
+    let english_markdown = export(&report, "markdown", Some("en-US"));
+    assert_eq!(default_markdown, english_markdown);
+    let chinese_markdown = export(&report, "markdown", Some("zh-CN"));
+    assert_ne!(
+        default_markdown, chinese_markdown,
+        "zh must render different labels than en"
+    );
+
+    // Machine formats ignore the locale: translating their keys would break
+    // every parser, including md5sum -c and the Dart side.
+    for format in ["json", "csv", "md5sum", "bsd"] {
+        let english = export(&report, format, Some("en"));
+        let chinese = export(&report, format, Some("zh"));
+        assert_eq!(english, chinese, "{format} must not be localized");
+    }
+
+    // An unknown code falls back to English instead of failing the export.
+    let unknown = export(&report, "markdown", Some("klingon"));
+    assert_eq!(unknown, default_markdown);
+}
+
+#[test]
+fn c_abi_export_report_renders_the_tree_format() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("a.txt"), b"alpha");
+    write(&temp.path().join("nested/b.txt"), b"bravo");
+    let report = tiny_report(temp.path());
+
+    let tree = export(&report, "tree", Some("en"));
+    // Two levels of nesting, one file per level, each carrying its digest.
+    assert!(
+        tree.contains("|- nested") || tree.contains("\\- nested"),
+        "{tree}"
+    );
+    assert!(tree.contains("a.txt"), "{tree}");
+    assert!(tree.contains("b.txt"), "{tree}");
+    assert!(tree.contains("sha256:"), "the tree shows digests: {tree}");
+    assert!(
+        tree.contains("Summary"),
+        "the tree ends with a summary: {tree}"
+    );
+    // The tree is human readable, so it follows the locale too.
+    assert_ne!(tree, export(&report, "tree", Some("zh")));
+    // Its extension is shared with plain TXT, but the format names differ.
+    assert_eq!(
+        batchhash_report::format::ReportFormat::Tree.extension(),
+        "txt"
+    );
+}
+
+#[test]
+fn c_abi_export_report_rejects_an_unknown_format() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("a.txt"), b"alpha");
+    let report = tiny_report(temp.path());
+    let request = serde_json::json!({
+        "report_json": report.to_string(),
+        "format": "nonsense",
+    });
+    let text = CString::new(request.to_string()).expect("cstr");
+    let error = call_err(unsafe { c_api::bh_export_report(text.as_ptr()) });
+    assert_eq!(error["kind"], "invalid_request");
+}
+
 #[test]
 fn c_abi_reports_errors_as_envelopes() {
     let bad = CString::new("{not json").expect("cstr");

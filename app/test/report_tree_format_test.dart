@@ -132,10 +132,10 @@ void main() {
     // the diff instead of hiding behind a pair of `contains` checks.
     final String expected =
         'BatchHash Report\n'
-        '|- docs\n'
-        '|  |- api.md  (failed)\n'
-        '|  \\- guide.md  sha256:${digest('a', 64)}  xxh3-64:0123456789abcdef\n'
-        '\\- index.html  sha256:${digest('b', 64)}  xxh3-64:fedcba9876543210\n';
+        '├─ docs\n'
+        '│  ├─ api.md  (failed)\n'
+        '│  └─ guide.md  sha256:${digest('a', 64)}  xxh3-64:0123456789abcdef\n'
+        '└─ index.html  sha256:${digest('b', 64)}  xxh3-64:fedcba9876543210\n';
     expect(text.startsWith(expected), isTrue, reason: text);
 
     // The summary counts every entry, not only the hashed ones.

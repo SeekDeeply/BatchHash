@@ -15,7 +15,7 @@ import '../models/models.dart';
 ///
 /// Keep the tree rules in sync with the core renderer:
 /// two spaces per level, directories before files, both sorted by name, and the
-/// ASCII prefixes `|- `, `\- `, `|  `, `   `.
+/// Unicode prefixes `├─ `, `└─ `, `│  `, `   `, matching the core renderer.
 String renderReport(
   ReportModel report,
   ReportFormat format, {
@@ -55,14 +55,16 @@ String renderReportTree(ReportModel report, {String? locale}) {
 
 /// Prefix used for a child, given whether it is the last one in its group.
 ///
-/// ASCII rather than box drawing characters: a Windows console with a legacy
-/// code page turns Unicode box glyphs into garbage, and the file is meant to be
-/// opened in whatever editor the user has.
-String _branch(bool isLast) => isLast ? '\\- ' : '|- ';
+/// Box drawing characters rather than ASCII: the file exists to be read by a
+/// person, and the glyphs make the nesting obvious at a glance. The ASCII
+/// variant was chosen originally to survive legacy code pages, which is not a
+/// real constraint here: the report body, the paths and the UI all assume UTF-8
+/// already. Keep in step with the core renderer in batchhash-report.
+String _branch(bool isLast) => isLast ? '└─ ' : '├─ ';
 
 /// Prefix a child's descendants repeat: a vertical bar only while more siblings
 /// follow, otherwise blank spaces of the same width.
-String _continuation(bool isLast) => isLast ? '   ' : '|  ';
+String _continuation(bool isLast) => isLast ? '   ' : '│  ';
 
 void _renderChildren(
   StringBuffer buffer,

@@ -1632,10 +1632,10 @@ fn export_diff_txt(diff: &batchhash_types::DiffReport, labels: &Labels) -> Strin
 
 /// 文件树渲染。
 ///
-/// 设计取舍：树线用 **ASCII**（`|- `、`\- `、`|  `、`   `）而不是 Unicode 制表符。
-/// 理由是树会出现在 Windows 控制台、CI 日志、SSH 会话和 diff 工具里，
-/// 其中任何一个环节编码没对齐都会把制表符变成乱码方块；ASCII 在所有场景下
-/// 都能正确显示，视觉损失极小。
+/// 树线用 Unicode 制表符（`├─ `、`└─ `、`│  `、`   `），与用户熟悉的 `tree`
+/// 命令输出一致。早先用过 ASCII（`|- `、`\- `），理由是终端编码安全；实际
+/// 取舍反过来了：这份输出主要给人看，制表符的视觉结构更清晰，而 UTF-8 已经是
+/// 本项目的硬前提（报告本身、文件名、界面文案都依赖它）。
 ///
 /// 这套规则与 Dart 侧测试替身 app/lib/src/services/report_rendering.dart 的
 /// renderReportTree **严格一致**（缩进两空格、目录先于文件、同级按名称升序、
@@ -1738,12 +1738,12 @@ impl TreeNode {
     }
 }
 
-/// 子节点的分支前缀：末项无后续，其余带垂线。
+/// 子节点的分支前缀：末项用 └─，其余用 ├─。
 fn tree_branch(is_last: bool) -> &'static str {
     if is_last {
-        "\\- "
+        "└─ "
     } else {
-        "|- "
+        "├─ "
     }
 }
 
@@ -1752,7 +1752,7 @@ fn tree_continuation(is_last: bool) -> &'static str {
     if is_last {
         "   "
     } else {
-        "|  "
+        "│  "
     }
 }
 

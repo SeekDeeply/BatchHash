@@ -651,7 +651,7 @@ fn diff_export_is_localized_by_locale() {
 }
 
 #[test]
-fn tree_renders_structure_with_ascii_branches() {
+fn tree_renders_structure_with_box_drawing_branches() {
     let mut report = Report::new(
         "/data/media",
         RootKind::Fs,
@@ -685,10 +685,10 @@ fn tree_renders_structure_with_ascii_branches() {
 
     // 目录在前、同级按名称升序：b.mkv（文件）排在 sub/（目录）之后。
     assert_eq!(lines[0], "BatchHash Report");
-    assert_eq!(lines[1], "|- sub");
-    assert_eq!(lines[2], "|  |- a.mkv  crc32:22222222");
-    assert_eq!(lines[3], "|  \\- z.mkv  crc32:11111111");
-    assert_eq!(lines[4], "\\- b.mkv  crc32:33333333");
+    assert_eq!(lines[1], "├─ sub");
+    assert_eq!(lines[2], "│  ├─ a.mkv  crc32:22222222");
+    assert_eq!(lines[3], "│  └─ z.mkv  crc32:11111111");
+    assert_eq!(lines[4], "└─ b.mkv  crc32:33333333");
 
     // 树后用同一套标签渲染汇总。
     assert!(tree.contains("\nSummary:\n"));

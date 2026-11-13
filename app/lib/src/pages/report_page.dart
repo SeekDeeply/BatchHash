@@ -79,18 +79,37 @@ class _ReportPageState extends State<ReportPage> {
   }
 
   Future<void> _export(ReportModel report) async {
+    // Ask for the destination first when none was chosen. Exporting silently
+    // into the app support directory was the complaint: the file lands in a
+    // path nobody can find, so the export looks like it did nothing.
+    String directory = widget.state.exportDirectory.value.trim();
+    if (directory.isEmpty) {
+      await _chooseDirectory();
+      if (!mounted) {
+        return;
+      }
+      directory = widget.state.exportDirectory.value.trim();
+      if (directory.isEmpty) {
+        // The user cancelled the picker. Say so instead of exporting elsewhere.
+        setState(() {
+          _message = null;
+          _error = context.strings('report.pickBeforeExport');
+        });
+        return;
+      }
+    }
+
     setState(() {
       _exporting = true;
       _error = null;
       _message = null;
     });
-    final String directory = widget.state.exportDirectory.value.trim();
     try {
       final List<ExportedReport> files = await widget.state.service
           .exportReport(
             report: report,
             formats: Set<ReportFormat>.of(_formats),
-            directory: directory.isEmpty ? null : directory,
+            directory: directory,
             // The human-readable formats follow the UI language; the machine
             // formats ignore it, so passing the active code is always correct.
             locale: Localizations.localeOf(context).languageCode,

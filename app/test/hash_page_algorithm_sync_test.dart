@@ -1,10 +1,23 @@
 import 'package:batchhash/src/app_state.dart';
+import 'package:batchhash/src/l10n/app_strings.dart';
 import 'package:batchhash/src/pages/hash_page.dart';
 import 'package:batchhash/src/services/fake_batch_hash_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/test_helpers.dart';
+
+/// The text the page shows for a selection of [count] algorithms.
+///
+/// Read from the same string table the page uses, so the assertion does not
+/// hard-code translated copy.
+String hashSelectedCountText(int count) {
+  return AppStrings.of(
+    'hash.algorithmCount',
+    locale: 'en',
+    args: <String, String>{'count': '$count'},
+  );
+}
 
 void main() {
   testWidgets('a restored selection reaches the hash page', (
@@ -24,11 +37,14 @@ void main() {
     // shared state after the page was already built. Before the fix the page
     // kept its own copy taken in initState, so the restored value never showed
     // up and the next launch appeared to reset the selection.
+    final String twoOf = hashSelectedCountText(2);
     state.algorithms.value = <String>{'sha512', 'crc32'};
     await tester.pumpAndSettle();
 
-    // The page reflects the new set in its own controls, not only in the state.
-    expect(find.textContaining('sha512'), findsWidgets);
+    // The page counts the selection in its own controls; before the fix this
+    // stayed at the default count of two only because the default also has two
+    // entries, so a distinct count is what proves the value was adopted.
+    expect(find.text(twoOf), findsWidgets);
   });
 
   testWidgets('the listener does not fight the page over the selection', (

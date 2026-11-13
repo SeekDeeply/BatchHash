@@ -11,8 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/test_helpers.dart';
 
 const String _chosen = '/tmp/batchhash-exports';
-const String PATH_CANCEL_KEY = 'path-cancel';
-const String PICK_FIRST_TEXT = 'Choose where to save before exporting.';
+const String pathCancelKey = 'path-cancel';
+const String pickFirstText = 'Choose where to save before exporting.';
 
 const List<ExportedReport> _written = <ExportedReport>[
   ExportedReport(
@@ -184,12 +184,12 @@ void main() {
     await tester.tap(button);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey<String>(PATH_CANCEL_KEY)));
+    await tester.tap(find.byKey(const ValueKey<String>(pathCancelKey)));
     await tester.pumpAndSettle();
 
     // Nothing was written and the page says why, rather than failing silently.
     expect(service.lastDirectory, isNull);
-    expect(find.text(PICK_FIRST_TEXT), findsOneWidget);
+    expect(find.text(pickFirstText), findsOneWidget);
   });
 
   testWidgets('tapping an exported file copies its path', (

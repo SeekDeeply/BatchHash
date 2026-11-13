@@ -35,7 +35,6 @@ class _FixedExportService extends FakeBatchHashService {
 
   final List<ExportedReport> written;
   String? lastDirectory;
-  String? lastLocale;
 
   @override
   Future<List<ExportedReport>> exportReport({
@@ -45,7 +44,9 @@ class _FixedExportService extends FakeBatchHashService {
     String? locale,
   }) async {
     lastDirectory = directory;
-    lastLocale = locale;
+    // The page also forwards the active language; keep the parameter so this
+    // double stays a faithful implementation, but assert on the directory only:
+    // the language path is covered by the tree format service test.
     return written;
   }
 }

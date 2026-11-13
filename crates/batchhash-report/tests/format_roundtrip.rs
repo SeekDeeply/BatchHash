@@ -733,3 +733,29 @@ fn tree_truncates_at_five_hundred_rows() {
     let file_lines = tree.lines().filter(|line| line.contains("crc32:")).count();
     assert_eq!(file_lines, MAX_TABLE_ROWS);
 }
+
+#[test]
+fn zz_print_tree_samples() {
+    for locale in [ExportLocale::En, ExportLocale::Zh] {
+        let mut report = Report::new(
+            "/data/media",
+            RootKind::Fs,
+            false,
+            vec![AlgorithmId::Crc32],
+            HardwareReport::default(),
+        );
+        report.generated_at = "2026-10-20T00:00:00Z".to_string();
+        let mut failed = record("sub/nested/bad.mkv", 5, vec![]);
+        failed.status = EntryStatus::Failed;
+        failed.error_kind = Some(ErrorKind::PermissionDenied);
+        report.entries = vec![
+            record("b.mkv", 30, vec![(AlgorithmId::Crc32, digest(AlgorithmId::Crc32, '3'))]),
+            record("sub/z.mkv", 10, vec![(AlgorithmId::Crc32, digest(AlgorithmId::Crc32, '1'))]),
+            record("sub/nested/a.mkv", 20, vec![(AlgorithmId::Crc32, digest(AlgorithmId::Crc32, '2'))]),
+            failed,
+        ];
+        report.recompute_summary();
+        println!("=== {} ===", locale.as_str());
+        println!("{}", export_report_with(&report, ReportFormat::Tree, locale).unwrap());
+    }
+}

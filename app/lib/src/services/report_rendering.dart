@@ -54,6 +54,10 @@ String renderReportTree(ReportModel report, {String? locale}) {
 }
 
 /// Prefix used for a child, given whether it is the last one in its group.
+///
+/// ASCII rather than box drawing characters: a Windows console with a legacy
+/// code page turns Unicode box glyphs into garbage, and the file is meant to be
+/// opened in whatever editor the user has.
 String _branch(bool isLast) => isLast ? '\\- ' : '|- ';
 
 /// Prefix a child's descendants repeat: a vertical bar only while more siblings
@@ -159,18 +163,27 @@ void _insert(_TreeNode root, List<String> segments, BatchEntry entry) {
 }
 
 /// Path of [path] below [root], or the unchanged path when it is not under it.
+///
+/// Mirrors the core helper: the report root may be empty (a checksum import) or
+/// carry a trailing separator, so the root is normalized and trimmed instead of
+/// being assumed to have one fixed shape.
 String _relativePath(String path, String root) {
   final String normalized = path.replaceAll('\\', '/');
   if (root.isEmpty) {
     return normalized;
   }
-  if (normalized == root) {
+  String base = root.replaceAll('\\', '/');
+  while (base.endsWith('/') && base.length > 1) {
+    base = base.substring(0, base.length - 1);
+  }
+  if (normalized == base) {
     return '';
   }
-  final String prefix = '$root/';
-  return normalized.startsWith(prefix)
-      ? normalized.substring(prefix.length)
-      : normalized;
+  if (!normalized.startsWith(base)) {
+    return normalized;
+  }
+  final String rest = normalized.substring(base.length);
+  return rest.replaceFirst(RegExp(r'^/+'), '');
 }
 
 String _placeholder(ReportModel report, ReportFormat format) {

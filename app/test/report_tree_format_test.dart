@@ -34,7 +34,7 @@ void main() {
             'xxh3-64': 'fedcba9876543210',
           },
         ),
-        BatchEntry(
+        const BatchEntry(
           path: '/data/site/docs/api.md',
           size: 32,
           status: EntryStatus.failed,

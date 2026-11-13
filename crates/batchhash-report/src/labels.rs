@@ -479,13 +479,16 @@ impl Labels {
     /// 断言的文本会和真实产物对不上。
     pub fn tree_summary(&self, field: SummaryField) -> &'static str {
         match self.locale {
+            // Capitalised like the rest of the report. The earlier mixed case
+            // ("Total" next to "ok") was an accident of hand-writing these and
+            // is worth fixing now that the Dart stand-in has to mirror them.
             ExportLocale::En => match field {
                 SummaryField::Total => "Total",
-                SummaryField::Ok => "ok",
-                SummaryField::Failed => "failed",
-                SummaryField::Skipped => "skipped",
+                SummaryField::Ok => "Ok",
+                SummaryField::Failed => "Failed",
+                SummaryField::Skipped => "Skipped",
                 SummaryField::TotalBytes => "Total bytes",
-                SummaryField::Truncated => "truncated",
+                SummaryField::Truncated => "Truncated",
             },
             ExportLocale::Zh => match field {
                 SummaryField::Total => "总数",

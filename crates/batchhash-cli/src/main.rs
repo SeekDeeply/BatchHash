@@ -203,7 +203,12 @@ fn parse_format(name: &str) -> CliResult<ReportFormat> {
                 || format.extension() == name
                 || (*format == ReportFormat::Markdown && name == "md")
         })
-        .ok_or_else(|| format!("unknown format '{name}' (json, csv, markdown, txt, md5sum, bsd)"))
+        // Built from ReportFormat::ALL, not a hand-written list: the literal
+        // version went stale the moment a format was added.
+        .ok_or_else(|| {
+            let known: Vec<&str> = ReportFormat::ALL.iter().map(|f| f.as_str()).collect();
+            format!("unknown format '{name}' ({})", known.join(", "))
+        })
 }
 
 fn emit(text: &str, out: Option<&Path>) -> CliResult<()> {

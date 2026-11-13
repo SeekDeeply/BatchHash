@@ -11,6 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/test_helpers.dart';
 
 const String _chosen = '/tmp/batchhash-exports';
+const String PATH_CANCEL_KEY = 'path-cancel';
+const String PICK_FIRST_TEXT = 'Choose where to save before exporting.';
 
 const List<ExportedReport> _written = <ExportedReport>[
   ExportedReport(
@@ -130,7 +132,7 @@ void main() {
     }
   });
 
-  testWidgets('export without a chosen directory still defers to the service', (
+  testWidgets('export asks for a folder first when none was chosen', (
     WidgetTester tester,
   ) async {
     setViewSize(tester, const Size(800, 1600));
@@ -147,13 +149,47 @@ void main() {
     await tester.tap(button);
     await tester.pumpAndSettle();
 
-    // No explicit folder: the service default is used, and the card keeps the
-    // localized default label instead of pretending a folder was chosen.
+    // Exporting straight into the app support directory was the complaint: the
+    // files landed somewhere nobody could find. The picker must come up first,
+    // and nothing may be written while it is open.
+    final Finder field = find.byKey(
+      const ValueKey<String>('path-input-field'),
+    );
+    expect(field, findsOneWidget);
     expect(service.lastDirectory, isNull);
-    expect(find.text('App default folder'), findsOneWidget);
-    // The result rows show where the files really landed, not the report root.
+
+    await tester.enterText(field, '/tmp/picked-now');
+    await tester.tap(find.byKey(const ValueKey<String>('path-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(service.lastDirectory, '/tmp/picked-now');
     expect(find.text(_written[0].path), findsOneWidget);
     expect(find.text(service.sampleReport.root), findsOneWidget);
+  });
+
+  testWidgets('cancelling the folder prompt aborts the export', (
+    WidgetTester tester,
+  ) async {
+    setViewSize(tester, const Size(800, 1600));
+    final _FixedExportService service = _FixedExportService(_written);
+    final BatchHashAppState state = BatchHashAppState(service: service);
+    state.report.value = service.sampleReport;
+    await tester.pumpWidget(wrapInApp(ReportPage(state: state)));
+    await tester.pumpAndSettle();
+
+    final Finder button = find.byKey(
+      const ValueKey<String>('report-export-button'),
+    );
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>(PATH_CANCEL_KEY)));
+    await tester.pumpAndSettle();
+
+    // Nothing was written and the page says why, rather than failing silently.
+    expect(service.lastDirectory, isNull);
+    expect(find.text(PICK_FIRST_TEXT), findsOneWidget);
   });
 
   testWidgets('tapping an exported file copies its path', (

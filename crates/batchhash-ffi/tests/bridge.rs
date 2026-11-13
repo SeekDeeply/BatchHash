@@ -451,8 +451,10 @@ fn c_abi_export_report_renders_the_tree_format() {
 
     let tree = export(&report, "tree", Some("en"));
     // Two levels of nesting, one file per level, each carrying its digest.
+    // Box drawing prefixes, matching the core renderer and the `tree` output
+    // people already know.
     assert!(
-        tree.contains("|- nested") || tree.contains("\\- nested"),
+        tree.contains("├─ nested") || tree.contains("└─ nested"),
         "{tree}"
     );
     assert!(tree.contains("a.txt"), "{tree}");

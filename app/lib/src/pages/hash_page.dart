@@ -62,10 +62,34 @@ class _HashPageState extends State<HashPage> {
     _elapsed = app.elapsed.value;
     _error = app.error.value;
     _cancelled = app.cancelled.value;
+    // The stored selection is read from disk asynchronously at start-up, which
+    // usually finishes after this page is built. Copying the value once in
+    // initState therefore kept the defaults forever: the shell rebuilt, but this
+    // State was already created so initState never ran again.
+    app.algorithms.addListener(_onAlgorithmsChangedExternally);
   }
+
+  /// Adopt a selection that changed outside this page.
+  ///
+  /// Only the persisted restore path does this today; the page is the sole
+  /// editor otherwise, so a plain overwrite is correct and avoids the loop a
+  /// two-way binding would create.
+  void _onAlgorithmsChangedExternally() {
+    final Set<String> next = widget.state.algorithms.value;
+    if (_sameSelection(next, _algorithms)) {
+      return;
+    }
+    setState(() {
+      _algorithms = <String>{...next};
+    });
+  }
+
+  static bool _sameSelection(Set<String> a, Set<String> b) =>
+      a.length == b.length && a.containsAll(b);
 
   @override
   void dispose() {
+    widget.state.algorithms.removeListener(_onAlgorithmsChangedExternally);
     unawaited(_subscription?.cancel());
     super.dispose();
   }

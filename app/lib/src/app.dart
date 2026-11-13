@@ -61,6 +61,7 @@ class BatchHashApp extends StatefulWidget {
     this.locale,
     this.firstRunStore,
     this.settingsStore,
+    this.initialSettings,
   });
 
   final BatchHashService? service;
@@ -76,6 +77,13 @@ class BatchHashApp extends StatefulWidget {
 
   /// Where language and accent are remembered; injectable for tests.
   final AppSettingsStore? settingsStore;
+
+  /// Preferences already read from disk by the caller.
+  ///
+  /// Supplying them lets the first frame use the stored values instead of
+  /// painting defaults and swapping a moment later. Null means "not loaded",
+  /// in which case the app falls back to reading them after mounting.
+  final AppSettings? initialSettings;
 
   @override
   State<BatchHashApp> createState() => _BatchHashAppState();
@@ -125,8 +133,14 @@ class _BatchHashAppState extends State<BatchHashApp> {
     // _appState must exist before anything below reads its notifiers; touching
     // it earlier threw a LateInitializationError at start-up.
     _appState = BatchHashAppState(service: _service);
-    // Load persisted choices, then mirror every later change back to disk.
-    unawaited(_restoreSettings());
+    // Apply what the caller already read; only fall back to a deferred read
+    // when nothing was supplied (tests embed the shell without a store).
+    final AppSettings? supplied = widget.initialSettings;
+    if (supplied != null) {
+      _applySettings(supplied);
+    } else {
+      unawaited(_restoreSettings());
+    }
     _localeController.addListener(_persistSettings);
     _themeController.addListener(_persistSettings);
     // The picker writes straight into this notifier, so persistence has to hang
@@ -178,6 +192,16 @@ class _BatchHashAppState extends State<BatchHashApp> {
     if (!mounted) {
       return;
     }
+    _applySettings(stored);
+    // Rebuild once so the first painted frame already uses the stored values.
+    setState(() {});
+  }
+
+  /// Copy [stored] into the live controllers and the shared app state.
+  ///
+  /// Shared by the synchronous start-up path and the deferred one, so both apply
+  /// exactly the same rules.
+  void _applySettings(AppSettings stored) {
     _restoring = true;
     if (widget.locale == null) {
       _localeController.restore(stored.locale);
@@ -201,8 +225,6 @@ class _BatchHashAppState extends State<BatchHashApp> {
       }
     }
     _restoring = false;
-    // Rebuild once so the first painted frame already uses the stored values.
-    setState(() {});
   }
 
   /// Write the current language, accent and selection back to disk.

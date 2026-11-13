@@ -11,7 +11,7 @@ use batchhash_report::format::{
     detect_report_format, export_diff, export_diff_with, export_report, export_report_with,
     import_report, ExportError, ImportError, ReportFormat, MAX_TABLE_ROWS,
 };
-use batchhash_report::labels::ExportLocale;
+use batchhash_report::labels::{ExportLocale, LabelStyle, TraceField};
 use batchhash_types::{
     AlgorithmId, BackendPolicy, DiffStatus, EntryStatus, ErrorKind, HardwareReport, Report,
     ReportEntry, ReportValidationError, RootKind, SuffixConfig,
@@ -732,4 +732,65 @@ fn tree_truncates_at_five_hundred_rows() {
     // 平铺目录下最多渲染 500 个文件行。
     let file_lines = tree.lines().filter(|line| line.contains("crc32:")).count();
     assert_eq!(file_lines, MAX_TABLE_ROWS);
+}
+
+/// 报告正文必须自证「用什么算的」和「统计口径」，否则事后无法追溯。
+#[test]
+fn human_reports_carry_environment_and_trace_metadata() {
+    let report = sample_report();
+
+    for locale in [ExportLocale::En, ExportLocale::Zh] {
+        let markdown =
+            export_report_with(&report, ReportFormat::Markdown, locale).expect("Markdown export");
+        let txt = export_report_with(&report, ReportFormat::Txt, locale).expect("TXT export");
+        let tree = export_report_with(&report, ReportFormat::Tree, locale).expect("Tree export");
+
+        // 环境小节标题按语言变化，出现在 Markdown 与 TXT 里。
+        let env_section = locale.labels().environment_section();
+        assert!(
+            markdown.contains(env_section),
+            "{locale:?} markdown missing environment section:\n{markdown}"
+        );
+        assert!(
+            txt.contains(env_section),
+            "{locale:?} txt missing environment section:\n{txt}"
+        );
+
+        // 追溯字段：条目总数与成功数必须与 summary 一致，而不是另行计算。
+        let entries_label = locale
+            .labels()
+            .trace(TraceField::Entries, LabelStyle::Table);
+        assert!(
+            markdown.contains(entries_label),
+            "{locale:?} markdown missing trace field {entries_label}"
+        );
+        assert!(
+            markdown.contains(&report.summary.total.to_string()),
+            "the entry total must appear in the trace block"
+        );
+
+        // 线程数与架构来自硬件探测，报告必须带上。
+        assert!(
+            markdown.contains(&report.hardware.arch),
+            "{locale:?} markdown missing cpu arch"
+        );
+
+        // 树格式同样带运行环境，因为它也是给人看的报告。
+        assert!(
+            tree.contains(env_section),
+            "{locale:?} tree missing environment section:\n{tree}"
+        );
+    }
+
+    // 两种语言的环境标签必须真的不同，否则等于没有本地化。
+    let en = export_report_with(&report, ReportFormat::Markdown, ExportLocale::En)
+        .expect("English Markdown");
+    let zh = export_report_with(&report, ReportFormat::Markdown, ExportLocale::Zh)
+        .expect("Chinese Markdown");
+    assert_ne!(
+        ExportLocale::En.labels().environment_section(),
+        ExportLocale::Zh.labels().environment_section()
+    );
+    assert!(en.contains("Environment"));
+    assert!(zh.contains("运行环境"));
 }

@@ -29,8 +29,8 @@ use batchhash_types::{
 use indexmap::IndexMap;
 
 use crate::labels::{
-    DiffMetaField, DiffSummaryField, EntryField, ExportLocale, LabelStyle, Labels, MetaField,
-    SummaryField,
+    DiffMetaField, DiffSummaryField, EntryField, EnvironmentField, ExportLocale, LabelStyle,
+    Labels, MetaField, SummaryField, TraceField,
 };
 
 /// Maximum number of entries rendered by Markdown and TXT table exports.
@@ -496,6 +496,78 @@ fn export_csv(report: &Report) -> Result<String, ExportError> {
     String::from_utf8(bytes).map_err(|error| ExportError::Csv(error.to_string()))
 }
 
+/// 报告用的环境与追溯取值。
+///
+/// 三个渲染器共用同一份取值，避免 Markdown 说「未知」而 TXT 留空这种不一致。
+/// Wire name of a [BackendPolicy].
+///
+/// Mirrors the serde `kebab-case` rename so the human report and the JSON report
+/// name the same thing identically; writing a second hand-rolled spelling here
+/// is how the two drift apart.
+fn backend_policy_str(policy: batchhash_types::BackendPolicy) -> &'static str {
+    match policy {
+        batchhash_types::BackendPolicy::Auto => "auto",
+        batchhash_types::BackendPolicy::ForcedSoft => "forced-soft",
+    }
+}
+fn environment_value(report: &Report, field: EnvironmentField, labels: &Labels) -> String {
+    let hardware = &report.hardware;
+    let unknown = labels.unknown_value();
+    let text = match field {
+        EnvironmentField::Arch => hardware.arch.clone(),
+        EnvironmentField::Features => {
+            if hardware.detected_features.is_empty() {
+                unknown.to_string()
+            } else {
+                hardware.detected_features.join(", ")
+            }
+        }
+        EnvironmentField::BackendPolicy => backend_policy_str(hardware.backend_policy).to_string(),
+        EnvironmentField::Blake3Backend => hardware.blake3_backend_reported.clone(),
+        EnvironmentField::Sha256Backend => hardware.sha256_backend_reported.clone(),
+        EnvironmentField::ProbeSource => hardware.source.clone(),
+        EnvironmentField::Threads => hardware.multithread.to_string(),
+    };
+    if text.is_empty() {
+        unknown.to_string()
+    } else {
+        text
+    }
+}
+
+/// 追溯取值，直接来自报告自身的 summary。
+fn trace_value(report: &Report, field: TraceField, labels: &Labels) -> String {
+    let summary = &report.summary;
+    match field {
+        TraceField::Entries => summary.total.to_string(),
+        TraceField::OkEntries => summary.ok.to_string(),
+        TraceField::FailedEntries => summary.failed.to_string(),
+        TraceField::SkippedEntries => summary.skipped.to_string(),
+        TraceField::TotalBytes => summary.total_bytes.to_string(),
+        TraceField::Truncated => labels.boolean(summary.truncated).to_string(),
+    }
+}
+
+/// 所有运行环境字段，按渲染顺序。
+const ENVIRONMENT_FIELDS: [EnvironmentField; 7] = [
+    EnvironmentField::Arch,
+    EnvironmentField::Features,
+    EnvironmentField::BackendPolicy,
+    EnvironmentField::Blake3Backend,
+    EnvironmentField::Sha256Backend,
+    EnvironmentField::ProbeSource,
+    EnvironmentField::Threads,
+];
+
+/// 所有追溯字段，按渲染顺序。
+const TRACE_FIELDS: [TraceField; 6] = [
+    TraceField::Entries,
+    TraceField::OkEntries,
+    TraceField::FailedEntries,
+    TraceField::SkippedEntries,
+    TraceField::TotalBytes,
+    TraceField::Truncated,
+];
 fn export_markdown(report: &Report, labels: &Labels) -> String {
     let table = LabelStyle::Table;
     let mut out = String::new();
@@ -586,6 +658,30 @@ fn export_markdown(report: &Report, labels: &Labels) -> String {
         labels.summary(SummaryField::Truncated, table),
         labels.boolean(report.summary.truncated),
     );
+
+    // Traceability block: the counts the summary is based on, plus the machine
+    // that produced them. Placed before the entry table so a reader knows the
+    // conditions first, and after the totals so counts stay next to what they
+    // qualify. "unknown" is reported as unknown on purpose, matching the
+    // hardware panel: guessing here would make the report lie about itself.
+    out.push_str("\n## ");
+    out.push_str(labels.environment_section());
+    out.push_str("\n\n");
+    out.push_str("| Field | Value |\n| --- | --- |\n");
+    for field in TRACE_FIELDS {
+        push_markdown_row(
+            &mut out,
+            labels.trace(field, table),
+            &trace_value(report, field, labels),
+        );
+    }
+    for field in ENVIRONMENT_FIELDS {
+        push_markdown_row(
+            &mut out,
+            labels.environment(field, table),
+            &environment_value(report, field, labels),
+        );
+    }
 
     out.push_str("\n## ");
     out.push_str(labels.entries_section);
@@ -760,6 +856,29 @@ fn export_txt(report: &Report, labels: &Labels) -> String {
         labels.summary(SummaryField::Truncated, text),
         labels.boolean(report.summary.truncated),
     );
+
+    // Same traceability block as Markdown, in the aligned Text style so the
+    // labels stay machine-friendly (`arch`, not `CPU architecture`).
+    out.push('\n');
+    let env_section = labels.environment_section();
+    out.push_str(env_section);
+    out.push('\n');
+    out.push_str(&"-".repeat(env_section.chars().count()));
+    out.push('\n');
+    for field in TRACE_FIELDS {
+        push_txt_line(
+            &mut out,
+            labels.trace(field, text),
+            &trace_value(report, field, labels),
+        );
+    }
+    for field in ENVIRONMENT_FIELDS {
+        push_txt_line(
+            &mut out,
+            labels.environment(field, text),
+            &environment_value(report, field, labels),
+        );
+    }
 
     out.push('\n');
     let entries_section = labels.entries_section;
@@ -1829,6 +1948,27 @@ fn render_tree_summary(out: &mut String, report: &Report, labels: &Labels) {
         out.push_str(labels.tree_summary(field));
         out.push_str(": ");
         out.push_str(&value.to_string());
+        out.push('\n');
+    }
+
+    // The tree is a report a person reads, so it carries the same provenance as
+    // Markdown and TXT: without it a saved tree cannot say which machine or
+    // thread count produced the digests beside the names.
+    out.push('\n');
+    out.push_str(labels.environment_section());
+    out.push_str(":\n");
+    for field in TRACE_FIELDS {
+        out.push_str("  ");
+        out.push_str(labels.trace(field, LabelStyle::Text));
+        out.push_str(": ");
+        out.push_str(&trace_value(report, field, labels));
+        out.push('\n');
+    }
+    for field in ENVIRONMENT_FIELDS {
+        out.push_str("  ");
+        out.push_str(labels.environment(field, LabelStyle::Text));
+        out.push_str(": ");
+        out.push_str(&environment_value(report, field, labels));
         out.push('\n');
     }
 }

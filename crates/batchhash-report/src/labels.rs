@@ -106,6 +106,46 @@ pub enum SummaryField {
     Truncated,
 }
 
+/// 运行环境字段。
+///
+/// 单独分组而不是塞进 MetaField：这一组描述的是「用什么算的」，
+/// 而 MetaField 描述的是「报告本身是什么」。分开之后，将来若要把环境段落
+/// 关掉或单独导出，都不用改动元信息那一段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnvironmentField {
+    /// CPU 架构。
+    Arch,
+    /// 探测到的指令集特性。
+    Features,
+    /// 后端策略。
+    BackendPolicy,
+    /// BLAKE3 报告的加速后端。
+    Blake3Backend,
+    /// SHA-256 报告的加速后端。
+    Sha256Backend,
+    /// 探测结果来源。
+    ProbeSource,
+    /// 批处理使用的线程数。
+    Threads,
+}
+
+/// 交叉引用/统计字段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TraceField {
+    /// 条目总数。
+    Entries,
+    /// 成功条目数。
+    OkEntries,
+    /// 失败条目数。
+    FailedEntries,
+    /// 跳过条目数。
+    SkippedEntries,
+    /// 总字节数。
+    TotalBytes,
+    /// 报告是否被截断。
+    Truncated,
+}
+
 /// 条目表列名。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryField {
@@ -513,6 +553,91 @@ impl Labels {
             ExportLocale::Zh => {
                 format!("已截断：共 {total} 条，仅显示 {shown} 条（truncated=true）。")
             }
+        }
+    }
+
+    /// 运行环境小节标题。
+    pub fn environment_section(&self) -> &'static str {
+        match self.locale {
+            ExportLocale::En => "Environment",
+            ExportLocale::Zh => "运行环境",
+        }
+    }
+
+    /// 运行环境字段标签。
+    pub fn environment(&self, field: EnvironmentField, style: LabelStyle) -> &'static str {
+        match self.locale {
+            ExportLocale::En => match style {
+                LabelStyle::Table => match field {
+                    EnvironmentField::Arch => "CPU architecture",
+                    EnvironmentField::Features => "CPU features",
+                    EnvironmentField::BackendPolicy => "Backend policy",
+                    EnvironmentField::Blake3Backend => "BLAKE3 backend",
+                    EnvironmentField::Sha256Backend => "SHA-256 backend",
+                    EnvironmentField::ProbeSource => "Probe source",
+                    EnvironmentField::Threads => "Worker threads",
+                },
+                LabelStyle::Text => match field {
+                    EnvironmentField::Arch => "arch",
+                    EnvironmentField::Features => "features",
+                    EnvironmentField::BackendPolicy => "backend_policy",
+                    EnvironmentField::Blake3Backend => "blake3_backend",
+                    EnvironmentField::Sha256Backend => "sha256_backend",
+                    EnvironmentField::ProbeSource => "probe_source",
+                    EnvironmentField::Threads => "multithread",
+                },
+            },
+            ExportLocale::Zh => match field {
+                EnvironmentField::Arch => "CPU 架构",
+                EnvironmentField::Features => "CPU 特性",
+                EnvironmentField::BackendPolicy => "后端策略",
+                EnvironmentField::Blake3Backend => "BLAKE3 后端",
+                EnvironmentField::Sha256Backend => "SHA-256 后端",
+                EnvironmentField::ProbeSource => "探测来源",
+                EnvironmentField::Threads => "线程数",
+            },
+        }
+    }
+
+    /// 追溯字段标签，用于让报告自证统计口径。
+    pub fn trace(&self, field: TraceField, style: LabelStyle) -> &'static str {
+        match self.locale {
+            ExportLocale::En => match style {
+                LabelStyle::Table => match field {
+                    TraceField::Entries => "Entries",
+                    TraceField::OkEntries => "Succeeded",
+                    TraceField::FailedEntries => "Failed",
+                    TraceField::SkippedEntries => "Skipped",
+                    TraceField::TotalBytes => "Total bytes",
+                    TraceField::Truncated => "Truncated",
+                },
+                LabelStyle::Text => match field {
+                    TraceField::Entries => "entries",
+                    TraceField::OkEntries => "ok",
+                    TraceField::FailedEntries => "failed",
+                    TraceField::SkippedEntries => "skipped",
+                    TraceField::TotalBytes => "total_bytes",
+                    TraceField::Truncated => "truncated",
+                },
+            },
+            ExportLocale::Zh => match field {
+                TraceField::Entries => "条目总数",
+                TraceField::OkEntries => "成功",
+                TraceField::FailedEntries => "失败",
+                TraceField::SkippedEntries => "跳过",
+                TraceField::TotalBytes => "总字节数",
+                TraceField::Truncated => "是否截断",
+            },
+        }
+    }
+
+    /// 未知/未探测值的占位文案。
+    ///
+    /// 与硬件面板的语义一致：拿不到就说拿不到，不猜。
+    pub fn unknown_value(&self) -> &'static str {
+        match self.locale {
+            ExportLocale::En => "unknown",
+            ExportLocale::Zh => "未知",
         }
     }
 }

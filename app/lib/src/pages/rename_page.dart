@@ -81,9 +81,13 @@ class _RenamePageState extends State<RenamePage> {
   /// job, and requiring a full hash run first made the feature unusable on its
   /// own.
   Future<void> _scanDirectoryHere() async {
-    final String? directory = await PlatformPickers.directory(
-      () async => Directory.current.path,
-    );
+    // Same Android constraint as the hash page: a picked document tree is not
+    // readable, so derive a real folder from chosen files instead.
+    final String? directory = Platform.isAndroid
+        ? await PlatformPickers.folderViaFiles()
+        : await PlatformPickers.directory(
+            () async => Directory.current.path,
+          );
     if (directory == null) {
       return;
     }

@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 
@@ -26,7 +28,17 @@ class PlatformPickers {
       if (picked == null || picked.trim().isEmpty) {
         return null;
       }
-      return picked.trim();
+      final String path = picked.trim();
+      // On Android getDirectoryPath hands back a storage-access-framework tree
+      // such as content://com.android.externalstorage.documents/tree/primary%3A
+      // which no file API can open: the app holds a content URI, not a readable
+      // directory. Scanning it silently yields nothing, which is exactly the
+      // "picking a folder does nothing" report. Ask for real files instead and
+      // let the caller derive the folder from them.
+      if (Platform.isAndroid && !path.startsWith('/')) {
+        return null;
+      }
+      return path;
     } on PlatformException {
       return fallback();
     } on MissingPluginException {
@@ -37,6 +49,55 @@ class PlatformPickers {
       return fallback();
     }
   }
+
+  /// Pick files on Android to stand in for a folder.
+  ///
+  /// Returns the common parent directory of the chosen files, or null when the
+  /// user cancelled. This is the only way to reach a real, readable folder on
+  /// Android without requesting all-files access: the document tree URI that
+  /// the folder picker returns is not openable through dart:io.
+  static Future<String?> folderViaFiles() async {
+    final List<String> picked = await files(() async => const <String>[]);
+    if (picked.isEmpty) {
+      return null;
+    }
+    return commonParent(picked);
+  }
+
+  /// Deepest directory containing every path, without a trailing separator.
+  ///
+  /// Returns an empty string when the paths share nothing beyond the root, so a
+  /// caller can treat that as "no usable folder" instead of scanning /.
+  static String commonParent(List<String> paths) {
+    if (paths.isEmpty) {
+      return '';
+    }
+    List<String> shared = _split(paths.first);
+    for (final String path in paths.skip(1)) {
+      final List<String> other = _split(path);
+      var keep = 0;
+      while (keep < shared.length &&
+          keep < other.length &&
+          shared[keep] == other[keep]) {
+        keep += 1;
+      }
+      shared = shared.sublist(0, keep);
+    }
+    // Always drop the last shared segment: every input is a file, so the shared
+    // prefix necessarily ends on a file name. Files in one directory therefore
+    // resolve to that directory rather than to a non-existent "directory" named
+    // after one of them.
+    if (shared.isNotEmpty) {
+      shared = shared.sublist(0, shared.length - 1);
+    }
+    if (shared.isEmpty) {
+      return '';
+    }
+    return '/${shared.join('/')}';
+  }
+
+  static List<String> _split(String path) =>
+      path.split('/').where((String part) => part.isNotEmpty).toList();
 
   /// Ask for one or more files. Returns an empty list when cancelled.
   static Future<List<String>> files(

@@ -120,15 +120,33 @@ class _DigestSectionState extends State<_DigestSection> {
       return const SizedBox.shrink();
     }
     final int total = digests.length;
+    // One algorithm needs no toggle: everything is already on screen, and a
+    // button that expands nothing is just noise on every row.
+    if (total < 2) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Divider(height: 16),
+          _DigestLine(
+            algorithm: digests.first.key,
+            digest: digests.first.value,
+          ),
+        ],
+      );
+    }
     final bool expanded = _expanded;
     final List<MapEntry<String, String>> visible = expanded
         ? digests
         : digests.take(1).toList(growable: false);
+    // The count on the button is what the reader cannot currently see, not how
+    // many algorithms exist: "expand (3)" read as three digests to reveal, which
+    // was wrong by one whenever one line was already shown.
+    final int hiddenCount = expanded ? 0 : digests.length - visible.length;
     final String toggleLabel = expanded
         ? context.strings('entry.collapseDigests')
         : context.strings(
             'entry.expandDigests',
-            args: <String, String>{'count': '$total'},
+            args: <String, String>{'count': '$hiddenCount'},
           );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -136,13 +154,13 @@ class _DigestSectionState extends State<_DigestSection> {
         const Divider(height: 16),
         for (final MapEntry<String, String> digest in visible)
           _DigestLine(algorithm: digest.key, digest: digest.value),
-        if (!expanded && total > 1)
+        if (!expanded && hiddenCount > 0)
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Text(
               context.strings(
-                'entry.moreDigests',
-                args: <String, String>{'count': '${total - 1}'},
+                'entry.collapsedCount',
+                args: <String, String>{'count': '$hiddenCount'},
               ),
               style: theme.textTheme.bodySmall,
             ),

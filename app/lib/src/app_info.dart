@@ -10,30 +10,42 @@ const String kAppVersion = '1.9.0';
 /// Project repository the Star buttons point at.
 const String kProjectUrl = 'https://github.com/SeekDeeply/BatchHash';
 
-/// Open [kProjectUrl] with the platform's default handler.
+/// Collaborators credited on the About page.
+///
+/// Only the GitHub handle is stored; the profile URL is derived, so adding a
+/// name never means keeping two strings in sync.
+const List<String> kCollaborators = <String>['IPF-Sinon'];
+
+/// Profile page for a GitHub [handle].
+String githubProfileUrl(String handle) => 'https://github.com/$handle';
+
+/// Open [url] with the platform's default handler.
+///
+/// [url] defaults to the project repository; the collaborators list passes a
+/// profile URL through the same path so both share one fallback story.
 ///
 /// There is deliberately no url_launcher dependency in pubspec.yaml, so desktop
 /// platforms shell out to their opener. Mobile has no equivalent command, so the
 /// caller gets `false` and can hand the URL over another way instead of
 /// showing a button that silently does nothing.
-Future<bool> openProjectUrl() async {
+Future<bool> openProjectUrl({String url = kProjectUrl}) async {
   if (!(Platform.isLinux || Platform.isMacOS || Platform.isWindows)) {
     return false;
   }
   try {
     final ProcessResult result;
     if (Platform.isMacOS) {
-      result = await Process.run('open', <String>[kProjectUrl]);
+      result = await Process.run('open', <String>[url]);
     } else if (Platform.isWindows) {
       // The empty argument is `start`'s window-title slot.
       result = await Process.run('cmd', <String>[
         '/c',
         'start',
         '',
-        kProjectUrl,
+        url,
       ]);
     } else {
-      result = await Process.run('xdg-open', <String>[kProjectUrl]);
+      result = await Process.run('xdg-open', <String>[url]);
     }
     return result.exitCode == 0;
   } catch (_) {

@@ -48,6 +48,24 @@ class BatchHashAppState {
   /// Destination directory for report export; empty means the service default.
   final ValueNotifier<String> exportDirectory = ValueNotifier<String>('');
 
+  /// Result of the last comparison run.
+  ///
+  /// Held here rather than in the page because the shell rebuilds each page from
+  /// scratch on every tab switch. Keeping the rows only in the page meant a
+  /// finished comparison vanished as soon as the user looked at another tab.
+  final ValueNotifier<List<DiffRowModel>> compareRows =
+      ValueNotifier<List<DiffRowModel>>(const <DiffRowModel>[]);
+
+  /// Reports loaded into the comparison panes.
+  final ValueNotifier<ReportModel?> compareLeftReport =
+      ValueNotifier<ReportModel?>(null);
+  final ValueNotifier<ReportModel?> compareRightReport =
+      ValueNotifier<ReportModel?>(null);
+
+  /// Paths typed or picked for the comparison panes.
+  final ValueNotifier<String> compareLeftPath = ValueNotifier<String>('');
+  final ValueNotifier<String> compareRightPath = ValueNotifier<String>('');
+
   /// Remember a path so the chooser can suggest it again.
   void rememberPath(String path) {
     final String trimmed = path.trim();
@@ -74,5 +92,10 @@ class BatchHashAppState {
     pickedFiles.dispose();
     recentPaths.dispose();
     exportDirectory.dispose();
+    compareRows.dispose();
+    compareLeftReport.dispose();
+    compareRightReport.dispose();
+    compareLeftPath.dispose();
+    compareRightPath.dispose();
   }
 }

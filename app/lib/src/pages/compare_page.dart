@@ -48,7 +48,9 @@ enum ComparePane { left, right, differences }
 /// Where the two sides of the comparison come from.
 enum CompareMode {
   directory('compare.mode.directory'),
-  reports('compare.mode.reports');
+  reports('compare.mode.reports'),
+  /// Two paths hashed in memory, no report file involved.
+  direct('compare.mode.files');
 
   const CompareMode(this.label);
 
@@ -111,6 +113,17 @@ class _ComparePageState extends State<ComparePage> {
   void initState() {
     super.initState();
     widget.state.report.addListener(_handleReportChanged);
+    // Adopt anything a previous visit left behind: the shell disposes this page
+    // on every tab switch, so without this the comparison was lost.
+    _rows = widget.state.compareRows.value;
+    _leftReport = widget.state.compareLeftReport.value;
+    _rightReport = widget.state.compareRightReport.value;
+    _leftPath = widget.state.compareLeftPath.value;
+    _rightPath = widget.state.compareRightPath.value;
+    // The direct inputs are remembered in the same shared state as the report
+    // panes, so switching tabs does not clear them either.
+    _directLeft = widget.state.compareLeftPath.value;
+    _directRight = widget.state.compareRightPath.value;
     final ReportModel? report = widget.state.report.value;
     if (report != null) {
       _mode = CompareMode.directory;
@@ -185,6 +198,11 @@ class _ComparePageState extends State<ComparePage> {
   /// user-chosen folder persists so switching modes does not lose it.
   String _diffDirectory = '';
 
+  /// Paths used by [CompareMode.direct].
+  String _directLeft = '';
+  String _directRight = '';
+  bool _directBusy = false;
+
   Future<void> _load(ReportModel report) async {
     final String directory = _diffDirectory.isEmpty ? report.root : _diffDirectory;
     await _startDirectoryDiff(report, directory);
@@ -197,7 +215,15 @@ class _ComparePageState extends State<ComparePage> {
     await _cancelDiffStream();
     final int generation = ++_generation;
     _diffSubscription = widget.state.service
-        .compareReportWithDirectory(report: report, directory: directory)
+        // recursive: true is the fix for "subfolders were ignored". The service
+        // defaults to a shallow scan, so comparing a report against its own root
+        // silently skipped everything below the first level and reported those
+        // files as removed.
+        .compareReportWithDirectory(
+          report: report,
+          directory: directory,
+          recursive: true,
+        )
         .listen(
           (DiffProgress progress) {
             if (!mounted || generation != _generation) {
@@ -211,6 +237,8 @@ class _ComparePageState extends State<ComparePage> {
                   _error = null;
                 } else {
                   _rows = progress.rows;
+                  // Mirror into the shared state so another tab visit keeps it.
+                  widget.state.compareRows.value = progress.rows;
                 }
               }
             });
@@ -318,9 +346,13 @@ class _ComparePageState extends State<ComparePage> {
         if (left) {
           _leftReport = report;
           _leftPath = path;
+          widget.state.compareLeftReport.value = report;
+          widget.state.compareLeftPath.value = path;
         } else {
           _rightReport = report;
           _rightPath = path;
+          widget.state.compareRightReport.value = report;
+          widget.state.compareRightPath.value = path;
         }
       });
       // Importing a file only loads it. Comparing is a separate step the user
@@ -372,6 +404,7 @@ class _ComparePageState extends State<ComparePage> {
         _rows = rows;
         _loading = false;
       });
+      widget.state.compareRows.value = rows;
     } catch (error) {
       if (!mounted || generation != _generation) {
         return;
@@ -480,6 +513,9 @@ class _ComparePageState extends State<ComparePage> {
           if (_mode == CompareMode.reports) ...<Widget>[
             const SizedBox(height: 12),
             _buildReportInputs(),
+          ] else if (_mode == CompareMode.direct) ...<Widget>[
+            const SizedBox(height: 12),
+            _buildDirectInputs(),
           ] else ...<Widget>[
             const SizedBox(height: 12),
             _buildScopeCard(),
@@ -631,6 +667,105 @@ class _ComparePageState extends State<ComparePage> {
   ///
   /// The report names exactly the files it covers, so the honest default is
   /// "compare those files" rather than "hash this whole folder".
+  /// Hash both sides and diff them, with no report file involved.
+  ///
+  /// Failures are surfaced rather than swallowed: a mismatched pair (file vs
+  /// folder) and an empty selection both leave the user with nothing unless the
+  /// reason is shown.
+  Future<void> _runDirectCompare() async {
+    final String left = _directLeft.trim();
+    final String right = _directRight.trim();
+    if (left.isEmpty || right.isEmpty) {
+      return;
+    }
+    final List<String> algorithms = widget.state.algorithms.value.isEmpty
+        ? const <String>['sha256']
+        : widget.state.algorithms.value.toList()..sort();
+    await _cancelDiffStream();
+    final int generation = ++_generation;
+    setState(() {
+      _directBusy = true;
+      _error = null;
+    });
+    try {
+      final DirectCompareResult result = await DirectComparator(
+        service: widget.state.service,
+      ).compare(leftPath: left, rightPath: right, algorithms: algorithms);
+      if (!mounted || generation != _generation) {
+        return;
+      }
+      setState(() {
+        _directBusy = false;
+        _rows = result.rows;
+      });
+      widget.state.compareRows.value = result.rows;
+      widget.state.compareLeftPath.value = left;
+      widget.state.compareRightPath.value = right;
+    } catch (error) {
+      if (!mounted || generation != _generation) {
+        return;
+      }
+      final String failure = context.strings(
+        'compare.compareFailed',
+        args: <String, String>{'error': '$error'},
+      );
+      setState(() {
+        _directBusy = false;
+        _error = failure;
+      });
+    }
+  }
+
+  Widget _buildDirectInputs() {
+    final ThemeData theme = Theme.of(context);
+    return Card(
+      key: const ValueKey<String>('compare-direct-card'),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              context.strings('compare.directHint'),
+              style: theme.textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            _DirectPathField(
+              fieldKey: 'compare-direct-left',
+              labelKey: 'compare.fileLeft',
+              value: _directLeft,
+              onChanged: (String value) {
+                setState(() => _directLeft = value);
+              },
+            ),
+            const SizedBox(height: 8),
+            _DirectPathField(
+              fieldKey: 'compare-direct-right',
+              labelKey: 'compare.fileRight',
+              value: _directRight,
+              onChanged: (String value) {
+                setState(() => _directRight = value);
+              },
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.icon(
+                key: const ValueKey<String>('compare-direct-run'),
+                onPressed: _directBusy ||
+                        _directLeft.trim().isEmpty ||
+                        _directRight.trim().isEmpty
+                    ? null
+                    : _runDirectCompare,
+                icon: const Icon(Icons.compare_arrows),
+                label: Text(context.strings('compare.compareNow')),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
   Widget _buildScopeCard() {
     final ThemeData theme = Theme.of(context);
     final ReportModel? report = widget.state.report.value;
@@ -983,6 +1118,85 @@ class _MessageCard extends StatelessWidget {
               ?.copyWith(color: foreground),
         ),
       ),
+    );
+  }
+}
+
+/// Text field with a picker button for one side of a direct comparison.
+///
+/// Stateful because the controller has to survive rebuilds: recreating it on
+/// every keystroke reset the cursor to the start of the line.
+class _DirectPathField extends StatefulWidget {
+  const _DirectPathField({
+    required this.fieldKey,
+    required this.labelKey,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String fieldKey;
+  final String labelKey;
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_DirectPathField> createState() => _DirectPathFieldState();
+}
+
+class _DirectPathFieldState extends State<_DirectPathField> {
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.value);
+
+  @override
+  void didUpdateWidget(covariant _DirectPathField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Adopt an externally supplied value (restored from shared state) without
+    // fighting the user while they type.
+    if (widget.value != _controller.text) {
+      _controller.text = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pick() async {
+    final List<String> picked = await PlatformPickers.files(
+      () async => const <String>[],
+    );
+    if (picked.isEmpty) {
+      return;
+    }
+    widget.onChanged(picked.first);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: TextField(
+            key: ValueKey<String>(widget.fieldKey),
+            controller: _controller,
+            decoration: InputDecoration(
+              labelText: context.strings(widget.labelKey),
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: widget.onChanged,
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          key: ValueKey<String>('${widget.fieldKey}-pick'),
+          tooltip: context.strings('compare.chooseFile'),
+          onPressed: _pick,
+          icon: const Icon(Icons.folder_open_outlined),
+        ),
+      ],
     );
   }
 }

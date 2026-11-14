@@ -76,6 +76,50 @@ class AboutPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
+            // Credits sit between the feature list and the hardware details:
+            // close enough to the product description to be read, without
+            // pushing the technical panel off the first screen.
+            Card(
+              key: const ValueKey<String>('about-collaborators'),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  ListTile(
+                    leading: const Icon(Icons.group_outlined),
+                    title: Text(context.strings('about.collaborators')),
+                    subtitle: Text(
+                      context.strings('about.collaboratorsDetail'),
+                    ),
+                  ),
+                  for (final String handle in kCollaborators)
+                    ListTile(
+                      key: ValueKey<String>('about-collaborator-$handle'),
+                      leading: const Icon(Icons.person_outline, size: 20),
+                      title: Text(handle),
+                      subtitle: Text(githubProfileUrl(handle)),
+                      trailing: const Icon(Icons.open_in_new, size: 18),
+                      onTap: () async {
+                        final bool opened = await openProjectUrl(
+                          url: githubProfileUrl(handle),
+                        );
+                        if (!context.mounted) {
+                          return;
+                        }
+                        // Some hosts have no browser to hand the link to; show
+                        // it rather than leaving a row that looks interactive
+                        // but does nothing.
+                        if (!opened) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(githubProfileUrl(handle))),
+                          );
+                        }
+                      },
+                    ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
             HardwarePanelLoader(service: service),
             const SizedBox(height: 16),
             Text(

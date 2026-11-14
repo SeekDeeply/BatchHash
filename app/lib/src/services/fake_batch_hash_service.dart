@@ -346,7 +346,7 @@ class FakeBatchHashService implements BatchHashService {
       );
     }
     return RenamePlanModel(
-      algorithm: algorithm,
+      algorithm: selected.first,
       length: length,
       uppercase: uppercase,
       rows: rows,

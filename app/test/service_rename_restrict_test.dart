@@ -109,7 +109,7 @@ void main() {
 
     test('accepts an explicit restriction that overrides the plan', () async {
       const RenamePlanModel plan = RenamePlanModel(
-        algorithms: <String>['blake3'],
+        algorithm: 'blake3',
         length: 8,
         uppercase: true,
         rows: <RenamePlanRowModel>[
@@ -132,7 +132,7 @@ void main() {
 
     test('refuses a plan with nothing ready instead of running wide', () async {
       const RenamePlanModel plan = RenamePlanModel(
-        algorithms: <String>['blake3'],
+        algorithm: 'blake3',
         length: 8,
         uppercase: true,
         rows: <RenamePlanRowModel>[

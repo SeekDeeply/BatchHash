@@ -388,7 +388,6 @@ class FakeBatchHashService implements BatchHashService {
   final Map<String, String> lastExportContents = <String, String>{};
 
   @override
-  @override
   Future<String> renderReport({
     required ReportModel report,
     required ReportFormat format,
@@ -397,6 +396,7 @@ class FakeBatchHashService implements BatchHashService {
     return rendering.renderReport(report, format, locale: locale);
   }
 
+  @override
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,

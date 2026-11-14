@@ -310,6 +310,7 @@ class LoggingBatchHashService implements BatchHashService {
     );
   }
 
+  @override
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,

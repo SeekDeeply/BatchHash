@@ -578,7 +578,6 @@ class RustBatchHashService implements BatchHashService {
   }
 
   @override
-  @override
   Future<String> renderReport({
     required ReportModel report,
     required ReportFormat format,
@@ -591,6 +590,7 @@ class RustBatchHashService implements BatchHashService {
     );
   }
 
+  @override
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,

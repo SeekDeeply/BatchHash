@@ -48,9 +48,11 @@ class DirectComparator {
     final FileSystemEntityType leftType = await _typeOf(leftPath);
     final FileSystemEntityType rightType = await _typeOf(rightPath);
     if (leftType != rightType) {
+      // FileSystemEntityType has no `name`; spell the two cases out so the
+      // message is readable instead of printing an enum toString.
       throw StateError(
-        'both sides must be the same kind: left is ${leftType.name}, '
-        'right is ${rightType.name}',
+        'both sides must be the same kind: '
+        'left is ${_describe(leftType)}, right is ${_describe(rightType)}',
       );
     }
 
@@ -104,9 +106,7 @@ class DirectComparator {
       }
     }
 
-    final String? root = isDirectory
-      ? path
-      : File(path).parent.path;
+    final String root = isDirectory ? path : _parentOf(path);
     return ReportModel(
       root: root,
       generatedAt: DateTime.now(),
@@ -117,4 +117,25 @@ class DirectComparator {
 
   static Future<FileSystemEntityType> _typeOf(String path) =>
       FileSystemEntity.type(path);
+
+  /// Human word for a type, used only in the mismatch message.
+  static String _describe(FileSystemEntityType type) => switch (type) {
+        FileSystemEntityType.directory => 'folder',
+        FileSystemEntityType.file => 'file',
+        FileSystemEntityType.link => 'link',
+        _ => 'missing',
+      };
+
+  /// Directory containing [path], without relying on `File.parent`.
+  ///
+  /// `File(path).parent` normalises and can return a relative name for a bare
+  /// file name, which would then become a report root that the diff cannot
+  /// match against the other side.
+  static String _parentOf(String path) {
+    final int slash = path.lastIndexOf(RegExp(r'[\\/]'));
+    if (slash <= 0) {
+      return path;
+    }
+    return path.substring(0, slash);
+  }
 }

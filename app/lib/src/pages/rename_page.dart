@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -5,6 +7,7 @@ import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../theme.dart';
 import '../util/formatting.dart';
+import '../util/platform_pickers.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/status_chip.dart';
 import 'history_page.dart';
@@ -47,6 +50,15 @@ class _RenamePageState extends State<RenamePage> {
 
   /// Whether the next plan strips existing suffixes instead of writing them.
   bool _clearSuffix = false;
+
+  /// Entries this page hashed itself.
+  ///
+  /// The rename page used to read the hash page's result, which forced the user
+  /// to run a full hash job elsewhere before writing a suffix. It now scans and
+  /// hashes its own selection; the shared list is only a starting hint, so the
+  /// two features no longer depend on each other's state.
+  List<BatchEntry>? _ownEntries;
+  bool _scanning = false;
   String? _message;
   RenamePlanModel? _plan;
 
@@ -61,6 +73,83 @@ class _RenamePageState extends State<RenamePage> {
             HistoryPage(service: widget.state.service),
       ),
     );
+  }
+
+  /// Pick a folder here and hash it with the rename page's own algorithms.
+  ///
+  /// Independent of the hash page on purpose: writing a suffix is a separate
+  /// job, and requiring a full hash run first made the feature unusable on its
+  /// own.
+  Future<void> _scanDirectoryHere() async {
+    final String? directory = await PlatformPickers.directory(
+      () async => Directory.current.path,
+    );
+    if (directory == null) {
+      return;
+    }
+    await _hashSelection(() => widget.state.service.scanDirectory(
+          directory,
+          recursive: true,
+        ));
+  }
+
+  /// Pick individual files here and hash them.
+  Future<void> _scanFilesHere() async {
+    final List<String> picked = await PlatformPickers.files(
+      () async => const <String>[],
+    );
+    if (picked.isEmpty) {
+      return;
+    }
+    await _hashSelection(() => widget.state.service.scanFiles(picked));
+  }
+
+  /// Run [scan] then hash the result with the configured algorithms.
+  ///
+  /// Every algorithm configured is required: a row missing one of them cannot
+  /// produce the suffix the user asked for, and computing a partial set would
+  /// only move the failure to the planning step with less context.
+  Future<void> _hashSelection(
+    Future<List<BatchEntry>> Function() scan,
+  ) async {
+    setState(() {
+      _scanning = true;
+      _error = null;
+      _message = null;
+    });
+    try {
+      final List<BatchEntry> scanned = await scan();
+      final List<BatchEntry> hashed = <BatchEntry>[];
+      await for (final HashProgress progress in widget.state.service
+          .computeHashes(
+        entries: scanned,
+        algorithms: _config.algorithms,
+      )) {
+        // The progress stream repeats the full set per tick; the last one wins.
+        hashed
+          ..clear()
+          ..addAll(progress.entries);
+      }
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _scanning = false;
+        _ownEntries = hashed;
+        _plan = null;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _scanning = false;
+        _error = context.strings(
+          'rename.previewFailed',
+          args: <String, String>{'error': '$error'},
+        );
+      });
+    }
   }
 
   /// Write [next] into the shared state, which is what persists it.
@@ -155,7 +244,11 @@ class _RenamePageState extends State<RenamePage> {
     final ColorScheme scheme = theme.colorScheme;
     return ValueListenableBuilder<List<BatchEntry>>(
       valueListenable: widget.state.entries,
-      builder: (BuildContext context, List<BatchEntry> entries, Widget? child) {
+      builder: (BuildContext context, List<BatchEntry> shared, Widget? child) {
+        // Own entries win when present: a scan started here is what the user is
+        // looking at, and quietly mixing in the other page's list would rename
+        // files they did not pick here.
+        final List<BatchEntry> entries = _ownEntries ?? shared;
         final int hashedCount = entries
             .where((BatchEntry entry) => entry.hashes.isNotEmpty)
             .length;
@@ -196,6 +289,31 @@ class _RenamePageState extends State<RenamePage> {
                   color: scheme.onSurfaceVariant,
                 ),
               ),
+              const SizedBox(height: 12),
+              // Local source selection: this page hashes what it is given here
+              // instead of waiting for the hash page to produce a list first.
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  OutlinedButton.icon(
+                    key: const ValueKey<String>('rename-scan-directory'),
+                    onPressed: _scanning ? null : _scanDirectoryHere,
+                    icon: const Icon(Icons.folder_open_outlined),
+                    label: Text(context.strings('rename.pickDirectory')),
+                  ),
+                  OutlinedButton.icon(
+                    key: const ValueKey<String>('rename-scan-files'),
+                    onPressed: _scanning ? null : _scanFilesHere,
+                    icon: const Icon(Icons.insert_drive_file_outlined),
+                    label: Text(context.strings('rename.pickFiles')),
+                  ),
+                ],
+              ),
+              if (_scanning) ...<Widget>[
+                const SizedBox(height: 12),
+                const LinearProgressIndicator(),
+              ],
               if (entries.isEmpty) ...<Widget>[
                 const SizedBox(height: 48),
                 EmptyState(

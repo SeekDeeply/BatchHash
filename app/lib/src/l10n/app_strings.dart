@@ -143,6 +143,8 @@ class AppStrings {
 
     'rename.title': '文件名写名',
     'rename.subtitle': '把摘要前缀写入文件名，便于肉眼比对；正式校验仍使用报告中的完整哈希。',
+    'rename.pickDirectory': '选择目录',
+    'rename.pickFiles': '选择文件',
     'rename.moreAlgorithms': '附加算法',
     'rename.moreAlgorithmsHint': '勾选后会在文件名里同时写入多个算法的截断值。',
     'rename.strictMode': '严格匹配历史校验',
@@ -586,6 +588,8 @@ class AppStrings {
     'metric.elapsed': 'Elapsed',
     'rename.title': 'Filename suffixes',
     'rename.subtitle': 'Write a digest prefix into filenames for quick eyeballing; real verification still uses the full hashes in the report.',
+    'rename.pickDirectory': 'Choose folder',
+    'rename.pickFiles': 'Choose files',
     'rename.moreAlgorithms': 'Extra algorithms',
     'rename.moreAlgorithmsHint': 'Also write a truncated digest for each ticked algorithm.',
     'rename.strictMode': 'Match recorded hashes strictly',

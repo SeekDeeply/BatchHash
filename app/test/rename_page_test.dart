@@ -36,7 +36,9 @@ void main() {
     expect(find.text('BLAKE3'), findsOneWidget);
     final String before = estimateOf(tester);
     expect(before, contains('Recommended length'));
-    expect(before, contains('length 5'));
+    // Default moved from 5 to 6 together with the recommendation table, so the
+    // slider and the hint agree instead of recommending a different number.
+    expect(before, contains('length 6'));
 
     await tester.drag(
       find.byKey(const ValueKey<String>('rename-length-slider')),

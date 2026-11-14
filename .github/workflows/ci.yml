@@ -157,6 +157,15 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+      # Pinned JDK for the Gradle step below. The hosted runner image moved its
+      # default JDK to 25, and Gradle 8.3 aborts with "Unsupported class file
+      # major version 69" when it runs on it. Other jobs already pin 17; this one
+      # built only Rust libraries until it started assembling an APK, so it had
+      # never needed the pin.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
       - name: Install Rust (Android targets)
         uses: dtolnay/rust-toolchain@1.89.0
         with:

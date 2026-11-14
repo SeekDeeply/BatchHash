@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../app_state.dart';
 import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
+import '../services/direct_compare.dart';
 import '../util/formatting.dart';
 import '../util/platform_pickers.dart';
 import '../widgets/diff_table.dart';

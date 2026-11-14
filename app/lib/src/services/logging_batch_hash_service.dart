@@ -294,6 +294,22 @@ class LoggingBatchHashService implements BatchHashService {
   }
 
   @override
+  Future<String> renderReport({
+    required ReportModel report,
+    required ReportFormat format,
+    String? locale,
+  }) {
+    return _record(
+      'op.renderReport',
+      () => inner.renderReport(
+        report: report,
+        format: format,
+        locale: locale,
+      ),
+      detail: (String text) => '${format.name} · ${text.length}',
+    );
+  }
+
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,

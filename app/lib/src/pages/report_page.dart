@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -105,15 +106,43 @@ class _ReportPageState extends State<ReportPage> {
       _message = null;
     });
     try {
-      final List<ExportedReport> files = await widget.state.service
-          .exportReport(
+      final String locale = Localizations.localeOf(context).languageCode;
+      // Android cannot write into a folder picked from shared storage: the app
+      // holds no write grant there, so the same export that works on desktop
+      // fails with errno 1. Render each format in memory and hand the bytes to
+      // the system document provider instead.
+      final List<ExportedReport> files;
+      if (Platform.isAndroid) {
+        files = <ExportedReport>[];
+        for (final ReportFormat format in _formats) {
+          final String text = await widget.state.service.renderReport(
             report: report,
-            formats: Set<ReportFormat>.of(_formats),
-            directory: directory,
-            // The human-readable formats follow the UI language; the machine
-            // formats ignore it, so passing the active code is always correct.
-            locale: Localizations.localeOf(context).languageCode,
+            format: format,
+            locale: locale,
           );
+          final String name =
+              'batchhash-report.${format.fileExtension}';
+          final String? saved = await PlatformPickers.saveBytes(
+            suggestedName: name,
+            bytes: utf8.encode(text),
+          );
+          if (saved == null) {
+            // The user backed out of one file; keep what was already written
+            // instead of pretending the whole export failed.
+            break;
+          }
+          files.add(ExportedReport(format: format, path: saved));
+        }
+      } else {
+        files = await widget.state.service.exportReport(
+          report: report,
+          formats: Set<ReportFormat>.of(_formats),
+          directory: directory,
+          // The human-readable formats follow the UI language; the machine
+          // formats ignore it, so passing the active code is always correct.
+          locale: locale,
+        );
+      }
       if (!mounted) {
         return;
       }

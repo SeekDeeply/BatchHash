@@ -101,6 +101,17 @@ abstract class BatchHashService {
   /// TXT, Tree). The machine readable formats (JSON, CSV, md5sum, BSD) never
   /// translate their keys or columns, because those are a parsing contract.
   /// Omit it to keep the historical English output.
+  /// Render one format to text without touching the filesystem.
+  ///
+  /// Android cannot write into a folder picked from shared storage, so the
+  /// export path has to hand bytes to the system document provider. Rendering
+  /// in memory keeps that path from round-tripping through a temp file.
+  Future<String> renderReport({
+    required ReportModel report,
+    required ReportFormat format,
+    String? locale,
+  });
+
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,

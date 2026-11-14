@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart' show FilePicker;
 
 import 'package:flutter/material.dart';
 
@@ -15,6 +13,7 @@ import '../services/operation_log_export.dart';
 import '../services/operation_log_store.dart';
 import '../widgets/log_export_dialog.dart';
 import '../util/formatting.dart';
+import '../util/platform_pickers.dart';
 import '../widgets/empty_state.dart';
 
 /// Audit trail of every operation the app performed.
@@ -205,10 +204,6 @@ class _OperationLogPageState extends State<OperationLogPage> {
       _snack(context.strings('log.exportNoEntries'));
       return;
     }
-    final String? directory = await _pickDirectory();
-    if (directory == null || !mounted) {
-      return;
-    }
     try {
       final String stamp = exportTimestamp();
       final String body = options.format == ExportFormat.json
@@ -239,9 +234,17 @@ class _OperationLogPageState extends State<OperationLogPage> {
         digest: digest,
         extension: zipped == null ? extension : '.zip',
       );
-      final File file = File('$directory/$name');
-      await file.writeAsBytes(payload, flush: true);
+      // Written through the platform save dialog rather than a directory plus
+      // File.write: on Android that combination fails with errno 1 because the
+      // app has no write grant for the picked folder under scoped storage.
+      final String? saved = await PlatformPickers.saveBytes(
+        suggestedName: name,
+        bytes: payload,
+      );
       if (!mounted) {
+        return;
+      }
+      if (saved == null) {
         return;
       }
       _snack(
@@ -260,17 +263,6 @@ class _OperationLogPageState extends State<OperationLogPage> {
     }
   }
 
-  Future<String?> _pickDirectory() async {
-    try {
-      final String? picked = await FilePicker.platform.getDirectoryPath();
-      if (picked == null || picked.trim().isEmpty) {
-      return null;
-      }
-      return picked.trim();
-    } catch (_) {
-      return null;
-    }
-  }
 
   void _snack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));

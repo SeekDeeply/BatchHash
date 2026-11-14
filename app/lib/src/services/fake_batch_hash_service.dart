@@ -1,7 +1,7 @@
 import '../models/models.dart';
 import '../platform/rendering_hardware.dart';
 import 'batch_hash_service.dart';
-import 'report_rendering.dart';
+import 'report_rendering.dart' as rendering;
 
 /// Raised when the fake is asked to scan a path it does not model.
 ///
@@ -388,6 +388,15 @@ class FakeBatchHashService implements BatchHashService {
   final Map<String, String> lastExportContents = <String, String>{};
 
   @override
+  @override
+  Future<String> renderReport({
+    required ReportModel report,
+    required ReportFormat format,
+    String? locale,
+  }) async {
+    return rendering.renderReport(report, format, locale: locale);
+  }
+
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,
@@ -397,7 +406,7 @@ class FakeBatchHashService implements BatchHashService {
     lastExportLocale = locale;
     lastExportContents.clear();
     for (final ReportFormat format in formats) {
-      lastExportContents[format.name] = renderReport(
+      lastExportContents[format.name] = rendering.renderReport(
         report,
         format,
         locale: locale,

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 
@@ -58,6 +60,41 @@ class PlatformPickers {
       return fallback();
     } catch (_) {
       return fallback();
+    }
+  }
+
+  /// Save [bytes] to a file the user picks.
+  ///
+  /// On Android this is the only reliable way to reach shared storage: since
+  /// scoped storage (API 29) an app cannot open an arbitrary path under
+  /// /storage/emulated/0 for writing, so a directory picker plus File.write
+  /// fails with errno 1. `saveFile` goes through the system document provider,
+  /// which already holds the grant for whatever the user chose.
+  ///
+  /// Desktop still works the same way; the plugin writes the bytes itself, so
+  /// callers do not need to know which mechanism was used.
+  ///
+  /// Returns the saved path, or null when the user cancelled.
+  static Future<String?> saveBytes({
+    required String suggestedName,
+    required List<int> bytes,
+  }) async {
+    try {
+      final String? path = await FilePicker.platform.saveFile(
+        dialogTitle: suggestedName,
+        fileName: suggestedName,
+        bytes: Uint8List.fromList(bytes),
+      );
+      if (path == null || path.trim().isEmpty) {
+        return null;
+      }
+      return path.trim();
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 }

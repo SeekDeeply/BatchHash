@@ -578,6 +578,19 @@ class RustBatchHashService implements BatchHashService {
   }
 
   @override
+  @override
+  Future<String> renderReport({
+    required ReportModel report,
+    required ReportFormat format,
+    String? locale,
+  }) async {
+    return native.exportReport(
+      reportJson: _reportJson(report),
+      format: format.name,
+      locale: locale,
+    );
+  }
+
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,

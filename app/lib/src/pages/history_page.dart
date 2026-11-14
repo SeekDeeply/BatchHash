@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -92,24 +93,22 @@ class _HistoryPageState extends State<HistoryPage> {
         });
         return;
       }
-      // Same destination story as report export: pick a folder, write a named
-      // file into it. A native save-file dialog is not available on every
-      // target this app ships for, so the folder picker is the common path.
-      final String? directory = await PlatformPickers.directory(
-        () async => Directory.current.path,
+      // Saved through the platform dialog, not a folder plus File.write: on
+      // Android the app has no write grant for a folder picked from shared
+      // storage, so that path fails with errno 1.
+      final String? saved = await PlatformPickers.saveBytes(
+        suggestedName: 'batchhash-rename-log.json',
+        bytes: utf8.encode(json),
       );
       if (!mounted) {
         return;
       }
-      if (directory == null) {
+      if (saved == null) {
         setState(() {
           _busy = false;
         });
         return;
       }
-      final String path =
-          '$directory${Platform.pathSeparator}batchhash-rename-log.json';
-      await File(path).writeAsString(json);
       if (!mounted) {
         return;
       }

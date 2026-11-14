@@ -69,7 +69,7 @@ void main() {
       final List<BatchEntry> entries = fake.sampleHashedEntries;
       final RenamePlanModel plan = await fake.planRenames(
         entries: entries,
-        algorithm: 'blake3',
+        algorithms: <String>['blake3'],
         length: 8,
       );
       expect(plan.rows, isNotEmpty);
@@ -93,7 +93,7 @@ void main() {
       final List<BatchEntry> entries = fake.sampleHashedEntries;
       final RenamePlanModel plan = await fake.planRenames(
         entries: entries,
-        algorithm: 'blake3',
+        algorithms: <String>['blake3'],
         length: 8,
       );
       final Set<String> blocked = <String>{
@@ -109,7 +109,7 @@ void main() {
 
     test('accepts an explicit restriction that overrides the plan', () async {
       const RenamePlanModel plan = RenamePlanModel(
-        algorithm: 'blake3',
+        algorithms: <String>['blake3'],
         length: 8,
         uppercase: true,
         rows: <RenamePlanRowModel>[
@@ -132,7 +132,7 @@ void main() {
 
     test('refuses a plan with nothing ready instead of running wide', () async {
       const RenamePlanModel plan = RenamePlanModel(
-        algorithm: 'blake3',
+        algorithms: <String>['blake3'],
         length: 8,
         uppercase: true,
         rows: <RenamePlanRowModel>[
@@ -191,7 +191,7 @@ void main() {
 
       final RenamePlanModel plan = await service.planRenames(
         entries: hashed,
-        algorithm: 'md5',
+        algorithms: <String>['md5'],
         length: 8,
       );
       expect(plan.rows, hasLength(3));
@@ -232,7 +232,7 @@ void main() {
           .toList();
       final RenamePlanModel plan = await service.planRenames(
         entries: progress.single.entries,
-        algorithm: 'md5',
+        algorithms: <String>['md5'],
         length: 8,
       );
       final RenamePlanModel empty = RenamePlanModel(

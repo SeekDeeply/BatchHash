@@ -147,6 +147,7 @@ class _BatchHashAppState extends State<BatchHashApp> {
     // off the notifier rather than off the picker: a future caller that changes
     // the selection another way must still be remembered.
     _appState.algorithms.addListener(_persistSettings);
+    _appState.renameConfig.addListener(_persistSettings);
     _sections = <AppSection>[
       AppSection(
         key: 'nav.hash',
@@ -224,6 +225,28 @@ class _BatchHashAppState extends State<BatchHashApp> {
         _appState.algorithms.value = kept;
       }
     }
+    // Rename configuration follows the same rule as the algorithm selection:
+    // adopt a stored value only when it is still usable, so an id this build no
+    // longer ships cannot make the suffix writer fail on every file.
+    final List<String>? storedRename = stored.renameAlgorithms;
+    final Set<String> suffixUsable = <String>{
+      for (final AlgorithmInfo algorithm in kAlgorithmCatalogue)
+        if (algorithm.suffixUsable) algorithm.id,
+    };
+    final List<String> keptRename = <String>[
+      if (storedRename != null)
+        for (final String id in storedRename)
+          if (suffixUsable.contains(id)) id,
+    ];
+    final int length = stored.renameLength ?? kDefaultRenameLength;
+    _appState.renameConfig.value = RenameConfig(
+      algorithms: keptRename.isEmpty
+          ? const <String>[kDefaultRenameAlgorithm]
+          : keptRename,
+      length: length.clamp(kMinRenameLength, kMaxRenameLength),
+      uppercase: stored.renameUppercase ?? true,
+      strict: stored.renameStrict ?? true,
+    );
     _restoring = false;
   }
 
@@ -246,6 +269,10 @@ class _BatchHashAppState extends State<BatchHashApp> {
           locale: _localeController.locale,
           seedArgb: _themeController.seed.value,
           algorithms: _appState.algorithms.value.toList()..sort(),
+          renameLength: _appState.renameConfig.value.length,
+          renameAlgorithms: _appState.renameConfig.value.algorithms,
+          renameStrict: _appState.renameConfig.value.strict,
+          renameUppercase: _appState.renameConfig.value.uppercase,
         ),
       );
     });

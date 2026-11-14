@@ -61,7 +61,7 @@ void main() {
           .toList();
       final RenamePlanModel plan = await service.planRenames(
         entries: progress.single.entries,
-        algorithm: 'md5',
+        algorithms: <String>['md5'],
         length: 8,
       );
       return service.executeRenames(plan);
@@ -124,7 +124,7 @@ void main() {
           .toList();
       final RenamePlanModel plan = await second.planRenames(
         entries: progress.single.entries,
-        algorithm: 'md5',
+        algorithms: <String>['md5'],
         length: 8,
       );
       await second.executeRenames(plan);

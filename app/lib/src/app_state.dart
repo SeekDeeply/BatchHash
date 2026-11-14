@@ -62,6 +62,14 @@ class BatchHashAppState {
   final ValueNotifier<ReportModel?> compareRightReport =
       ValueNotifier<ReportModel?>(null);
 
+  /// Rename page configuration.
+  ///
+  /// Lives here rather than in the page because the shell rebuilds the page on
+  /// every tab switch; page-local fields would reset the suffix length each
+  /// time the user looked at another tab.
+  final ValueNotifier<RenameConfig> renameConfig =
+      ValueNotifier<RenameConfig>(const RenameConfig());
+
   /// Paths typed or picked for the comparison panes.
   final ValueNotifier<String> compareLeftPath = ValueNotifier<String>('');
   final ValueNotifier<String> compareRightPath = ValueNotifier<String>('');
@@ -96,6 +104,7 @@ class BatchHashAppState {
     compareLeftReport.dispose();
     compareRightReport.dispose();
     compareLeftPath.dispose();
+    renameConfig.dispose();
     compareRightPath.dispose();
   }
 }

@@ -137,6 +137,8 @@ IconData renameRowStatusIcon(RenameRowStatus status) => switch (status) {
   RenameRowStatus.invalidName => Icons.error,
   RenameRowStatus.noPermission => Icons.lock,
   RenameRowStatus.unsupported => Icons.block,
+  // A digest that no longer matches is a security signal, not a routine skip.
+  RenameRowStatus.hashMismatch => Icons.gpp_bad,
 };
 
 Color renameRowStatusColor(RenameRowStatus status, ColorScheme scheme) =>
@@ -148,4 +150,5 @@ Color renameRowStatusColor(RenameRowStatus status, ColorScheme scheme) =>
       RenameRowStatus.invalidName => scheme.error,
       RenameRowStatus.noPermission => scheme.error,
       RenameRowStatus.unsupported => scheme.outline,
+      RenameRowStatus.hashMismatch => scheme.error,
     };

@@ -57,6 +57,11 @@ class _HashPageState extends State<HashPage> {
     super.initState();
     final BatchHashAppState app = widget.state;
     _algorithms = <String>{...app.algorithms.value};
+    // The chips on screen come from _pinned, not from _algorithms. Leaving it at
+    // the default list meant a restored selection that included an algorithm
+    // outside those defaults rendered with nothing ticked: the value was
+    // correct in state and invisible in the UI.
+    _pinned = _visibleChips(_algorithms);
     _entries = app.entries.value;
     _progress = app.progress.value;
     _elapsed = app.elapsed.value;
@@ -81,7 +86,24 @@ class _HashPageState extends State<HashPage> {
     }
     setState(() {
       _algorithms = <String>{...next};
+      // Keep the restored algorithms visible as chips; otherwise a value that
+      // is not in the default list has no chip and looks unselected.
+      _pinned = _visibleChips(_algorithms);
     });
+  }
+
+  /// Defaults first, then any selected algorithm the defaults do not cover.
+  ///
+  /// Order matters: the common algorithms stay in a stable place run to run,
+  /// while a restored selection still gets a chip it can be toggled from.
+  static List<String> _visibleChips(Set<String> selected) {
+    final List<String> chips = <String>[...kDefaultPinnedAlgorithms];
+    for (final String id in selected) {
+      if (!chips.contains(id)) {
+        chips.add(id);
+      }
+    }
+    return chips;
   }
 
   static bool _sameSelection(Set<String> a, Set<String> b) =>

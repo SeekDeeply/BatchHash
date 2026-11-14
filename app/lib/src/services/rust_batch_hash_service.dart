@@ -488,16 +488,23 @@ class RustBatchHashService implements BatchHashService {
   @override
   Future<RenamePlanModel> planRenames({
     required List<BatchEntry> entries,
-    required String algorithm,
+    required List<String> algorithms,
     required int length,
     bool uppercase = true,
+    bool strict = true,
+    bool clearSuffix = false,
   }) async {
+    final List<String> effective = algorithms.isEmpty
+        ? const <String>[kDefaultRenameAlgorithm]
+        : algorithms;
     final data = native.planRenames(
       root: _lastRoot,
       entries: entries.map(_entryJson).toList(),
-      algorithm: algorithm,
+      algorithms: effective,
       length: length,
       uppercase: uppercase,
+      strict: strict,
+      clearSuffix: clearSuffix,
     );
     final rows = (data['rows'] as List<Object?>? ?? const <Object?>[])
         .cast<Map<String, Object?>>()
@@ -514,7 +521,7 @@ class RustBatchHashService implements BatchHashService {
         )
         .toList();
     return RenamePlanModel(
-      algorithm: algorithm,
+      algorithm: effective.first,
       length: length,
       uppercase: uppercase,
       rows: rows,
@@ -905,6 +912,32 @@ class RustBatchHashService implements BatchHashService {
   }
 
   @override
+  Future<String?> exportRenameLog() async {
+    final String? db = await _resolveLogDb();
+    if (db == null || db.isEmpty) {
+      return null;
+    }
+    final Map<String, Object?> data = native.exportRenameLog(db: db);
+    // The native side returns the encoded document under `json`; anything else
+    // means the core answered in a shape this build does not understand, which
+    // must surface as "no export" rather than as an empty file.
+    return data['json'] as String?;
+  }
+
+  @override
+  Future<int> importRenameLog(String json) async {
+    final String? db = await _resolveLogDb();
+    if (db == null || db.isEmpty) {
+      throw StateError('no rename log database');
+    }
+    final Map<String, Object?> data = native.importRenameLog(
+      db: db,
+      json: json,
+    );
+    return (data['batches'] as num?)?.toInt() ?? 0;
+  }
+
+  @override
   Future<bool> undoBatch(String batchId) async {
     final db = await _resolveLogDb();
     if (db == null) {
@@ -1254,6 +1287,7 @@ class RustBatchHashService implements BatchHashService {
       'missing_hash' => RenameRowStatus.missingHash,
       'invalid_name' => RenameRowStatus.invalidName,
       'no_permission' => RenameRowStatus.noPermission,
+      'hash_mismatch' => RenameRowStatus.hashMismatch,
       // "error" has no dedicated enum value; it is a row that cannot be
       // applied, which is exactly what "unsupported" reports.
       _ => RenameRowStatus.unsupported,

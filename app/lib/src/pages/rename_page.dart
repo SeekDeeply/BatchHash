@@ -18,6 +18,7 @@ String _rowStatusKey(RenameRowStatus status) => switch (status) {
   RenameRowStatus.invalidName => 'rename.status.invalidName',
   RenameRowStatus.noPermission => 'rename.status.noPermission',
   RenameRowStatus.unsupported => 'rename.status.unsupported',
+  RenameRowStatus.hashMismatch => 'rename.strictMismatch',
 };
 
 /// Suffix based rename workflow with a pure dry run before execution.
@@ -36,12 +37,16 @@ class RenamePage extends StatefulWidget {
 }
 
 class _RenamePageState extends State<RenamePage> {
-  String _algorithm = 'blake3';
-  int _length = 5;
-  bool _uppercase = true;
+  /// Configuration is owned by the app state so it survives tab switches and
+  /// restarts; the page only mirrors it for rendering.
+  RenameConfig get _config => widget.state.renameConfig.value;
+
   bool _planning = false;
   bool _executing = false;
   String? _error;
+
+  /// Whether the next plan strips existing suffixes instead of writing them.
+  bool _clearSuffix = false;
   String? _message;
   RenamePlanModel? _plan;
 
@@ -58,6 +63,15 @@ class _RenamePageState extends State<RenamePage> {
     );
   }
 
+  /// Write [next] into the shared state, which is what persists it.
+  ///
+  /// Going through the notifier instead of a local field is what makes the
+  /// length and algorithm choices survive a restart: the app-level listener
+  /// saves on change, and the shell rebuilds this page from the same value.
+  void _updateConfig(RenameConfig next) {
+    widget.state.renameConfig.value = next;
+  }
+
   Future<void> _preview(List<BatchEntry> entries) async {
     setState(() {
       _planning = true;
@@ -67,9 +81,11 @@ class _RenamePageState extends State<RenamePage> {
     try {
       final RenamePlanModel plan = await widget.state.service.planRenames(
         entries: entries,
-        algorithm: _algorithm,
-        length: _length,
-        uppercase: _uppercase,
+        algorithms: _config.algorithms,
+        length: _config.length,
+        uppercase: _config.uppercase,
+        strict: _config.strict,
+        clearSuffix: _clearSuffix,
       );
       if (!mounted) {
         return;
@@ -145,7 +161,7 @@ class _RenamePageState extends State<RenamePage> {
             .length;
         final int fileCount = hashedCount > 0 ? hashedCount : entries.length;
         final int recommended = recommendedSuffixLength(fileCount);
-        final double probability = collisionProbability(fileCount, _length);
+        final double probability = collisionProbability(fileCount, _config.length);
         final RenamePlanModel? plan = _plan;
         final String? error = _error;
         final String? message = _message;
@@ -213,7 +229,7 @@ class _RenamePageState extends State<RenamePage> {
                             key: const ValueKey<String>(
                               'rename-algorithm-dropdown',
                             ),
-                            value: _algorithm,
+                            value: _config.algorithms.first,
                             isDense: true,
                             isExpanded: true,
                             onChanged: (String? value) {
@@ -221,15 +237,26 @@ class _RenamePageState extends State<RenamePage> {
                                 return;
                               }
                               setState(() {
-                                _algorithm = value;
+                                // Replacing the first entry keeps the primary
+                                // algorithm as the one shown in the dropdown;
+                                // extra algorithms are managed below it.
+                                _updateConfig(
+                                  _config.copyWith(
+                                    algorithms: <String>[
+                                      value,
+                                      ..._config.algorithms.skip(1),
+                                    ],
+                                  ),
+                                );
                                 _plan = null;
                               });
                             },
                             items: <DropdownMenuItem<String>>[
-                              for (final String algorithm in kSuffixAlgorithms)
+                              for (final AlgorithmInfo info
+                                  in kSuffixUsableAlgorithms)
                                 DropdownMenuItem<String>(
-                                  value: algorithm,
-                                  child: Text(algorithm.toUpperCase()),
+                                  value: info.id,
+                                  child: Text(info.displayName),
                                 ),
                             ],
                           ),
@@ -251,14 +278,16 @@ class _RenamePageState extends State<RenamePage> {
                     Expanded(
                       child: Slider(
                         key: const ValueKey<String>('rename-length-slider'),
-                        value: _length.toDouble(),
-                        min: 4,
-                        max: 16,
-                        divisions: 12,
-                        label: '$_length',
+                        value: _config.length.toDouble(),
+                        min: kMinRenameLength.toDouble(),
+                        max: kMaxRenameLength.toDouble(),
+                        divisions: kMaxRenameLength - kMinRenameLength,
+                        label: '${_config.length}',
                         onChanged: (double value) {
                           setState(() {
-                            _length = value.round();
+                            _updateConfig(
+                              _config.copyWith(length: value.round()),
+                            );
                             _plan = null;
                             _message = null;
                           });
@@ -267,18 +296,91 @@ class _RenamePageState extends State<RenamePage> {
                     ),
                     SizedBox(
                       width: 32,
-                      child: Text('$_length', textAlign: TextAlign.end),
+                      child: Text('${_config.length}', textAlign: TextAlign.end),
                     ),
                   ],
+                ),
+                // Extra algorithms: the primary one is the dropdown above, and
+                // any ticked here is appended to the same bracket group. Restricted
+                // to suffix-usable algorithms because writing an algorithm whose
+                // digest length is ambiguous would make the name unparseable.
+                ExpansionTile(
+                  key: const ValueKey<String>('rename-extra-algorithms'),
+                  tilePadding: EdgeInsets.zero,
+                  title: Text(context.strings('rename.moreAlgorithms')),
+                  subtitle: Text(
+                    context.strings('rename.moreAlgorithmsHint'),
+                  ),
+                  children: <Widget>[
+                    for (final AlgorithmInfo info in kSuffixUsableAlgorithms)
+                      CheckboxListTile(
+                        key: ValueKey<String>(
+                          'rename-extra-${info.id}',
+                        ),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(info.displayName),
+                        value: _config.algorithms.contains(info.id),
+                        // The primary algorithm is never removable here: the
+                        // dropdown above owns it, and unchecking it from a second
+                        // control would leave the page with no algorithm at all.
+                        onChanged: info.id == _config.algorithms.first
+                            ? null
+                            : (bool? selected) {
+                                final List<String> next = <String>[
+                                  ..._config.algorithms,
+                                ];
+                                if (selected == true) {
+                                  if (!next.contains(info.id)) {
+                                    next.add(info.id);
+                                  }
+                                } else {
+                                  next.remove(info.id);
+                                }
+                                setState(() {
+                                  _updateConfig(
+                                    _config.copyWith(algorithms: next),
+                                  );
+                                  _plan = null;
+                                });
+                              },
+                      ),
+                  ],
+                ),
+                SwitchListTile(
+                  key: const ValueKey<String>('rename-strict-switch'),
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(context.strings('rename.strictMode')),
+                  subtitle: Text(context.strings('rename.strictModeHint')),
+                  value: _config.strict,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _updateConfig(_config.copyWith(strict: value));
+                      _plan = null;
+                    });
+                  },
+                ),
+                SwitchListTile(
+                  key: const ValueKey<String>('rename-clear-suffix-switch'),
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(context.strings('rename.clearSuffix')),
+                  subtitle: Text(context.strings('rename.clearSuffixHint')),
+                  value: _clearSuffix,
+                  onChanged: (bool value) {
+                    setState(() {
+                      _clearSuffix = value;
+                      _plan = null;
+                    });
+                  },
                 ),
                 SwitchListTile(
                   key: const ValueKey<String>('rename-uppercase-switch'),
                   contentPadding: EdgeInsets.zero,
                   title: Text(context.strings('rename.uppercase')),
-                  value: _uppercase,
+                  value: _config.uppercase,
                   onChanged: (bool value) {
                     setState(() {
-                      _uppercase = value;
+                      _updateConfig(_config.copyWith(uppercase: value));
                       _plan = null;
                     });
                   },
@@ -287,7 +389,7 @@ class _RenamePageState extends State<RenamePage> {
                   context.strings(
                     'rename.collisionEstimate',
                     args: <String, String>{
-                      'length': '$_length',
+                      'length': '${_config.length}',
                       'files': '$fileCount',
                       'probability': formatProbabilityPercent(probability),
                       'recommended': '$recommended',

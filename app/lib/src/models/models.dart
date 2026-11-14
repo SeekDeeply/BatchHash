@@ -939,7 +939,13 @@ enum RenameRowStatus {
   missingHash,
   invalidName,
   noPermission,
-  unsupported;
+  unsupported,
+
+  /// The file on disk no longer matches the digest the plan expected.
+  ///
+  /// Its own status rather than a skip: a skip means "nothing to do", while
+  /// this means "something changed behind our back", which the user has to see.
+  hashMismatch;
 
   String get label => switch (this) {
     RenameRowStatus.ready => 'ready',
@@ -949,6 +955,7 @@ enum RenameRowStatus {
     RenameRowStatus.invalidName => 'invalid name',
     RenameRowStatus.noPermission => 'no permission',
     RenameRowStatus.unsupported => 'unsupported',
+    RenameRowStatus.hashMismatch => 'hash mismatch',
   };
 }
 
@@ -1090,9 +1097,13 @@ class RenderingHardwareModel {
 }
 
 /// Recommended suffix length for a given number of files.
+///
+/// The first tier returns 6, matching the default. A default that differs from
+/// the recommendation makes the page contradict itself: the slider would sit on
+/// one number while the hint recommended another.
 int recommendedSuffixLength(int fileCount) {
   if (fileCount <= 100) {
-    return 5;
+    return 6;
   }
   if (fileCount <= 1000) {
     return 8;
@@ -1112,3 +1123,68 @@ double collisionProbability(int fileCount, int length) {
   final double pairs = fileCount * (fileCount - 1) / 2;
   return 1 - math.exp(-pairs / space);
 }
+
+/// Settings the rename page keeps between visits and across restarts.
+///
+/// Separate from the hash page selection on purpose: writing a suffix and
+/// computing a report answer different questions, and a user who hashes with
+/// twenty algorithms should still be able to write a five-character suffix.
+class RenameConfig {
+  const RenameConfig({
+    this.algorithms = const <String>[kDefaultRenameAlgorithm],
+    this.length = kDefaultRenameLength,
+    this.uppercase = true,
+    this.strict = true,
+  });
+
+  /// Algorithms written into the filename, in the order they appear.
+  final List<String> algorithms;
+
+  /// Hex characters taken from each digest.
+  final int length;
+
+  /// Whether the hex token is uppercase.
+  final bool uppercase;
+
+  /// When true, a file whose current digest does not match the recorded one is
+  /// refused instead of renamed.
+  final bool strict;
+
+  RenameConfig copyWith({
+    List<String>? algorithms,
+    int? length,
+    bool? uppercase,
+    bool? strict,
+  }) {
+    return RenameConfig(
+      algorithms: algorithms ?? this.algorithms,
+      length: length ?? this.length,
+      uppercase: uppercase ?? this.uppercase,
+      strict: strict ?? this.strict,
+    );
+  }
+}
+
+/// Suffix length used before the user picks one.
+///
+/// Six rather than the historical five: a shorter token collides as soon as a
+/// folder holds a few thousand files, and six is what the default suffix
+/// algorithm already emits for its own token.
+const int kDefaultRenameLength = 6;
+
+/// Algorithm written when the user has never chosen one.
+const String kDefaultRenameAlgorithm = 'blake3';
+
+/// Bounds accepted for the suffix length, matching the Rust contract.
+const int kMinRenameLength = 4;
+const int kMaxRenameLength = 16;
+
+/// Algorithms that may be written into a filename suffix.
+///
+/// Derived from the catalogue rather than hand-listed so the rename page cannot
+/// drift behind the hash page: the old fixed five-entry list is exactly how the
+/// two pages ended up offering different algorithm sets.
+final List<AlgorithmInfo> kSuffixUsableAlgorithms = <AlgorithmInfo>[
+  for (final AlgorithmInfo info in kAlgorithmCatalogue)
+    if (info.suffixUsable) info,
+];

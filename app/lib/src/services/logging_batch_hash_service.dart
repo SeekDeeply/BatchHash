@@ -229,20 +229,27 @@ class LoggingBatchHashService implements BatchHashService {
   @override
   Future<RenamePlanModel> planRenames({
     required List<BatchEntry> entries,
-    required String algorithm,
+    required List<String> algorithms,
     required int length,
     bool uppercase = true,
+    bool strict = true,
+    bool clearSuffix = false,
   }) {
     return _record(
       'op.planRenames',
       () => inner.planRenames(
         entries: entries,
-        algorithm: algorithm,
+        algorithms: algorithms,
         length: length,
         uppercase: uppercase,
+        strict: strict,
+        clearSuffix: clearSuffix,
       ),
+      // The log line names every algorithm written, not just the first: a
+      // suffix carrying two digests is a different operation from one carrying
+      // one, and an operator reading the log needs to see that.
       detail: (RenamePlanModel plan) =>
-          '$algorithm · ${plan.rows.length}',
+          '${algorithms.join("+")} · ${plan.rows.length}',
     );
   }
 
@@ -445,6 +452,24 @@ class LoggingBatchHashService implements BatchHashService {
 
   @override
   Future<List<HistoryBatchModel>> loadHistory() => inner.loadHistory();
+
+  @override
+  Future<String?> exportRenameLog() {
+    return _record(
+      'op.exportRenameLog',
+      () => inner.exportRenameLog(),
+      detail: (String? json) => json == null ? 'none' : '${json.length} bytes',
+    );
+  }
+
+  @override
+  Future<int> importRenameLog(String json) {
+    return _record(
+      'op.importRenameLog',
+      () => inner.importRenameLog(json),
+      detail: (int batches) => '$batches batches',
+    );
+  }
 
   @override
   Future<bool> undoBatch(String batchId) {

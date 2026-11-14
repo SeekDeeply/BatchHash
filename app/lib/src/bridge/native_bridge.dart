@@ -241,23 +241,50 @@ class BatchHashNative {
     return features is List<Object?> && features.contains('async_jobs');
   }
   /// Plan suffix renames from entries that already carry their hashes.
+  /// Plan suffix writes.
+  ///
+  /// Sends both `algorithm` (primary, historical field) and `algorithms` (the
+  /// full list). The native side reads `algorithms` when present, so an older
+  /// core that only understands `algorithm` still plans the primary one instead
+  /// of failing on an unknown key.
   Map<String, Object?> planRenames({
     required List<Map<String, Object?>> entries,
-    required String algorithm,
+    required List<String> algorithms,
     required int length,
     String? root,
     bool uppercase = true,
     bool prefix = false,
     bool overwrite = false,
+    bool strict = true,
+    bool clearSuffix = false,
   }) {
     return _callMap('bh_plan_renames', <String, Object?>{
       if (root != null) 'root': root,
       'entries': entries,
-      'algorithm': algorithm,
+      'algorithm': algorithms.isEmpty ? '' : algorithms.first,
+      'algorithms': algorithms,
       'length': length,
       'case': uppercase ? 'upper' : 'lower',
       'prefix': prefix,
       'overwrite': overwrite,
+      'strict': strict,
+      'clear_suffix': clearSuffix,
+    });
+  }
+
+  /// Export the rename log as portable JSON.
+  Map<String, Object?> exportRenameLog({required String db}) {
+    return _callMap('bh_export_rename_log', <String, Object?>{'db': db});
+  }
+
+  /// Import a previously exported rename log.
+  Map<String, Object?> importRenameLog({
+    required String db,
+    required String json,
+  }) {
+    return _callMap('bh_import_rename_log', <String, Object?>{
+      'db': db,
+      'json': json,
     });
   }
 

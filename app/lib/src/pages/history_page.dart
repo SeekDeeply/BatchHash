@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../services/batch_hash_service.dart';
 import '../util/formatting.dart';
+import '../util/platform_pickers.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/status_chip.dart';
 
@@ -69,13 +72,134 @@ class _HistoryPageState extends State<HistoryPage> {
     }
   }
 
+  /// Write the log to a JSON file the user picks.
+  ///
+  /// The export is the payload a future import reads back, so it is written as
+  /// plain JSON with no app-specific envelope: a user can inspect or diff it.
+  Future<void> _exportLog() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final String? json = await widget.service.exportRenameLog();
+      if (!mounted) {
+        return;
+      }
+      if (json == null) {
+        setState(() {
+          _busy = false;
+        });
+        return;
+      }
+      // Same destination story as report export: pick a folder, write a named
+      // file into it. A native save-file dialog is not available on every
+      // target this app ships for, so the folder picker is the common path.
+      final String? directory = await PlatformPickers.directory(
+        () async => Directory.current.path,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (directory == null) {
+        setState(() {
+          _busy = false;
+        });
+        return;
+      }
+      final String path =
+          '$directory${Platform.pathSeparator}batchhash-rename-log.json';
+      await File(path).writeAsString(json);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _busy = false;
+        _message = context.strings('rename.logExported');
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _busy = false;
+        _message = context.strings(
+          'rename.importFailed',
+          args: <String, String>{'error': '$error'},
+        );
+      });
+    }
+  }
+
+  /// Read a log document and hand it to the service.
+  Future<void> _importLog() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final List<String> picked = await PlatformPickers.files(
+        () async => const <String>[],
+      );
+      if (!mounted) {
+        return;
+      }
+      if (picked.isEmpty) {
+        setState(() {
+          _busy = false;
+        });
+        return;
+      }
+      final String json = await File(picked.first).readAsString();
+      final int batches = await widget.service.importRenameLog(json);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _busy = false;
+        _message = context.strings('rename.logImported');
+        _future = widget.service.loadHistory();
+      });
+      // Touch the count so an empty import is visible as such rather than
+      // looking identical to a successful restore.
+      debugPrint('imported $batches batches');
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _busy = false;
+        _message = context.strings(
+          'rename.importFailed',
+          args: <String, String>{'error': '$error'},
+        );
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final String? message = _message;
     return Scaffold(
-      appBar: AppBar(title: Text(context.strings('history.title'))),
+      appBar: AppBar(
+        title: Text(context.strings('history.title')),
+        actions: <Widget>[
+          IconButton(
+            key: const ValueKey<String>('history-export-log'),
+            onPressed: _busy ? null : _exportLog,
+            icon: const Icon(Icons.upload_file_outlined),
+            tooltip: context.strings('rename.exportLog'),
+          ),
+          IconButton(
+            key: const ValueKey<String>('history-import-log'),
+            onPressed: _busy ? null : _importLog,
+            icon: const Icon(Icons.download_outlined),
+            tooltip: context.strings('rename.importLog'),
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

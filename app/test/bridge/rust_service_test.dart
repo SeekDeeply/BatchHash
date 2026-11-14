@@ -200,7 +200,7 @@ void main() {
 
       final plan = await service.planRenames(
         entries: hashed,
-        algorithm: 'md5',
+        algorithms: <String>['md5'],
         length: 8,
       );
       expect(plan.rows, hasLength(2));

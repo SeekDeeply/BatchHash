@@ -49,11 +49,23 @@ abstract class BatchHashService {
     bool forceSoftware = false,
   });
 
+  /// Plan suffix writes for [entries].
+  ///
+  /// [algorithms] is a list rather than a single id so one filename can carry
+  /// several truncated digests; the first entry is the primary one and keeps
+  /// the historical single-algorithm output identical.
+  ///
+  /// [strict] refuses any entry whose digest in [entries] does not match what
+  /// the planner is told the file should contain, so a file changed behind the
+  /// app's back is never renamed. [clearSuffix] is the opposite mode: strip an
+  /// existing digest from the name instead of writing one.
   Future<RenamePlanModel> planRenames({
     required List<BatchEntry> entries,
-    required String algorithm,
+    required List<String> algorithms,
     required int length,
     bool uppercase = true,
+    bool strict = true,
+    bool clearSuffix = false,
   });
 
   /// Apply [plan].
@@ -139,4 +151,20 @@ abstract class BatchHashService {
   /// A successful undo invalidates any cached report: serializing the pre-undo
   /// state afterwards would be a lie.
   Future<bool> undoBatch(String batchId);
+
+  /// Export the rename log as portable JSON.
+  ///
+  /// Returns the encoded document rather than writing it: the caller decides
+  /// where it lands, so the same payload can be shown, copied or saved.
+  ///
+  /// Optional on the interface: a service that has no log (the demo one, or a
+  /// build without persistence) returns null and the UI hides the action
+  /// instead of offering a button that cannot work.
+  Future<String?> exportRenameLog();
+
+  /// Import a previously exported rename log.
+  ///
+  /// Returns the number of batches restored. Throws when [json] is not a log
+  /// document, because silently importing nothing would look like success.
+  Future<int> importRenameLog(String json);
 }

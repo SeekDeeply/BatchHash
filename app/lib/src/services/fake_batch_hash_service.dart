@@ -280,31 +280,50 @@ class FakeBatchHashService implements BatchHashService {
   @override
   Future<RenamePlanModel> planRenames({
     required List<BatchEntry> entries,
-    required String algorithm,
+    required List<String> algorithms,
     required int length,
     bool uppercase = true,
+    bool strict = true,
+    bool clearSuffix = false,
   }) async {
     await Future<void>.delayed(const Duration(milliseconds: 5));
+    final List<String> selected = algorithms.isEmpty
+        ? const <String>[kDefaultRenameAlgorithm]
+        : algorithms;
     final List<RenamePlanRowModel> rows = <RenamePlanRowModel>[];
     for (var index = 0; index < entries.length; index += 1) {
       final BatchEntry entry = entries[index];
-      final String? hash = entry.hashes[algorithm];
-      if (entry.status != EntryStatus.ok ||
-          hash == null ||
-          hash.length < length) {
+      // Every requested algorithm must be present: writing a suffix that only
+      // covers some of them would silently produce a different filename than
+      // the user configured.
+      final List<String> pieces = <String>[];
+      String? missing;
+      for (final String algorithm in selected) {
+        final String? hash = entry.hashes[algorithm];
+        if (hash == null || hash.length < length) {
+          missing = algorithm;
+          break;
+        }
+        pieces.add(
+          uppercase
+              ? hash.substring(0, length).toUpperCase()
+              : hash.substring(0, length).toLowerCase(),
+        );
+      }
+      if (entry.status != EntryStatus.ok || missing != null) {
         rows.add(
           RenamePlanRowModel(
             path: entry.path,
             status: RenameRowStatus.missingHash,
-            message: 'No $algorithm digest available.',
+            message: 'No ${missing ?? selected.first} digest available.',
           ),
         );
         continue;
       }
-      final String suffix = uppercase
-          ? hash.substring(0, length).toUpperCase()
-          : hash.substring(0, length).toLowerCase();
-      final String target = _suffixPath(entry.path, suffix);
+      final String suffix = pieces.join('-');
+      final String target = clearSuffix
+          ? _clearSuffixPath(entry.path)
+          : _suffixPath(entry.path, suffix);
       final RenameRowStatus status;
       if (index % 11 == 5) {
         status = RenameRowStatus.skipped;
@@ -506,6 +525,28 @@ class FakeBatchHashService implements BatchHashService {
   @override
   Future<List<HistoryBatchModel>> loadHistory() async {
     return List<HistoryBatchModel>.unmodifiable(_history);
+  }
+
+  /// In-memory stand-in for the persisted log, so tests can exercise export
+  /// and import without a database file.
+  final List<String> _renameLog = <String>[];
+
+  @override
+  Future<String?> exportRenameLog() async {
+    // A JSON array keeps the demo payload self-describing, and an empty log
+    // still exports: "I have nothing" is a valid answer, not a failure.
+    return '[${_renameLog.join(',')}]';
+  }
+
+  @override
+  Future<int> importRenameLog(String json) async {
+    // Deliberately strict: a payload that is not a JSON array is rejected so a
+    // wrong file cannot look like a successful, if empty, import.
+    if (!json.trim().startsWith('[')) {
+      throw const FormatException('not a rename log document');
+    }
+    _renameLog.add(json);
+    return 1;
   }
 
   @override
@@ -738,6 +779,11 @@ class FakeBatchHashService implements BatchHashService {
   /// A real export gets a fresh timestamp; the fake stays deterministic so a
   /// widget test can assert on the path.
   String _exportStamp() => '20240601-120000';
+
+  /// Strip an existing `[digest]` group from the name, if any.
+  String _clearSuffixPath(String path) {
+    return path.replaceFirst(RegExp(r'\[[0-9A-Fa-f]+\]'), '');
+  }
 
   String _suffixPath(String path, String suffix) {
     final int slash = path.lastIndexOf('/');

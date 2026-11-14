@@ -83,11 +83,12 @@ class PlatformPickers {
       }
       shared = shared.sublist(0, keep);
     }
-    // Always drop the last shared segment: every input is a file, so the shared
-    // prefix necessarily ends on a file name. Files in one directory therefore
-    // resolve to that directory rather than to a non-existent "directory" named
-    // after one of them.
-    if (shared.isNotEmpty) {
+    // Drop the last segment only when the shared prefix is itself one of the
+    // inputs. When two files differ in their final segment the prefix already
+    // describes their directory (a.txt + b.txt -> .../Download), and blindly
+    // cutting a segment there would walk one level too high.
+    final String prefix = '/${shared.join('/')}';
+    if (paths.contains(prefix) && shared.isNotEmpty) {
       shared = shared.sublist(0, shared.length - 1);
     }
     if (shared.isEmpty) {

@@ -324,7 +324,7 @@ class AppStrings {
 
     'about.title': '关于 BatchHash',
     'about.collaborators': '合作者',
-    'about.collaboratorsDetail': '参与测试、反馈与改进的贡献者。',
+    'about.collaboratorsDetail': '参与本项目协作的贡献者。',
     'about.openProfile': '打开主页',
     'entry.collapsedCount': '{count} 项已折叠',
     'compare.mode.files': '文件直接对比',
@@ -749,7 +749,7 @@ class AppStrings {
     'settings.languageEn': 'English',
     'about.title': 'About BatchHash',
     'about.collaborators': 'Collaborators',
-    'about.collaboratorsDetail': 'People who tested, reported issues and improved it.',
+    'about.collaboratorsDetail': 'People who worked on this project.',
     'about.openProfile': 'Open profile',
     'entry.collapsedCount': '{count} hidden',
     'compare.mode.files': 'Compare files',

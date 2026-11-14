@@ -91,16 +91,27 @@ class AboutPage extends StatelessWidget {
                       context.strings('about.collaboratorsDetail'),
                     ),
                   ),
-                  for (final String handle in kCollaborators)
+                  for (final ({String handle, List<String> roleKeys}) person
+                      in kCollaborators)
                     ListTile(
-                      key: ValueKey<String>('about-collaborator-$handle'),
+                      key: ValueKey<String>(
+                        'about-collaborator-${person.handle}',
+                      ),
                       leading: const Icon(Icons.person_outline, size: 20),
-                      title: Text(handle),
-                      subtitle: Text(githubProfileUrl(handle)),
+                      title: Text(person.handle),
+                      // Roles come from the string table: the same person may
+                      // be credited differently per language without editing
+                      // code.
+                      subtitle: Text(
+                        <String>[
+                          for (final String key in person.roleKeys)
+                            context.strings(key),
+                        ].join(' · '),
+                      ),
                       trailing: const Icon(Icons.open_in_new, size: 18),
                       onTap: () async {
                         final bool opened = await openProjectUrl(
-                          url: githubProfileUrl(handle),
+                          url: githubProfileUrl(person.handle),
                         );
                         if (!context.mounted) {
                           return;
@@ -110,7 +121,9 @@ class AboutPage extends StatelessWidget {
                         // but does nothing.
                         if (!opened) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(githubProfileUrl(handle))),
+                            SnackBar(
+                              content: Text(githubProfileUrl(person.handle)),
+                            ),
                           );
                         }
                       },

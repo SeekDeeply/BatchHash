@@ -13,8 +13,20 @@ const String kProjectUrl = 'https://github.com/SeekDeeply/BatchHash';
 /// Collaborators credited on the About page.
 ///
 /// Only the GitHub handle is stored; the profile URL is derived, so adding a
-/// name never means keeping two strings in sync.
-const List<String> kCollaborators = <String>['IPF-Sinon'];
+/// name never means keeping two strings in sync. Roles are i18n keys rather
+/// than free text so the credit reads in the same language as the rest of the
+/// UI.
+const List<({String handle, List<String> roleKeys})> kCollaborators =
+    <({String handle, List<String> roleKeys})>[
+  (
+    handle: 'IPF-Sinon',
+    roleKeys: <String>[
+      'about.role.devEnv',
+      'about.role.beta',
+      'about.role.funding',
+    ],
+  ),
+];
 
 /// Profile page for a GitHub [handle].
 String githubProfileUrl(String handle) => 'https://github.com/$handle';

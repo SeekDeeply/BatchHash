@@ -273,8 +273,17 @@ class BatchHashNative {
   }
 
   /// Export the rename log as portable JSON.
-  Map<String, Object?> exportRenameLog({required String db}) {
-    return _callMap('bh_export_rename_log', <String, Object?>{'db': db});
+  ///
+  /// [batchId] narrows the document to one batch; omitting it exports every
+  /// batch, which is what the history page hands the user by default.
+  Map<String, Object?> exportRenameLog({
+    required String db,
+    String? batchId,
+  }) {
+    return _callMap('bh_export_rename_log', <String, Object?>{
+      'db': db,
+      if (batchId != null) 'batch_id': batchId,
+    });
   }
 
   /// Import a previously exported rename log.

@@ -347,6 +347,7 @@ class FakeBatchHashService implements BatchHashService {
     }
     return RenamePlanModel(
       algorithm: selected.first,
+      algorithms: selected,
       length: length,
       uppercase: uppercase,
       rows: rows,
@@ -539,14 +540,14 @@ class FakeBatchHashService implements BatchHashService {
   }
 
   @override
-  Future<int> importRenameLog(String json) async {
+  Future<RenameLogImportResult> importRenameLog(String json) async {
     // Deliberately strict: a payload that is not a JSON array is rejected so a
     // wrong file cannot look like a successful, if empty, import.
     if (!json.trim().startsWith('[')) {
       throw const FormatException('not a rename log document');
     }
     _renameLog.add(json);
-    return 1;
+    return const RenameLogImportResult(batches: 1, operations: 1);
   }
 
   @override

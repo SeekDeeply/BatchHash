@@ -522,6 +522,7 @@ class RustBatchHashService implements BatchHashService {
         .toList();
     return RenamePlanModel(
       algorithm: effective.first,
+      algorithms: effective,
       length: length,
       uppercase: uppercase,
       rows: rows,
@@ -925,7 +926,7 @@ class RustBatchHashService implements BatchHashService {
   }
 
   @override
-  Future<int> importRenameLog(String json) async {
+  Future<RenameLogImportResult> importRenameLog(String json) async {
     final String? db = await _resolveLogDb();
     if (db == null || db.isEmpty) {
       throw StateError('no rename log database');
@@ -934,7 +935,11 @@ class RustBatchHashService implements BatchHashService {
       db: db,
       json: json,
     );
-    return (data['batches'] as num?)?.toInt() ?? 0;
+    return RenameLogImportResult(
+      batches: (data['batches'] as num?)?.toInt() ?? 0,
+      operations: (data['operations'] as num?)?.toInt() ?? 0,
+      skipped: (data['skipped'] as num?)?.toInt() ?? 0,
+    );
   }
 
   @override

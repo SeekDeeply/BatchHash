@@ -434,6 +434,42 @@ pub unsafe extern "C" fn bh_list_batches(request: *const c_char) -> *mut c_char 
     })
 }
 
+/// Export a rename log as a portable JSON archive.
+///
+/// Request: {"db": "<sqlite path>", "batch_id": "<optional>"}.
+/// Response data: {"json": "<archive document>", "batches": N, "operations": M}.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_export_rename_log(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::ExportRenameLogRequest = parse_request(request, false)?;
+        let exported = api::export_rename_log_request(&parsed)?;
+        serde_json::to_value(exported).map_err(internal_error)
+    })
+}
+
+/// Import a portable JSON archive into a rename log.
+///
+/// Request: {"db": "<sqlite path>", "json": "<archive document>"}.
+/// Response data: {"batches": N, "operations": M, "skipped": K}.
+///
+/// Only the log is written; no file is renamed.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be freed
+/// with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_import_rename_log(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::ImportRenameLogRequest = parse_request(request, false)?;
+        let imported = api::import_rename_log_request(&parsed)?;
+        serde_json::to_value(imported).map_err(internal_error)
+    })
+}
+
 /// Build canonical report JSON from entries the UI already holds.
 ///
 /// # Safety

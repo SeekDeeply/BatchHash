@@ -231,6 +231,148 @@ impl RenameOperation {
     }
 }
 
+/// Version of the portable rename-log archive format.
+///
+/// Bumped only when the document shape changes incompatibly; importers accept
+/// every version they know and reject anything newer than [`ARCHIVE_VERSION`], so
+/// a newer export never silently loses fields on an older build.
+pub const ARCHIVE_VERSION: u32 = 1;
+
+/// One archived rename operation.
+///
+/// The database row id is deliberately absent: it is a local autoincrement value
+/// that means nothing on another machine, and an archive a human might read or
+/// diff should not carry it. Operations reference their batch by id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchivedOperation {
+    /// Owning batch id (the portable reference, not a numeric foreign key).
+    pub batch_id: String,
+    /// Original path recorded by the rename.
+    pub original_path: String,
+    /// Path after the rename.
+    pub new_path: String,
+    /// Algorithm whose digest produced the suffix.
+    pub algorithm: AlgorithmId,
+    /// Full hex digest recorded for verification.
+    pub full_hash: String,
+    /// Truncated suffix token written into the filename, without brackets.
+    pub suffix: String,
+    /// Operation type, for example `rename`.
+    pub op_type: String,
+    /// Backend result text, once known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    /// Machine-readable error kind, once known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
+    /// Creation timestamp in RFC 3339 form.
+    pub created_at: String,
+    /// Timestamp of the undo, once undone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undone_at: Option<String>,
+    /// Lifecycle state at export time.
+    pub state: String,
+}
+
+impl ArchivedOperation {
+    /// Convert a stored operation into its portable form.
+    pub fn from_operation(operation: &RenameOperation) -> Self {
+        Self {
+            batch_id: operation.batch_id.clone(),
+            original_path: operation.original_path.clone(),
+            new_path: operation.new_path.clone(),
+            algorithm: operation.algorithm,
+            full_hash: operation.full_hash.clone(),
+            suffix: operation.suffix.clone(),
+            op_type: operation.op_type.clone(),
+            result: operation.result.clone(),
+            error_kind: operation.error_kind.clone(),
+            created_at: operation.created_at.clone(),
+            undone_at: operation.undone_at.clone(),
+            state: operation.state.as_str().to_string(),
+        }
+    }
+
+    /// Rebuild a storable operation; the row id is assigned by the store.
+    ///
+    /// Returns [`LogError::InvalidStoredValue`] when the archived state is not a
+    /// known lifecycle state, so a hand-edited archive fails loudly instead of
+    /// being imported as `pending`.
+    pub fn to_operation(&self) -> Result<RenameOperation, LogError> {
+        let state = OperationState::from_str_name(&self.state).ok_or_else(|| {
+            LogError::InvalidStoredValue(format!("unknown state: {}", self.state))
+        })?;
+        Ok(RenameOperation {
+            id: 0,
+            batch_id: self.batch_id.clone(),
+            original_path: self.original_path.clone(),
+            new_path: self.new_path.clone(),
+            algorithm: self.algorithm,
+            full_hash: self.full_hash.clone(),
+            suffix: self.suffix.clone(),
+            op_type: self.op_type.clone(),
+            result: self.result.clone(),
+            error_kind: self.error_kind.clone(),
+            created_at: self.created_at.clone(),
+            undone_at: self.undone_at.clone(),
+            state,
+        })
+    }
+}
+
+/// One archived batch with its operations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArchivedBatch {
+    /// The batch record, unchanged.
+    pub batch: BatchRecord,
+    /// Operations belonging to this batch, in insertion order.
+    #[serde(default)]
+    pub operations: Vec<ArchivedOperation>,
+}
+
+/// A whole rename log in one portable JSON document.
+///
+/// The document is meant to be human readable and diffable: keys are stable,
+/// batches are self-contained and nothing refers to a local row id. Import it with
+/// [`import_archive`] to restore the log, or open it in a text editor to see
+/// exactly which files a batch renamed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenameLogArchive {
+    /// Archive format version ([`ARCHIVE_VERSION`]).
+    pub version: u32,
+    /// Tool that produced the archive, for diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    /// Tool version, for diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_version: Option<String>,
+    /// Export timestamp in RFC 3339 form.
+    pub exported_at: String,
+    /// Every exported batch, oldest first.
+    pub batches: Vec<ArchivedBatch>,
+}
+
+impl RenameLogArchive {
+    /// Total number of operations across every batch.
+    pub fn operation_count(&self) -> usize {
+        self.batches
+            .iter()
+            .map(|batch| batch.operations.len())
+            .sum()
+    }
+}
+
+/// Result of one import pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ImportSummary {
+    /// Batches written to the log.
+    pub batches: u64,
+    /// Operations written to the log.
+    pub operations: u64,
+    /// Batches skipped because the log already had that batch id.
+    pub skipped: u64,
+}
+
 /// Status of one row in an [`UndoPlan`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -667,6 +809,142 @@ impl LogStore {
         error_kind: Option<&str>,
     ) -> Result<(), LogError> {
         self.record_result(operation_id, result, error_kind, state)
+    }
+
+    /// Export the whole log, or one batch, as a portable archive.
+    ///
+    /// `batch_id` of [`None`] exports every batch, oldest first. The result carries
+    /// no local row ids, so the document is stable across machines and readable by
+    /// a human: see [`RenameLogArchive`].
+    pub fn export_archive(&self, batch_id: Option<&str>) -> Result<RenameLogArchive, LogError> {
+        let batches = match batch_id {
+            Some(id) => {
+                if !self.batch_exists(id)? {
+                    return Err(LogError::BatchNotFound(id.to_string()));
+                }
+                vec![id.to_string()]
+            }
+            None => self
+                .list_batches()?
+                .into_iter()
+                .map(|batch| batch.id)
+                .collect(),
+        };
+        let mut archived: Vec<ArchivedBatch> = Vec::with_capacity(batches.len());
+        for id in batches {
+            let batch = self.load_batch(&id)?;
+            let operations = self.load_operations(Some(&id))?;
+            archived.push(ArchivedBatch {
+                batch,
+                operations: operations
+                    .iter()
+                    .map(ArchivedOperation::from_operation)
+                    .collect(),
+            });
+        }
+        Ok(RenameLogArchive {
+            version: ARCHIVE_VERSION,
+            tool: Some(batchhash_types::TOOL_NAME.to_string()),
+            tool_version: Some(batchhash_types::TOOL_VERSION.to_string()),
+            exported_at: now_rfc3339(),
+            batches: archived,
+        })
+    }
+
+    /// Export the log as canonical pretty-printed JSON.
+    ///
+    /// Pretty-printed on purpose: the archive is meant to be opened, read and
+    /// diffed by a person, and a single-line document defeats that.
+    pub fn export_archive_json(&self, batch_id: Option<&str>) -> Result<String, LogError> {
+        let archive = self.export_archive(batch_id)?;
+        serde_json::to_string_pretty(&archive).map_err(|error| {
+            LogError::InvalidStoredValue(format!("cannot serialize archive: {error}"))
+        })
+    }
+
+    /// Import a portable archive into this log.
+    ///
+    /// Import is idempotent per batch id: a batch whose id is already present is
+    /// skipped together with its operations, so importing the same document twice
+    /// cannot duplicate records or overwrite newer local state. Nothing here
+    /// touches the filesystem; restoring filenames is a separate, explicit
+    /// [`plan_undo`](LogStore::plan_undo) plus [`apply_undo`] call.
+    pub fn import_archive(
+        &mut self,
+        archive: &RenameLogArchive,
+    ) -> Result<ImportSummary, LogError> {
+        if archive.version > ARCHIVE_VERSION {
+            return Err(LogError::InvalidStoredValue(format!(
+                "archive version {} is newer than the supported version {ARCHIVE_VERSION}",
+                archive.version
+            )));
+        }
+        let mut summary = ImportSummary::default();
+        for entry in &archive.batches {
+            if self.batch_exists(&entry.batch.id)? {
+                summary.skipped += 1;
+                continue;
+            }
+            let batch = entry.batch.clone();
+            self.create_batch(&batch)?;
+            let mut written = 0u64;
+            for operation in &entry.operations {
+                let operation = operation.to_operation()?;
+                // A mismatched batch reference would be rejected by the foreign
+                // key anyway; reporting it as a malformed archive is clearer.
+                if operation.batch_id != batch.id {
+                    return Err(LogError::InvalidStoredValue(format!(
+                        "operation for batch {} claims batch {}",
+                        batch.id, operation.batch_id
+                    )));
+                }
+                self.insert_operation(&operation)?;
+                written += 1;
+            }
+            summary.batches += 1;
+            summary.operations += written;
+        }
+        Ok(summary)
+    }
+
+    /// Import an archive from JSON text.
+    ///
+    /// Parsing failures are reported as [`LogError::InvalidStoredValue`] so a
+    /// malformed document (a truncated download, a hand edit) is distinguishable
+    /// from a valid archive that conflicts with local state.
+    pub fn import_archive_json(&mut self, text: &str) -> Result<ImportSummary, LogError> {
+        let archive: RenameLogArchive = serde_json::from_str(text).map_err(|error| {
+            LogError::InvalidStoredValue(format!("cannot parse archive: {error}"))
+        })?;
+        self.import_archive(&archive)
+    }
+
+    /// Load one batch by id.
+    fn load_batch(&self, batch_id: &str) -> Result<BatchRecord, LogError> {
+        let raw = self
+            .conn
+            .query_row(
+                "SELECT id, created_at, root, root_kind, algorithms,
+                        suffix_length, suffix_case, suffix_algorithm, status
+                 FROM batch WHERE id = ?1",
+                params![batch_id],
+                |row| {
+                    Ok(RawBatch {
+                        id: row.get(0)?,
+                        created_at: row.get(1)?,
+                        root: row.get(2)?,
+                        root_kind: row.get(3)?,
+                        algorithms: row.get(4)?,
+                        suffix_length: row.get(5)?,
+                        suffix_case: row.get(6)?,
+                        suffix_algorithm: row.get(7)?,
+                        status: row.get(8)?,
+                    })
+                },
+            )
+            .optional()?
+            .ok_or_else(|| LogError::BatchNotFound(batch_id.to_string()))?;
+        raw.into_record()
     }
 
     fn batch_exists(&self, batch_id: &str) -> Result<bool, LogError> {
@@ -1539,6 +1817,146 @@ mod tests {
         assert_eq!(stale_results[0].status, UndoResultStatus::Skipped);
         assert!(original.exists());
         assert!(!Path::new(&renamed).exists());
+    }
+
+    #[test]
+    fn archive_round_trips_batches_and_operations() {
+        let temp = tempdir().expect("tempdir");
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let batch = test_batch();
+        store.create_batch(&batch).expect("create batch");
+        let first = insert_applied(&mut store, &batch.id, "/tmp/a.txt", "/tmp/a[ABCDEF].txt");
+        let second = insert_pending(&mut store, &batch.id, "/tmp/b.txt", "/tmp/b[ABCDEF].txt");
+        store.mark_undone(first).expect("mark undone");
+
+        let archive = store.export_archive(None).expect("export");
+        assert_eq!(archive.version, ARCHIVE_VERSION);
+        assert_eq!(archive.batches.len(), 1);
+        assert_eq!(archive.operation_count(), 2);
+        let exported = &archive.batches[0];
+        assert_eq!(exported.batch.id, batch.id);
+        assert_eq!(exported.operations.len(), 2);
+        assert_eq!(exported.operations[0].state, "undone");
+        assert_eq!(exported.operations[1].state, "pending");
+        assert!(exported.operations[0].undone_at.is_some());
+
+        // The document must not leak local row ids: they mean nothing elsewhere.
+        let json = store.export_archive_json(None).expect("export json");
+        assert!(
+            !json.contains("\"id\": 1"),
+            "row ids must not be archived: {json}"
+        );
+        assert!(json.contains("\"batch_id\""));
+
+        // Import into a fresh store and compare the visible state.
+        let mut restored = LogStore::open_in_memory().expect("second store");
+        let summary = restored.import_archive_json(&json).expect("import");
+        assert_eq!(summary.batches, 1);
+        assert_eq!(summary.operations, 2);
+        assert_eq!(summary.skipped, 0);
+        let batches = restored.list_batches().expect("list");
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].id, batch.id);
+        let operations = restored
+            .operations_for_batch(&batch.id)
+            .expect("operations");
+        assert_eq!(operations.len(), 2);
+        assert_eq!(operations[0].state, OperationState::Undone);
+        assert_eq!(operations[1].state, OperationState::Pending);
+        assert_eq!(operations[1].original_path, "/tmp/b.txt");
+        let _ = second;
+        let _ = temp;
+    }
+
+    #[test]
+    fn importing_the_same_archive_twice_skips_every_batch() {
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let batch = test_batch();
+        store.create_batch(&batch).expect("create batch");
+        insert_applied(&mut store, &batch.id, "/tmp/a.txt", "/tmp/a[ABCDEF].txt");
+        let json = store.export_archive_json(None).expect("export json");
+
+        let mut target = LogStore::open_in_memory().expect("second store");
+        let first = target.import_archive_json(&json).expect("first import");
+        assert_eq!(first.batches, 1);
+        assert_eq!(first.operations, 1);
+
+        // Importing the same document again must be a no-op, not a duplicate.
+        let second = target.import_archive_json(&json).expect("second import");
+        assert_eq!(second.batches, 0);
+        assert_eq!(second.operations, 0);
+        assert_eq!(second.skipped, 1);
+        assert_eq!(
+            target
+                .operations_for_batch(&batch.id)
+                .expect("operations")
+                .len(),
+            1,
+            "an idempotent import must not duplicate operations"
+        );
+    }
+
+    #[test]
+    fn import_rejects_a_newer_archive_version_and_unknown_states() {
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let mut archive = store.export_archive(None).expect("export");
+        archive.version = ARCHIVE_VERSION + 1;
+        let error = store.import_archive(&archive).expect_err("newer version");
+        assert!(matches!(error, LogError::InvalidStoredValue(_)));
+
+        let batch = test_batch();
+        let mut archive = RenameLogArchive {
+            version: ARCHIVE_VERSION,
+            tool: None,
+            tool_version: None,
+            exported_at: now_rfc3339(),
+            batches: vec![ArchivedBatch {
+                batch: batch.clone(),
+                operations: vec![ArchivedOperation {
+                    batch_id: batch.id.clone(),
+                    original_path: "/tmp/a.txt".to_string(),
+                    new_path: "/tmp/a[ABCDEF].txt".to_string(),
+                    algorithm: AlgorithmId::Blake3,
+                    full_hash: digest(),
+                    suffix: "ABCDEF".to_string(),
+                    op_type: RenameOperation::TYPE_RENAME.to_string(),
+                    result: None,
+                    error_kind: None,
+                    created_at: now_rfc3339(),
+                    undone_at: None,
+                    state: "nonsense".to_string(),
+                }],
+            }],
+        };
+        let error = store.import_archive(&archive).expect_err("bad state");
+        assert!(matches!(error, LogError::InvalidStoredValue(_)));
+
+        // A malformed document is reported as invalid rather than panicking.
+        let error = store
+            .import_archive_json("{\"version\":1")
+            .expect_err("truncated json");
+        assert!(matches!(error, LogError::InvalidStoredValue(_)));
+        archive.version = ARCHIVE_VERSION;
+    }
+
+    #[test]
+    fn export_of_one_batch_only_contains_that_batch() {
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let first = test_batch();
+        let mut second = test_batch();
+        second.id = "other-batch".to_string();
+        store.create_batch(&first).expect("first batch");
+        store.create_batch(&second).expect("second batch");
+        insert_applied(&mut store, &first.id, "/tmp/a.txt", "/tmp/a[ABCDEF].txt");
+
+        let archive = store.export_archive(Some(&first.id)).expect("export");
+        assert_eq!(archive.batches.len(), 1);
+        assert_eq!(archive.batches[0].batch.id, first.id);
+
+        let error = store
+            .export_archive(Some("missing"))
+            .expect_err("unknown batch");
+        assert!(matches!(error, LogError::BatchNotFound(_)));
     }
 
     #[test]

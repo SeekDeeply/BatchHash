@@ -151,18 +151,24 @@ class _HistoryPageState extends State<HistoryPage> {
         return;
       }
       final String json = await File(picked.first).readAsString();
-      final int batches = await widget.service.importRenameLog(json);
+      final RenameLogImportResult result = await widget.service
+          .importRenameLog(json);
       if (!mounted) {
         return;
       }
       setState(() {
         _busy = false;
-        _message = context.strings('rename.logImported');
+        // The counts are the whole point: "imported" with no numbers cannot
+        // tell a real restore from a file that was already there.
+        _message = context.strings(
+          'rename.logImported',
+          args: <String, String>{
+            'batches': '${result.batches}',
+            'skipped': '${result.skipped}',
+          },
+        );
         _future = widget.service.loadHistory();
       });
-      // Touch the count so an empty import is visible as such rather than
-      // looking identical to a successful restore.
-      debugPrint('imported $batches batches');
     } catch (error) {
       if (!mounted) {
         return;

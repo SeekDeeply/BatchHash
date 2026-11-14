@@ -575,6 +575,183 @@ fn hash_entries_request_hashes_explicit_paths() {
 }
 
 #[test]
+fn plan_renames_prefers_the_algorithm_list_and_falls_back_to_the_single_field() {
+    let entry = batchhash_ffi::api::EntryInputDto {
+        path: "movie.mkv".to_string(),
+        display_path: None,
+        size: 5,
+        mtime: None,
+        hashes: vec![
+            batchhash_ffi::api::HashDto {
+                algorithm: "md5".to_string(),
+                hex: "0123456789abcdef0123456789abcdef".to_string(),
+            },
+            batchhash_ffi::api::HashDto {
+                algorithm: "sha256".to_string(),
+                hex: "f".repeat(64),
+            },
+        ],
+    };
+
+    // The modern shape: a list of algorithms produces one combined group, with
+    // the algorithm prefix forced on even though `prefix` is false.
+    let plan = batchhash_ffi::api::plan_renames_request(&batchhash_ffi::api::PlanRenamesRequest {
+        root: None,
+        entries: vec![entry.clone()],
+        algorithm: String::new(),
+        algorithms: vec!["md5".to_string(), "sha256".to_string()],
+        length: 6,
+        case: Some("upper".to_string()),
+        prefix: false,
+        overwrite: false,
+        strict: false,
+        clear_suffix: false,
+    })
+    .expect("plan");
+    assert_eq!(plan.summary.ready, 1);
+    assert_eq!(
+        plan.rows[0].proposed_name,
+        "movie[md5:012345+sha256:FFFFFF].mkv"
+    );
+
+    // The legacy shape still works: only `algorithm` is sent.
+    let plan = batchhash_ffi::api::plan_renames_request(&batchhash_ffi::api::PlanRenamesRequest {
+        root: None,
+        entries: vec![entry],
+        algorithm: "md5".to_string(),
+        algorithms: Vec::new(),
+        length: 6,
+        case: Some("upper".to_string()),
+        prefix: false,
+        overwrite: false,
+        strict: false,
+        clear_suffix: false,
+    })
+    .expect("legacy plan");
+    assert_eq!(plan.summary.ready, 1);
+    assert_eq!(plan.rows[0].proposed_name, "movie[012345].mkv");
+}
+
+#[test]
+fn strict_planning_reports_changed_content_without_renaming_it() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let file = temp.path().join("movie.mkv");
+    write(&file, b"movie");
+    let display = file.to_string_lossy().into_owned();
+    let entry = batchhash_ffi::api::EntryInputDto {
+        path: "movie.mkv".to_string(),
+        display_path: Some(display),
+        size: 5,
+        mtime: None,
+        // A digest the file does not have.
+        hashes: vec![batchhash_ffi::api::HashDto {
+            algorithm: "md5".to_string(),
+            hex: "00000000000000000000000000000000".to_string(),
+        }],
+    };
+    let plan = batchhash_ffi::api::plan_renames_request(&batchhash_ffi::api::PlanRenamesRequest {
+        root: None,
+        entries: vec![entry],
+        algorithm: "md5".to_string(),
+        algorithms: Vec::new(),
+        length: 6,
+        case: None,
+        prefix: false,
+        overwrite: false,
+        strict: true,
+        clear_suffix: false,
+    })
+    .expect("strict plan");
+    assert_eq!(plan.summary.ready, 0);
+    assert_eq!(plan.summary.hash_mismatch, 1);
+    assert_eq!(plan.rows[0].status, "hash_mismatch");
+    assert!(file.exists(), "a mismatch must never be renamed");
+}
+
+#[test]
+fn strict_planning_keeps_a_matching_file_ready() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let file = temp.path().join("movie.mkv");
+    write(&file, b"movie");
+    let display = file.to_string_lossy().into_owned();
+    // MD5 of b"movie".
+    let entry = batchhash_ffi::api::EntryInputDto {
+        path: "movie.mkv".to_string(),
+        display_path: Some(display),
+        size: 5,
+        mtime: None,
+        hashes: vec![batchhash_ffi::api::HashDto {
+            algorithm: "md5".to_string(),
+            hex: "aed34b9f60ee115dfa7918b742336277".to_string(),
+        }],
+    };
+    let plan = batchhash_ffi::api::plan_renames_request(&batchhash_ffi::api::PlanRenamesRequest {
+        root: None,
+        entries: vec![entry],
+        algorithm: "md5".to_string(),
+        algorithms: Vec::new(),
+        length: 6,
+        case: None,
+        prefix: false,
+        overwrite: false,
+        strict: true,
+        clear_suffix: false,
+    })
+    .expect("strict plan");
+    assert_eq!(plan.summary.hash_mismatch, 0);
+    assert_eq!(plan.summary.ready, 1);
+    assert_eq!(plan.rows[0].proposed_name, "movie[AED34B].mkv");
+}
+
+#[test]
+fn rename_log_export_and_import_round_trip_through_the_c_abi() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    write(&temp.path().join("movie.mkv"), b"movie");
+    let log_db = temp.path().join("log/rename.db");
+    let mut request = batch_request(temp.path(), vec!["md5"]);
+    request.suffix = Some(SuffixDto {
+        algorithm: "md5".to_string(),
+        length: 8,
+        case: None,
+        prefix: false,
+    });
+    request.apply_renames = true;
+    request.log_db = Some(log_db.to_string_lossy().into_owned());
+    let run = run_batch_request(&request).expect("rename run");
+    assert_eq!(run.renamed, 1);
+
+    let exported = call_ok(unsafe {
+        c_api::bh_export_rename_log(request_ptr(&serde_json::json!({ "db": log_db })))
+    });
+    assert_eq!(exported["batches"], 1);
+    assert_eq!(exported["operations"], 1);
+    let json = exported["json"].as_str().expect("json field").to_string();
+    assert!(json.contains("\"batches\""));
+
+    // Import the same document into a second log: it must be restored there.
+    let other_db = temp.path().join("log/other.db");
+    let import_body = serde_json::json!({ "db": other_db, "json": json });
+    let imported = call_ok(unsafe { c_api::bh_import_rename_log(request_ptr(&import_body)) });
+    assert_eq!(imported["batches"], 1);
+    assert_eq!(imported["operations"], 1);
+    assert_eq!(imported["skipped"], 0);
+
+    // Importing twice is idempotent and reports the skip.
+    let again = call_ok(unsafe { c_api::bh_import_rename_log(request_ptr(&import_body)) });
+    assert_eq!(again["batches"], 0);
+    assert_eq!(again["skipped"], 1);
+}
+
+/// Encode a JSON value as a NUL-terminated request string.
+fn request_ptr(value: &serde_json::Value) -> *const c_char {
+    let text = serde_json::to_string(value).expect("encode request");
+    let owned = CString::new(text).expect("cstring");
+    // Leaking keeps the pointer alive for the duration of the call; the value is
+    // small and the test process exits right after.
+    owned.into_raw()
+}
+
+#[test]
 fn plan_renames_request_uses_the_supplied_hashes() {
     let entry = batchhash_ffi::api::EntryInputDto {
         path: "movie.mkv".to_string(),
@@ -590,10 +767,13 @@ fn plan_renames_request_uses_the_supplied_hashes() {
         root: None,
         entries: vec![entry],
         algorithm: "md5".to_string(),
+        algorithms: Vec::new(),
         length: 8,
         case: Some("upper".to_string()),
         prefix: false,
         overwrite: false,
+        strict: false,
+        clear_suffix: false,
     })
     .expect("plan");
     assert_eq!(plan.summary.ready, 1);

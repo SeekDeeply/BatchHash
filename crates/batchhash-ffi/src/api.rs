@@ -10,8 +10,8 @@ use batchhash_core::pipeline::{run_batch, BatchRequest};
 use batchhash_core::scan::{scan, ScanOptions};
 use batchhash_hash::{FileIo, HashEntryOptions, HashOptions};
 use batchhash_rename::log_store::{apply_undo, LogStore, OperationState, UndoResultStatus};
-use batchhash_rename::planner::{RenameRowStatus, StdFsBackend, StdRenameFs};
-use batchhash_rename::suffix::{SuffixFormat, SuffixParseResult};
+use batchhash_rename::planner::{ExpectedHash, RenameRowStatus, StdFsBackend, StdRenameFs};
+use batchhash_rename::suffix::{MultiSuffixFormat, SuffixFormat, SuffixParseResult};
 use batchhash_report::format::{detect_report_format, export_report, import_report, ReportFormat};
 use batchhash_report::{export_report_with, ExportLocale};
 use batchhash_types::{
@@ -372,6 +372,11 @@ pub struct PlanSummaryDto {
     pub unsupported: u32,
     /// Rows that failed for another reason.
     pub errors: u32,
+    /// Rows whose file no longer matches its recorded digest.
+    ///
+    /// Only produced by a strict plan; zero otherwise.
+    #[serde(default)]
+    pub hash_mismatch: u32,
 }
 
 /// Result of a batch run.
@@ -635,6 +640,7 @@ pub fn run_batch_request_with_progress(
         no_permission: u32::try_from(plan.summary.no_permission).unwrap_or(u32::MAX),
         unsupported: u32::try_from(plan.summary.unsupported).unwrap_or(u32::MAX),
         errors: u32::try_from(plan.summary.errors).unwrap_or(u32::MAX),
+        hash_mismatch: u32::try_from(plan.summary.hash_mismatch).unwrap_or(u32::MAX),
     });
     Ok(BatchResultDto {
         total: run.report.summary.total,
@@ -879,6 +885,7 @@ fn plan_row_status_str(status: RenameRowStatus) -> &'static str {
         RenameRowStatus::NoPermission => "no_permission",
         RenameRowStatus::Unsupported => "unsupported",
         RenameRowStatus::Error => "error",
+        RenameRowStatus::HashMismatch => "hash_mismatch",
     }
 }
 
@@ -1045,22 +1052,45 @@ pub struct PlanRenamesRequest {
     /// Root the entry paths are relative to (defaults to the process directory).
     #[serde(default)]
     pub root: Option<String>,
-    /// Entries to plan, with the hash required by the suffix algorithm.
+    /// Entries to plan, with the hash required by the suffix algorithm(s).
     pub entries: Vec<EntryInputDto>,
     /// Algorithm whose digest supplies the suffix token.
+    ///
+    /// Kept for older clients: when [`PlanRenamesRequest::algorithms`] is absent or
+    /// empty this single value is used.
+    #[serde(default)]
     pub algorithm: String,
-    /// Number of hex characters (4..=16).
+    /// Algorithms written into the suffix, in filename order.
+    ///
+    /// This is the current field; [`PlanRenamesRequest::algorithm`] is only a
+    /// fallback so a client that predates multi-algorithm support still works.
+    #[serde(default)]
+    pub algorithms: Vec<String>,
+    /// Number of hex characters (4..=16), applied to every algorithm.
     #[serde(default = "default_suffix_length")]
     pub length: u8,
     /// "upper" | "lower" (defaults to upper).
     #[serde(default)]
     pub case: Option<String>,
     /// Emit a self-describing "algo:hex" token.
+    ///
+    /// Always on for multi-algorithm plans: a combined group of bare hex tokens
+    /// cannot be parsed or verified, so the flag only affects single-algorithm
+    /// output.
     #[serde(default)]
     pub prefix: bool,
     /// Allow overwriting existing targets.
     #[serde(default)]
     pub overwrite: bool,
+    /// Verify each file against the hash supplied in its entry before renaming.
+    ///
+    /// Off by default: with `strict` false the planner performs exactly the
+    /// planning it always did, with no extra hashing and no `hash_mismatch` rows.
+    #[serde(default)]
+    pub strict: bool,
+    /// Replace an existing parseable suffix instead of skipping the file.
+    #[serde(default)]
+    pub clear_suffix: bool,
 }
 
 /// Result of [plan_renames_request].
@@ -1339,28 +1369,52 @@ pub fn hash_entries_request_with_progress(
 }
 
 /// Plan suffix renames from entries that already carry their hashes.
+///
+/// Algorithms come from `algorithms` and fall back to the single `algorithm`
+/// field, so a client built before multi-algorithm support keeps working. With
+/// `strict` set, every candidate file is verified against the hash its entry
+/// carries; a mismatch yields a `hash_mismatch` row and is never planned for
+/// renaming.
 pub fn plan_renames_request(request: &PlanRenamesRequest) -> Result<RenamePlanDto, ApiError> {
-    let suffix = parse_suffix(&SuffixDto {
-        algorithm: request.algorithm.clone(),
-        length: request.length,
-        case: request.case.clone(),
-        prefix: request.prefix,
-    })?;
+    let algorithms = request_algorithms(request)?;
+    let parts: Vec<SuffixFormat> = algorithms
+        .iter()
+        .map(|algorithm| {
+            parse_suffix(&SuffixDto {
+                algorithm: algorithm.stable_id().to_string(),
+                length: request.length,
+                case: request.case.clone(),
+                prefix: request.prefix,
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    let format =
+        MultiSuffixFormat::new(parts).map_err(|error| ApiError::invalid(error.to_string()))?;
     let root = request.root.clone().unwrap_or_else(|| ".".to_string());
     let entries: Vec<FileEntry> = request
         .entries
         .iter()
         .map(|entry| entry_from_input(entry, &root))
         .collect();
+    let verify_hashes = if request.strict {
+        expected_hashes(&entries, &algorithms)
+    } else {
+        Vec::new()
+    };
     let options = batchhash_rename::planner::RenamePlanOptions {
-        format: suffix,
+        format,
         overwrite: request.overwrite,
+        verify_hashes,
+        clear_existing_suffix: request.clear_suffix,
         ..batchhash_rename::planner::RenamePlanOptions::default()
     };
-    let plan = batchhash_rename::planner::plan_renames(
+    // With strict off this is the probe-free entry point, so planning performs no
+    // hashing and therefore no additional I/O.
+    let plan = batchhash_rename::planner::plan_renames_with_probe(
         &entries,
         &options,
         &batchhash_rename::planner::StdRenameFs,
+        &VerifiedEntryProbe { entries: &entries },
     );
     Ok(RenamePlanDto {
         rows: plan
@@ -1392,8 +1446,104 @@ pub fn plan_renames_request(request: &PlanRenamesRequest) -> Result<RenamePlanDt
             no_permission: u32::try_from(plan.summary.no_permission).unwrap_or(u32::MAX),
             unsupported: u32::try_from(plan.summary.unsupported).unwrap_or(u32::MAX),
             errors: u32::try_from(plan.summary.errors).unwrap_or(u32::MAX),
+            hash_mismatch: u32::try_from(plan.summary.hash_mismatch).unwrap_or(u32::MAX),
         },
     })
+}
+
+/// Algorithms requested by a plan, preferring the list over the legacy field.
+///
+/// The single `algorithm` field is validated even when the list is present, so a
+/// client that sends both cannot have an invalid legacy value silently ignored.
+fn request_algorithms(request: &PlanRenamesRequest) -> Result<Vec<AlgorithmId>, ApiError> {
+    let mut requested: Vec<AlgorithmId> = Vec::new();
+    for id in &request.algorithms {
+        let algorithm = AlgorithmId::from_stable_id(id)
+            .ok_or_else(|| ApiError::invalid(format!("unknown algorithm '{id}'")))?;
+        if !requested.contains(&algorithm) {
+            requested.push(algorithm);
+        }
+    }
+    if requested.is_empty() {
+        if request.algorithm.trim().is_empty() {
+            return Err(ApiError::invalid(
+                "at least one algorithm is required (algorithms or algorithm)",
+            ));
+        }
+        let algorithm = AlgorithmId::from_stable_id(&request.algorithm).ok_or_else(|| {
+            ApiError::invalid(format!("unknown algorithm '{}'", request.algorithm))
+        })?;
+        requested.push(algorithm);
+    }
+    Ok(requested)
+}
+
+/// Recorded digests for every entry, used when a plan is strict.
+///
+/// The digest a caller sends with an entry is the historical record it wants
+/// verified; the probe re-reads the file and compares, so a file edited after it
+/// was hashed is caught before any rename.
+fn expected_hashes(entries: &[FileEntry], algorithms: &[AlgorithmId]) -> Vec<ExpectedHash> {
+    let mut expected = Vec::new();
+    for entry in entries {
+        for algorithm in algorithms {
+            if let Some(hex) = entry.hashes.get(algorithm) {
+                expected.push(ExpectedHash::new(
+                    entry.display_path.clone(),
+                    *algorithm,
+                    hex.clone(),
+                ));
+            }
+        }
+    }
+    expected
+}
+
+/// [`HashProbe`] that re-reads each file and hashes the requested algorithms.
+///
+/// It is only constructed when a plan is strict, and it keeps one digest per
+/// (path, algorithm) pair so a two-algorithm plan hashes each file once per
+/// algorithm instead of once per suffix part.
+struct VerifiedEntryProbe<'a> {
+    entries: &'a [FileEntry],
+}
+
+impl batchhash_rename::planner::HashProbe for VerifiedEntryProbe<'_> {
+    fn current_hash(&self, path: &std::path::Path, algorithm: AlgorithmId) -> Option<String> {
+        let display = path.to_string_lossy();
+        let entry = self
+            .entries
+            .iter()
+            .find(|entry| entry.display_path == display)?;
+        hash_file(&entry.display_path, entry, algorithm)
+    }
+}
+
+/// Compute one digest of one file on disk.
+///
+/// Returns [`None`] when the file cannot be read, which the planner reports as a
+/// mismatch: under a strict policy an unverifiable file must not be renamed.
+fn hash_file(path: &str, entry: &FileEntry, algorithm: AlgorithmId) -> Option<String> {
+    let options = HashOptions::new(vec![algorithm]);
+    let options = HashEntryOptions {
+        hasher: options,
+        io: FileIo::Path,
+    };
+    let entries = std::slice::from_ref(entry);
+    let outcome = batchhash_hash::hash_entries(
+        entries,
+        &options,
+        &batchhash_hash::CancelToken::new(),
+        &|_event| {},
+    );
+    let hashed = outcome.entries.first()?;
+    let digest = hashed.hashes.get(&algorithm)?;
+    if hashed.status.is_ok() {
+        Some(digest.clone())
+    } else {
+        let _ = path;
+        None
+    }
 }
 
 /// Import a report file and return its canonical JSON.
@@ -1656,6 +1806,95 @@ pub fn list_batches_request(request: &ListBatchesRequest) -> Result<Vec<BatchInf
         });
     }
     Ok(out)
+}
+
+/// Request for [export_rename_log_request]: dump a rename log as portable JSON.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExportRenameLogRequest {
+    /// SQLite rename log path.
+    pub db: String,
+    /// Restrict the export to one batch id; every batch when absent.
+    #[serde(default)]
+    pub batch_id: Option<String>,
+}
+
+/// Result of [export_rename_log_request].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExportRenameLogDto {
+    /// Portable archive document, pretty-printed JSON.
+    ///
+    /// The field is named `json` because that is what the UI reads; it is the
+    /// document to write to a file or hand to [import_rename_log_request].
+    pub json: String,
+    /// Number of batches in the document.
+    pub batches: u64,
+    /// Number of operations in the document.
+    pub operations: u64,
+}
+
+/// Request for [import_rename_log_request]: restore a rename log from JSON.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImportRenameLogRequest {
+    /// SQLite rename log path to import into (created when missing).
+    pub db: String,
+    /// Archive document previously produced by [export_rename_log_request].
+    pub json: String,
+}
+
+/// Result of [import_rename_log_request].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ImportRenameLogDto {
+    /// Batches written to the log.
+    pub batches: u64,
+    /// Operations written to the log.
+    pub operations: u64,
+    /// Batches skipped because the log already contained that batch id.
+    ///
+    /// A non-zero value means the import was a no-op for those batches: the same
+    /// document was imported before, or the log already had newer local state.
+    pub skipped: u64,
+}
+
+/// Export a rename log as a portable JSON archive.
+///
+/// Nothing is written to the filesystem here: the caller receives the document and
+/// decides where it goes. Importing it back never renames files either; restoring
+/// filenames stays an explicit undo.
+pub fn export_rename_log_request(
+    request: &ExportRenameLogRequest,
+) -> Result<ExportRenameLogDto, ApiError> {
+    let store =
+        LogStore::open(&request.db).map_err(|error| ApiError::new("log", error.to_string()))?;
+    let archive = store
+        .export_archive(request.batch_id.as_deref())
+        .map_err(|error| ApiError::new("log", error.to_string()))?;
+    let json = serde_json::to_string_pretty(&archive)
+        .map_err(|error| ApiError::new("log", format!("cannot serialize archive: {error}")))?;
+    Ok(ExportRenameLogDto {
+        json,
+        batches: u64::try_from(archive.batches.len()).unwrap_or(u64::MAX),
+        operations: u64::try_from(archive.operation_count()).unwrap_or(u64::MAX),
+    })
+}
+
+/// Import a portable JSON archive into a rename log.
+///
+/// Idempotent per batch id: a batch already present is skipped, so importing the
+/// same document twice cannot duplicate records. Only the log is written — no file
+/// is renamed or moved.
+pub fn import_rename_log_request(
+    request: &ImportRenameLogRequest,
+) -> Result<ImportRenameLogDto, ApiError> {
+    let mut store =
+        LogStore::open(&request.db).map_err(|error| ApiError::new("log", error.to_string()))?;
+    let summary = store
+        .import_archive_json(&request.json)
+        .map_err(|error| ApiError::new("log", error.to_string()))?;
+    Ok(ImportRenameLogDto {
+        batches: summary.batches,
+        operations: summary.operations,
+        skipped: summary.skipped,
+    })
 }
 
 /// Request for [build_report_request]: canonical report JSON from entries.

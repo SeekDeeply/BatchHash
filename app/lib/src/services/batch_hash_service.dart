@@ -164,7 +164,7 @@ abstract class BatchHashService {
 
   /// Import a previously exported rename log.
   ///
-  /// Returns the number of batches restored. Throws when [json] is not a log
-  /// document, because silently importing nothing would look like success.
-  Future<int> importRenameLog(String json);
+  /// Returns what was restored. Throws when [json] is not a log document,
+  /// because silently importing nothing would look like success.
+  Future<RenameLogImportResult> importRenameLog(String json);
 }

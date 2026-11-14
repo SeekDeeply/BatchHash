@@ -25,8 +25,10 @@ use std::path::{Path, PathBuf};
 use batchhash_types::{is_hex_digest_of_len, FileEntry};
 use serde::{Deserialize, Serialize};
 
+use batchhash_types::AlgorithmId;
+
 use crate::suffix::{
-    format_filename, parse_filename, SuffixError, SuffixFormat, SuffixParseResult,
+    format_filename_multi, parse_filename, MultiSuffixFormat, SuffixError, SuffixParseResult,
     DEFAULT_MAX_UTF16_LEN,
 };
 
@@ -81,25 +83,100 @@ impl RenameFs for StdRenameFs {
     }
 }
 
+/// Expected digest for one file, supplied by the caller as a history record.
+///
+/// The planner never computes hashes itself: this crate owns filename rules and
+/// the rename log, not the hash engines. A caller that already hashed the file
+/// (the pipeline, a stored report or the UI cache) passes the digest it recorded,
+/// and the plan verifies that the file still matches before any rename happens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExpectedHash {
+    /// Path the digest belongs to, exactly as [`FileEntry::display_path`] holds it.
+    pub path: String,
+    /// Algorithm whose digest was recorded.
+    pub algorithm: AlgorithmId,
+    /// Full digest in hex, any case.
+    pub hex: String,
+}
+
+impl ExpectedHash {
+    /// Build an expected digest record.
+    pub fn new(path: impl Into<String>, algorithm: AlgorithmId, hex: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            algorithm,
+            hex: hex.into(),
+        }
+    }
+}
+
+/// Optional digest source consulted while planning a strict rename.
+///
+/// Implemented by callers that can re-read a file cheaply; the planner only calls
+/// it for rows it would otherwise mark [`RenameRowStatus::Ready`], so a dry run
+/// stays a pure function of its inputs when strict verification is off.
+pub trait HashProbe {
+    /// Current digest of [`path`] for [`algorithm`], or [`None`] when the file
+    /// cannot be read or the algorithm is unknown to the implementation.
+    ///
+    /// Returning [`None`] never renames: the row becomes
+    /// [`RenameRowStatus::HashMismatch`] because an unverifiable file must not be
+    /// renamed under a strict policy.
+    fn current_hash(&self, path: &Path, algorithm: AlgorithmId) -> Option<String>;
+}
+
+/// [`HashProbe`] that never has anything to report.
+///
+/// Used when strict verification is configured but no probe was supplied, so the
+/// planner can still explain the outcome per row instead of silently trusting.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoHashProbe;
+
+impl HashProbe for NoHashProbe {
+    fn current_hash(&self, _path: &Path, _algorithm: AlgorithmId) -> Option<String> {
+        None
+    }
+}
+
 /// Options controlling [`plan_renames`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenamePlanOptions {
     /// Suffix format applied to every planned filename.
-    pub format: SuffixFormat,
+    ///
+    /// One-part formats behave exactly like the historical single-algorithm
+    /// configuration; multi-part formats additionally force the algorithm prefix
+    /// on every token so the group stays parseable.
+    pub format: MultiSuffixFormat,
     /// When true, an existing target file is not reported as a conflict.
     /// Defaults to false because overwriting is destructive.
     pub overwrite: bool,
     /// When true, planned targets that differ only by Unicode case are treated
     /// as conflicts. Defaults to true so case-insensitive filesystems are safe.
     pub case_insensitive_conflicts: bool,
+    /// Historical digests every candidate file must still match.
+    ///
+    /// An empty list is the default and means **no verification at all**: no
+    /// lookup, no comparison, no probe call and no [`RenameRowStatus::HashMismatch`]
+    /// row, so existing callers observe exactly the behaviour they did before
+    /// strict verification existed.
+    pub verify_hashes: Vec<ExpectedHash>,
+    /// When true, a file whose name already carries a parseable suffix has that
+    /// group replaced with a freshly computed one instead of being skipped.
+    ///
+    /// This is the "strip existing suffix" mode: it never trusts the old token,
+    /// it rewrites the name from the current digest, so a stale or foreign suffix
+    /// is removed rather than nested.
+    pub clear_existing_suffix: bool,
 }
 
 impl Default for RenamePlanOptions {
     fn default() -> Self {
         Self {
-            format: SuffixFormat::default(),
+            format: MultiSuffixFormat::default(),
             overwrite: false,
             case_insensitive_conflicts: true,
+            verify_hashes: Vec::new(),
+            clear_existing_suffix: false,
         }
     }
 }
@@ -117,6 +194,12 @@ pub enum RenameRowStatus {
     SkippedAlreadySuffixed,
     /// The entry has no usable hash for the configured suffix algorithm.
     MissingHash,
+    /// The file no longer matches the historical digest the caller supplied.
+    ///
+    /// Only produced when [`RenamePlanOptions::verify_hashes`] is non-empty; such
+    /// a row is never renamed, because renaming it would label a file with a
+    /// digest that is not its own.
+    HashMismatch,
     /// The original filename cannot be used (unparseable bracket group or a
     /// name that cannot be formatted within the platform limit).
     InvalidName,
@@ -159,6 +242,8 @@ pub struct RenamePlanSummary {
     pub skipped: usize,
     /// Rows with [`RenameRowStatus::MissingHash`].
     pub missing_hash: usize,
+    /// Rows with [`RenameRowStatus::HashMismatch`].
+    pub hash_mismatch: usize,
     /// Rows with [`RenameRowStatus::InvalidName`].
     pub invalid_name: usize,
     /// Rows with [`RenameRowStatus::NoPermission`].
@@ -186,10 +271,32 @@ pub struct RenamePlan {
 /// are skipped entirely. Rows are produced for every remaining entry, even when
 /// they cannot be renamed, so the UI can explain each outcome. The
 /// implementation performs reads through [`RenameFs`] only and never writes.
+///
+/// This entry point performs no digest verification: it is
+/// [`plan_renames_with_probe`] with [`NoHashProbe`], which is indistinguishable
+/// from the historical behaviour as long as
+/// [`RenamePlanOptions::verify_hashes`] is empty (the default).
 pub fn plan_renames(
     entries: &[FileEntry],
     options: &RenamePlanOptions,
     fs: &dyn RenameFs,
+) -> RenamePlan {
+    plan_renames_with_probe(entries, options, fs, &NoHashProbe)
+}
+
+/// Build a dry-run rename plan, verifying recorded digests through [`probe`].
+///
+/// When [`RenamePlanOptions::verify_hashes`] is empty the probe is never called,
+/// so behaviour and I/O are identical to [`plan_renames`]. When it is not empty,
+/// every row that would be [`RenameRowStatus::Ready`] is re-hashed for each
+/// algorithm the suffix writes, and a row whose digest no longer matches becomes
+/// [`RenameRowStatus::HashMismatch`] with the expected and actual values in its
+/// reason. A mismatching row is never renamed.
+pub fn plan_renames_with_probe(
+    entries: &[FileEntry],
+    options: &RenamePlanOptions,
+    fs: &dyn RenameFs,
+    probe: &dyn HashProbe,
 ) -> RenamePlan {
     if let Err(error) = options.format.validate() {
         let mut rows = Vec::new();
@@ -268,6 +375,8 @@ pub fn plan_renames(
             row.reason = Some("target name already exists".to_string());
         }
     }
+
+    verify_row_hashes(&mut rows, options, probe);
 
     let summary = summarize(&rows);
     RenamePlan {
@@ -594,16 +703,24 @@ fn build_row(entry_index: usize, entry: &FileEntry, options: &RenamePlanOptions)
             reason: Some("path has no file name".to_string()),
         };
     };
+    // The name is rewritten from scratch in clear-suffix mode, so an existing
+    // parseable group is stripped before formatting. In strict mode it stays a
+    // skip: nesting a second suffix onto an already suffixed name is never what
+    // the user meant.
+    let mut base_name = original_name.clone();
     match parse_filename(&original_name) {
-        SuffixParseResult::Parsed(_) => {
-            return RenamePlanRow {
-                entry_index,
-                original_path,
-                original_name,
-                proposed_name: String::new(),
-                status: RenameRowStatus::SkippedAlreadySuffixed,
-                reason: Some("filename already carries a parseable suffix".to_string()),
-            };
+        SuffixParseResult::Parsed(parsed) => {
+            if !options.clear_existing_suffix {
+                return RenamePlanRow {
+                    entry_index,
+                    original_path,
+                    original_name,
+                    proposed_name: String::new(),
+                    status: RenameRowStatus::SkippedAlreadySuffixed,
+                    reason: Some("filename already carries a parseable suffix".to_string()),
+                };
+            }
+            base_name = strip_suffix_group(&original_name, &parsed);
         }
         SuffixParseResult::Unparseable => {
             return RenamePlanRow {
@@ -618,34 +735,33 @@ fn build_row(entry_index: usize, entry: &FileEntry, options: &RenamePlanOptions)
         SuffixParseResult::NotSuffixed => {}
     }
 
-    let algorithm = options.format.algorithm;
-    let Some(digest) = entry.hashes.get(&algorithm) else {
-        return RenamePlanRow {
-            entry_index,
-            original_path,
-            original_name,
-            proposed_name: String::new(),
-            status: RenameRowStatus::MissingHash,
-            reason: Some(format!("entry has no {algorithm} hash")),
+    let mut digests: Vec<(AlgorithmId, &str)> = Vec::with_capacity(options.format.len());
+    for part in options.format.parts() {
+        let algorithm = part.algorithm;
+        let Some(digest) = entry.hashes.get(&algorithm) else {
+            return RenamePlanRow {
+                entry_index,
+                original_path,
+                original_name,
+                proposed_name: String::new(),
+                status: RenameRowStatus::MissingHash,
+                reason: Some(format!("entry has no {algorithm} hash")),
+            };
         };
-    };
-    if !is_hex_digest_of_len(digest, algorithm.hex_len()) {
-        return RenamePlanRow {
-            entry_index,
-            original_path,
-            original_name,
-            proposed_name: String::new(),
-            status: RenameRowStatus::MissingHash,
-            reason: Some(format!("entry hash for {algorithm} is malformed")),
-        };
+        if !is_hex_digest_of_len(digest, algorithm.hex_len()) {
+            return RenamePlanRow {
+                entry_index,
+                original_path,
+                original_name,
+                proposed_name: String::new(),
+                status: RenameRowStatus::MissingHash,
+                reason: Some(format!("entry hash for {algorithm} is malformed")),
+            };
+        }
+        digests.push((algorithm, digest.as_str()));
     }
 
-    match format_filename(
-        &original_name,
-        digest,
-        &options.format,
-        DEFAULT_MAX_UTF16_LEN,
-    ) {
+    match format_filename_multi(&base_name, &digests, &options.format, DEFAULT_MAX_UTF16_LEN) {
         Ok(proposed_name) => RenamePlanRow {
             entry_index,
             original_path,
@@ -664,9 +780,11 @@ fn build_row(entry_index: usize, entry: &FileEntry, options: &RenamePlanOptions)
                 SuffixError::DigestTooShort { .. } | SuffixError::InvalidDigest => {
                     RenameRowStatus::MissingHash
                 }
-                SuffixError::InvalidLength(_) | SuffixError::AlgorithmNotSuffixUsable(_) => {
-                    RenameRowStatus::Error
-                }
+                SuffixError::InvalidLength(_)
+                | SuffixError::AlgorithmNotSuffixUsable(_)
+                | SuffixError::EmptySuffixFormat
+                | SuffixError::TooManySuffixParts { .. }
+                | SuffixError::DuplicateSuffixAlgorithm(_) => RenameRowStatus::Error,
             };
             RenamePlanRow {
                 entry_index,
@@ -680,6 +798,96 @@ fn build_row(entry_index: usize, entry: &FileEntry, options: &RenamePlanOptions)
     }
 }
 
+/// Strip the parseable suffix group from `name`, keeping extension and stem.
+///
+/// The group is located from the [`ParsedSuffix`] the parser already found, so
+/// the removal cannot disagree with [`parse_filename`] about what the suffix is.
+fn strip_suffix_group(name: &str, parsed: &crate::suffix::ParsedSuffix) -> String {
+    let (stem, extension) = match name.rfind('.') {
+        Some(index) if index > 0 => (&name[..index], &name[index..]),
+        _ => (name, ""),
+    };
+    let group_len = parsed.token.len() + 2; // "[" + token + "]"
+    match stem.len().checked_sub(group_len) {
+        Some(keep) if stem[keep..].starts_with('[') => format!("{}{extension}", &stem[..keep]),
+        // The parser reported a group this helper cannot locate: fall back to
+        // the untouched name so the caller formats a name that still exists.
+        _ => name.to_string(),
+    }
+}
+
+/// Mark rows whose file no longer matches its recorded digest.
+///
+/// This is the whole of the strict-verification pass, and it is deliberately a
+/// no-op when [`RenamePlanOptions::verify_hashes`] is empty: no probe call, no
+/// allocation and no status change, which is what keeps older callers byte-for-byte
+/// compatible.
+fn verify_row_hashes(
+    rows: &mut [RenamePlanRow],
+    options: &RenamePlanOptions,
+    probe: &dyn HashProbe,
+) {
+    if options.verify_hashes.is_empty() {
+        return;
+    }
+    for row in rows.iter_mut() {
+        if row.status != RenameRowStatus::Ready {
+            continue;
+        }
+        for part in options.format.parts() {
+            let Some(expected) =
+                expected_hash_for(&options.verify_hashes, &row.original_path, part.algorithm)
+            else {
+                continue;
+            };
+            let Some(actual) = probe.current_hash(Path::new(&row.original_path), part.algorithm)
+            else {
+                row.status = RenameRowStatus::HashMismatch;
+                row.reason = Some(format!(
+                    "cannot verify the {} digest of {}: the file could not be read",
+                    part.algorithm, row.original_path
+                ));
+                break;
+            };
+            if !digests_match(&actual, expected) {
+                row.status = RenameRowStatus::HashMismatch;
+                row.reason = Some(format!(
+                    "file content changed: {} digest is {} but the record says {}",
+                    part.algorithm,
+                    shorten_digest(&actual),
+                    shorten_digest(expected)
+                ));
+                break;
+            }
+        }
+    }
+}
+
+/// Recorded digest for `path` and `algorithm`, if the caller supplied one.
+fn expected_hash_for<'a>(
+    expected: &'a [ExpectedHash],
+    path: &str,
+    algorithm: AlgorithmId,
+) -> Option<&'a str> {
+    expected
+        .iter()
+        .find(|entry| entry.path == path && entry.algorithm == algorithm)
+        .map(|entry| entry.hex.as_str())
+}
+
+/// Compare two digest strings case-insensitively.
+///
+/// Digests are hex text: the algorithm fixes the length, and case is a display
+/// choice, so an upper-case record must match a lower-case computation.
+fn digests_match(actual: &str, expected: &str) -> bool {
+    actual.eq_ignore_ascii_case(expected)
+}
+
+/// First 12 characters of a digest, for a reason message a human can read.
+fn shorten_digest(digest: &str) -> String {
+    digest.chars().take(12).collect()
+}
+
 fn summarize(rows: &[RenamePlanRow]) -> RenamePlanSummary {
     let mut summary = RenamePlanSummary::default();
     for row in rows {
@@ -689,6 +897,7 @@ fn summarize(rows: &[RenamePlanRow]) -> RenamePlanSummary {
             RenameRowStatus::ConflictTargetExists => summary.conflicts += 1,
             RenameRowStatus::SkippedAlreadySuffixed => summary.skipped += 1,
             RenameRowStatus::MissingHash => summary.missing_hash += 1,
+            RenameRowStatus::HashMismatch => summary.hash_mismatch += 1,
             RenameRowStatus::InvalidName => summary.invalid_name += 1,
             RenameRowStatus::NoPermission => summary.no_permission += 1,
             RenameRowStatus::Unsupported => summary.unsupported += 1,
@@ -789,18 +998,18 @@ mod tests {
         assert!(plan.dry_run);
         assert_eq!(plan.rows.len(), 1);
         assert_eq!(plan.rows[0].status, RenameRowStatus::Ready);
-        assert_eq!(plan.rows[0].proposed_name, "a[ABCDE].txt");
+        assert_eq!(plan.rows[0].proposed_name, "a[ABCDEF].txt");
         assert_eq!(plan.summary.ready, 1);
         assert_eq!(plan.summary.total, 1);
         assert!(source.exists(), "dry run must not rename the source");
-        assert!(!temp.path().join("a[ABCDE].txt").exists());
+        assert!(!temp.path().join("a[ABCDEF].txt").exists());
     }
 
     #[test]
     fn planner_reports_existing_target_conflicts_and_honors_overwrite() {
         let temp = tempdir().expect("tempdir");
         let source = temp.path().join("a.txt");
-        let target = temp.path().join("a[ABCDE].txt");
+        let target = temp.path().join("a[ABCDEF].txt");
         fs::write(&source, b"hello").expect("source file");
         fs::write(&target, b"other").expect("target file");
         let entry = make_entry(&source, true);
@@ -856,7 +1065,7 @@ mod tests {
     #[test]
     fn planner_skips_already_suffixed_names() {
         let temp = tempdir().expect("tempdir");
-        let path = temp.path().join("a[ABCDE].txt");
+        let path = temp.path().join("a[ABCDEF].txt");
         let plan = plan_renames(
             &[make_entry(&path, true)],
             &RenamePlanOptions::default(),
@@ -957,12 +1166,205 @@ mod tests {
             format: SuffixFormat {
                 length: 3,
                 ..SuffixFormat::default()
-            },
+            }
+            .into(),
             ..RenamePlanOptions::default()
         };
         let plan = plan_renames(&[make_entry(&path, true)], &options, &StdRenameFs);
         assert_eq!(plan.rows[0].status, RenameRowStatus::Error);
         assert_eq!(plan.summary.errors, 1);
+    }
+
+    #[test]
+    fn planner_writes_a_multi_algorithm_group_with_forced_prefixes() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("movie.mkv");
+        fs::write(&source, b"movie").expect("source file");
+        let mut entry = make_entry(&source, true);
+        entry.hashes.insert(
+            AlgorithmId::Md5,
+            "0123456789abcdef0123456789abcdef".to_string(),
+        );
+        let options = RenamePlanOptions {
+            format: MultiSuffixFormat::new(vec![
+                SuffixFormat {
+                    algorithm: AlgorithmId::Blake3,
+                    ..SuffixFormat::default()
+                },
+                SuffixFormat {
+                    algorithm: AlgorithmId::Md5,
+                    ..SuffixFormat::default()
+                },
+            ])
+            .expect("two parts"),
+            ..RenamePlanOptions::default()
+        };
+        let plan = plan_renames(&[entry], &options, &StdRenameFs);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::Ready);
+        assert_eq!(
+            plan.rows[0].proposed_name,
+            "movie[blake3:ABCDEF+md5:012345].mkv"
+        );
+        assert!(source.exists(), "planning must not rename");
+    }
+
+    #[test]
+    fn planner_reports_missing_hash_for_any_multi_algorithm_part() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("movie.mkv");
+        fs::write(&source, b"movie").expect("source file");
+        let entry = make_entry(&source, true); // Blake3 only
+        let options = RenamePlanOptions {
+            format: MultiSuffixFormat::new(vec![
+                SuffixFormat {
+                    algorithm: AlgorithmId::Blake3,
+                    ..SuffixFormat::default()
+                },
+                SuffixFormat {
+                    algorithm: AlgorithmId::Md5,
+                    ..SuffixFormat::default()
+                },
+            ])
+            .expect("two parts"),
+            ..RenamePlanOptions::default()
+        };
+        let plan = plan_renames(&[entry], &options, &StdRenameFs);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::MissingHash);
+        assert!(plan.rows[0]
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("md5")));
+        assert_eq!(plan.summary.missing_hash, 1);
+    }
+
+    #[test]
+    fn clear_existing_suffix_rewrites_the_name_instead_of_skipping() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("movie[999999].mkv");
+        fs::write(&source, b"movie").expect("source file");
+        let entry = make_entry(&source, true);
+
+        // Without the switch the name is skipped, as it always was.
+        let plan = plan_renames(
+            std::slice::from_ref(&entry),
+            &RenamePlanOptions::default(),
+            &StdRenameFs,
+        );
+        assert_eq!(plan.rows[0].status, RenameRowStatus::SkippedAlreadySuffixed);
+
+        // With it, the old token is replaced by a freshly computed one.
+        let options = RenamePlanOptions {
+            clear_existing_suffix: true,
+            ..RenamePlanOptions::default()
+        };
+        let plan = plan_renames(&[entry], &options, &StdRenameFs);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::Ready);
+        assert_eq!(plan.rows[0].proposed_name, "movie[ABCDEF].mkv");
+    }
+
+    #[test]
+    fn strict_plan_marks_changed_files_as_hash_mismatch() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("movie.mkv");
+        fs::write(&source, b"movie").expect("source file");
+        let entry = make_entry(&source, true);
+        let options = RenamePlanOptions {
+            verify_hashes: vec![ExpectedHash::new(
+                entry.display_path.clone(),
+                AlgorithmId::Blake3,
+                digest(),
+            )],
+            ..RenamePlanOptions::default()
+        };
+        // The probe reports a different digest than the record.
+        struct ChangedProbe;
+        impl HashProbe for ChangedProbe {
+            fn current_hash(&self, _path: &Path, _algorithm: AlgorithmId) -> Option<String> {
+                Some("f".repeat(64))
+            }
+        }
+        let plan = plan_renames_with_probe(&[entry], &options, &StdRenameFs, &ChangedProbe);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::HashMismatch);
+        assert_eq!(plan.summary.hash_mismatch, 1);
+        assert_eq!(plan.summary.ready, 0);
+        assert!(plan.rows[0]
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("changed")));
+    }
+
+    #[test]
+    fn strict_plan_keeps_matching_files_ready_and_never_renames_a_mismatch() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("movie.mkv");
+        fs::write(&source, b"movie").expect("source file");
+        let entry = make_entry(&source, true);
+        let options = RenamePlanOptions {
+            verify_hashes: vec![ExpectedHash::new(
+                entry.display_path.clone(),
+                AlgorithmId::Blake3,
+                digest().to_uppercase(), // case must not matter
+            )],
+            ..RenamePlanOptions::default()
+        };
+        struct SameProbe;
+        impl HashProbe for SameProbe {
+            fn current_hash(&self, _path: &Path, _algorithm: AlgorithmId) -> Option<String> {
+                Some(digest())
+            }
+        }
+        let plan = plan_renames_with_probe(&[entry], &options, &StdRenameFs, &SameProbe);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::Ready);
+        assert_eq!(plan.summary.hash_mismatch, 0);
+
+        let results = execute_plan(&plan, &mut StdFsBackend::new());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, RenameResultStatus::Renamed);
+    }
+
+    #[test]
+    fn strict_plan_treats_an_unreadable_file_as_a_mismatch() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("movie.mkv");
+        fs::write(&source, b"movie").expect("source file");
+        let entry = make_entry(&source, true);
+        let options = RenamePlanOptions {
+            verify_hashes: vec![ExpectedHash::new(
+                entry.display_path.clone(),
+                AlgorithmId::Blake3,
+                digest(),
+            )],
+            ..RenamePlanOptions::default()
+        };
+        // NoHashProbe cannot report a digest at all; under a strict policy that
+        // must block the rename rather than trust the record.
+        let plan = plan_renames_with_probe(&[entry], &options, &StdRenameFs, &NoHashProbe);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::HashMismatch);
+        assert!(plan.rows[0]
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("could not be read")));
+    }
+
+    #[test]
+    fn empty_verify_hashes_is_exactly_the_legacy_behaviour() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("movie.mkv");
+        fs::write(&source, b"movie").expect("source file");
+        let entry = make_entry(&source, true);
+
+        // A probe that would panic proves the legacy path never consults it.
+        struct PanicProbe;
+        impl HashProbe for PanicProbe {
+            fn current_hash(&self, _path: &Path, _algorithm: AlgorithmId) -> Option<String> {
+                panic!("the probe must not be called when verify_hashes is empty");
+            }
+        }
+        let options = RenamePlanOptions::default();
+        assert!(options.verify_hashes.is_empty());
+        let plan = plan_renames_with_probe(&[entry], &options, &StdRenameFs, &PanicProbe);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::Ready);
+        assert_eq!(plan.summary.hash_mismatch, 0);
     }
 
     #[test]
@@ -972,7 +1374,8 @@ mod tests {
         let conflicted = temp.path().join("conflicted.txt");
         fs::write(&ready, b"ready").expect("ready file");
         fs::write(&conflicted, b"conflicted").expect("conflicted file");
-        fs::write(temp.path().join("conflicted[ABCDE].txt"), b"existing").expect("existing target");
+        fs::write(temp.path().join("conflicted[ABCDEF].txt"), b"existing")
+            .expect("existing target");
 
         let plan = plan_renames(
             &[make_entry(&ready, true), make_entry(&conflicted, true)],
@@ -989,7 +1392,7 @@ mod tests {
             results[0].original_path,
             ready.to_string_lossy().into_owned()
         );
-        assert!(temp.path().join("ready[ABCDE].txt").exists());
+        assert!(temp.path().join("ready[ABCDEF].txt").exists());
         assert!(!ready.exists());
         assert!(conflicted.exists(), "conflicted row must not be moved");
     }
@@ -1010,14 +1413,14 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, RenameResultStatus::Failed);
         assert!(results[0].error.is_some());
-        assert!(!temp.path().join("a[ABCDE].txt").exists());
+        assert!(!temp.path().join("a[ABCDEF].txt").exists());
     }
 
     #[test]
     fn execute_plan_never_replaces_a_target_created_after_planning() {
         let temp = tempdir().expect("tempdir");
         let source = temp.path().join("a.txt");
-        let target = temp.path().join("a[ABCDE].txt");
+        let target = temp.path().join("a[ABCDEF].txt");
         fs::write(&source, b"hello").expect("source file");
 
         let plan = plan_renames(
@@ -1053,7 +1456,7 @@ mod tests {
     fn execute_plan_with_policy_overwrites_only_when_asked() {
         let temp = tempdir().expect("tempdir");
         let source = temp.path().join("a.txt");
-        let target = temp.path().join("a[ABCDE].txt");
+        let target = temp.path().join("a[ABCDEF].txt");
         fs::write(&source, b"hello").expect("source file");
 
         let plan = plan_renames(
@@ -1099,12 +1502,12 @@ mod tests {
         let results = execute_plan_with_policy_and_cancel(&plan, &mut backend, false, &should_stop);
         assert_eq!(results.len(), 1, "only the first row may be attempted");
         assert_eq!(results[0].status, RenameResultStatus::Renamed);
-        assert!(temp.path().join("first[ABCDE].txt").exists());
+        assert!(temp.path().join("first[ABCDEF].txt").exists());
         assert!(!first.exists());
         assert!(
             second.exists(),
             "cancellation must stop the loop before the next rename"
         );
-        assert!(!temp.path().join("second[ABCDE].txt").exists());
+        assert!(!temp.path().join("second[ABCDEF].txt").exists());
     }
 }

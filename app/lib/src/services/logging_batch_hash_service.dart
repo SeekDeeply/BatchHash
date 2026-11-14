@@ -463,11 +463,12 @@ class LoggingBatchHashService implements BatchHashService {
   }
 
   @override
-  Future<int> importRenameLog(String json) {
+  Future<RenameLogImportResult> importRenameLog(String json) {
     return _record(
       'op.importRenameLog',
       () => inner.importRenameLog(json),
-      detail: (int batches) => '$batches batches',
+      detail: (RenameLogImportResult result) =>
+          '${result.batches} batches, ${result.skipped} skipped',
     );
   }
 

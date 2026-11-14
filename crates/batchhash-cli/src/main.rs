@@ -714,6 +714,7 @@ fn row_status_label(status: RenameRowStatus) -> &'static str {
         RenameRowStatus::NoPermission => "no_permission",
         RenameRowStatus::Unsupported => "unsupported",
         RenameRowStatus::Error => "error",
+        RenameRowStatus::HashMismatch => "hash_mismatch",
     }
 }
 

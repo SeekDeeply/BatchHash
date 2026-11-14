@@ -981,9 +981,19 @@ class RenamePlanModel {
     required this.length,
     required this.uppercase,
     required this.rows,
+    this.algorithms = const <String>[],
   });
 
+  /// Primary algorithm, kept for callers that only care about one.
   final String algorithm;
+
+  /// Every algorithm written into this plan. Empty means "just [algorithm]",
+  /// so a plan built before multi-algorithm support still reads correctly.
+  final List<String> algorithms;
+
+  /// The full algorithm list, falling back to the primary one.
+  List<String> get effectiveAlgorithms =>
+      algorithms.isEmpty ? <String>[algorithm] : algorithms;
   final int length;
   final bool uppercase;
   final List<RenamePlanRowModel> rows;
@@ -1188,3 +1198,24 @@ final List<AlgorithmInfo> kSuffixUsableAlgorithms = <AlgorithmInfo>[
   for (final AlgorithmInfo info in kAlgorithmCatalogue)
     if (info.suffixUsable) info,
 ];
+
+/// Outcome of importing a rename log archive.
+class RenameLogImportResult {
+  const RenameLogImportResult({
+    required this.batches,
+    required this.operations,
+    this.skipped = 0,
+  });
+
+  /// Batches actually inserted.
+  final int batches;
+
+  /// Operations actually inserted.
+  final int operations;
+
+  /// Batches skipped because their id was already present.
+  ///
+  /// Reported separately so re-importing the same file reads as "nothing to
+  /// do" instead of looking like a failed restore.
+  final int skipped;
+}

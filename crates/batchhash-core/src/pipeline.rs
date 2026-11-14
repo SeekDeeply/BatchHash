@@ -375,7 +375,7 @@ pub fn run_batch(
         if !run.cancelled {
             events(PipelineEvent::Phase(BatchPhase::PlanningSuffix));
             let plan_options = RenamePlanOptions {
-                format,
+                format: format.into(),
                 overwrite: request.overwrite,
                 ..RenamePlanOptions::default()
             };

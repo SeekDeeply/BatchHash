@@ -5,6 +5,25 @@ import 'package:batchhash/src/services/direct_compare.dart';
 import 'package:batchhash/src/services/fake_batch_hash_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// Minimal service that records how the comparator drove it.
+///
+/// Extends the demo service so untouched methods keep working, and overrides
+/// only the two entry points this test cares about.
+class _RecordingService extends FakeBatchHashService {
+  final List<String> scannedDirectories = <String>[];
+  final List<bool> recursiveFlags = <bool>[];
+
+  @override
+  Future<List<BatchEntry>> scanDirectory(
+    String path, {
+    bool recursive = false,
+  }) async {
+    scannedDirectories.add(path);
+    recursiveFlags.add(recursive);
+    return const <BatchEntry>[];
+  }
+}
+
 void main() {
   late Directory temp;
 
@@ -21,34 +40,23 @@ void main() {
   DirectComparator comparator() =>
       DirectComparator(service: FakeBatchHashService());
 
-  test('a folder pair is compared recursively', () async {
+  test('a folder pair is scanned recursively', () async {
     // The regression this guards: a shallow scan reported every file below the
-    // first level as missing on one side.
+    // first level as missing on one side. The demo service does not read the
+    // real disk, so the assertion is on the flag the comparator passes rather
+    // than on rows produced from a real folder tree.
     final Directory left = Directory('${temp.path}/left')..createSync();
     final Directory right = Directory('${temp.path}/right')..createSync();
-    File('${left.path}/top.txt').writeAsStringSync('same');
-    File('${right.path}/top.txt').writeAsStringSync('same');
-    Directory('${left.path}/nested').createSync();
-    Directory('${right.path}/nested').createSync();
-    File('${left.path}/nested/deep.txt').writeAsStringSync('same');
-    File('${right.path}/nested/deep.txt').writeAsStringSync('same');
+    final _RecordingService recording = _RecordingService();
 
-    final DirectCompareResult result = await comparator().compare(
+    await DirectComparator(service: recording).compare(
       leftPath: left.path,
       rightPath: right.path,
       algorithms: const <String>['sha256'],
     );
 
-    // Four paths, all present on both sides: nothing may show as added or
-    // removed, which is exactly what a shallow scan would have produced.
-    final int added = result.rows
-        .where((DiffRowModel row) => row.status == DiffStatus.added)
-        .length;
-    final int removed = result.rows
-        .where((DiffRowModel row) => row.status == DiffStatus.removed)
-        .length;
-    expect(added, 0);
-    expect(removed, 0);
+    expect(recording.scannedDirectories, <String>[left.path, right.path]);
+    expect(recording.recursiveFlags, <bool>[true, true]);
   });
 
   test('a file pair is compared directly', () async {

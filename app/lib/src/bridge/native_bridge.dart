@@ -316,11 +316,18 @@ class BatchHashNative {
   /// Each entry names a raw fd, an offset and a length. The offset is honoured
   /// rather than assumed to be zero, and the descriptor is duped rather than
   /// adopted, so the caller keeps ownership of the original.
+  /// Hash entries addressed by descriptor.
+  ///
+  /// [root] labels the batch. For a granted Android tree it is the tree URI,
+  /// which is what the scan echoed back: there is no absolute path to record,
+  /// and the core requires this field.
   Map<String, Object?> hashFdEntries({
+    required String root,
     required List<Map<String, Object?>> entries,
     required List<String> algorithms,
   }) {
     return _callMap('bh_hash_fd_entries', <String, Object?>{
+      'root': root,
       'entries': entries,
       'algorithms': algorithms,
     });

@@ -312,6 +312,9 @@ class RustBatchHashService implements BatchHashService {
       );
       try {
         final Map<String, Object?> data = native.hashFdEntries(
+          // The tree URI is the batch root: it is what the scan reported, and
+          // it is the only stable label a granted tree has.
+          root: treeUri,
           entries: <Map<String, Object?>>[
             for (final SafOpenFile file in opened)
               <String, Object?>{

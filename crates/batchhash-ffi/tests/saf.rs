@@ -308,3 +308,49 @@ fn scan_saf_request_deserialises_without_mtime() {
     assert_eq!(result.entries[0].path, "a.bin");
     assert_eq!(result.entries[0].mtime, None);
 }
+
+#[test]
+fn the_dart_bridge_payload_deserialises_verbatim() {
+    // The literal JSON the Flutter bridge sends, copied from
+    // app/lib/src/bridge/native_bridge.dart.
+    //
+    // Every other test here builds the request struct in Rust, which is exactly
+    // why a missing field could ship: the struct always had one. This one starts
+    // from the wire shape, so a DTO that demands a field the bridge does not
+    // send fails here instead of on a user's phone.
+    let dart_payload = r#"{
+        "root": "content://tree/primary%3AMovies",
+        "entries": [
+            {"path": "clip.mkv", "fd": 42, "offset": 0, "length": 1024}
+        ],
+        "algorithms": ["sha256", "blake3"]
+    }"#;
+    let parsed: HashFdEntriesRequest =
+        serde_json::from_str(dart_payload).expect("the bridge payload must deserialise");
+    assert_eq!(parsed.root, "content://tree/primary%3AMovies");
+    assert_eq!(parsed.entries.len(), 1);
+    assert_eq!(parsed.entries[0].path, "clip.mkv");
+    assert_eq!(parsed.entries[0].fd, 42);
+    assert_eq!(parsed.entries[0].length, 1024);
+    assert_eq!(parsed.algorithms, vec!["sha256", "blake3"]);
+}
+
+#[test]
+fn the_dart_scan_payload_deserialises_verbatim() {
+    // Same reasoning as above, for the scan entry point.
+    let dart_payload = r#"{
+        "tree_uri": "content://tree/primary%3AMovies",
+        "nodes": [
+            {"path": "clip.mkv", "size": 1024, "mtime": "2026-11-15T12:00:00Z"}
+        ]
+    }"#;
+    let parsed: ScanSafRequest =
+        serde_json::from_str(dart_payload).expect("the bridge payload must deserialise");
+    let result = scan_saf_request(&parsed).expect("scan");
+    assert_eq!(result.entries.len(), 1);
+    assert_eq!(result.entries[0].size, 1024);
+    assert_eq!(
+        result.entries[0].mtime.as_deref(),
+        Some("2026-11-15T12:00:00Z")
+    );
+}

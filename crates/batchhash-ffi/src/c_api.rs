@@ -100,6 +100,39 @@ pub unsafe extern "C" fn bh_scan(request: *const c_char) -> *mut c_char {
     })
 }
 
+/// Build entries from a walked Android Storage Access Framework tree.
+///
+/// Request: see [crate::api::ScanSafRequest]. There is no filesystem access on
+/// this path; the caller supplies the nodes the platform already walked.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be
+/// freed with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_scan_saf(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::ScanSafRequest = parse_request(request, false)?;
+        let scanned = api::scan_saf_request(&parsed)?;
+        serde_json::to_value(scanned).map_err(internal_error)
+    })
+}
+
+/// Hash entries addressed by descriptor, for a granted SAF tree.
+///
+/// Request: see [crate::api::HashFdEntriesRequest]. Each descriptor is duped,
+/// never adopted, so the caller keeps ownership and closes it afterwards.
+///
+/// # Safety
+/// request must be a valid NUL-terminated UTF-8 string; the result must be
+/// freed with [bh_free].
+#[no_mangle]
+pub unsafe extern "C" fn bh_hash_fd_entries(request: *const c_char) -> *mut c_char {
+    reply(|| {
+        let parsed: api::HashFdEntriesRequest = parse_request(request, false)?;
+        let hashed = api::hash_fd_entries_request(&parsed)?;
+        serde_json::to_value(hashed).map_err(internal_error)
+    })
+}
 /// Run the pipeline. Request: see [crate::api::BatchRequestDto].
 ///
 /// # Safety

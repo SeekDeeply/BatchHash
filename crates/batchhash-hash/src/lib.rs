@@ -25,7 +25,8 @@ pub use hasher::{
 };
 pub use probe::{probe, probe_auto, HardwareInfo};
 pub use scheduler::{
-    hash_entries, BatchEvent, BatchOutcome, CancelToken, FileIo, HashEntryOptions, ProgressSnapshot,
+    hash_entries, hash_entries_resolved, BatchEvent, BatchOutcome, CancelToken, FileIo,
+    HashEntryOptions, ProgressSnapshot,
 };
 
 pub use batchhash_types::BackendPolicy;

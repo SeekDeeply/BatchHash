@@ -5,6 +5,7 @@
 //! the bridge testable without any Dart code in the loop.
 
 use serde::{Deserialize, Serialize};
+use std::io;
 
 use batchhash_core::pipeline::{run_batch, BatchRequest};
 use batchhash_core::scan::{scan, ScanOptions};
@@ -268,6 +269,230 @@ pub struct ScanResultDto {
     pub single_file: bool,
 }
 
+/// Request for [scan_saf_request].
+///
+/// Carries the node list the platform already walked rather than a path: an
+/// Android Storage Access Framework tree is a content URI, which no file API
+/// can open, so the core cannot walk it itself.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScanSafRequest {
+    /// Granted tree URI, echoed back as the result root for labelling.
+    pub tree_uri: String,
+    /// Nodes the platform walked, relative to the tree root.
+    pub nodes: Vec<SafNodeDto>,
+}
+
+/// One node of a walked Storage Access Framework tree.
+///
+/// Directories are expected to be filtered out by the caller; a directory that
+/// arrives here is skipped rather than turned into a zero-byte file entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SafNodeDto {
+    /// Path relative to the tree root, slash separated.
+    pub path: String,
+    /// Size in bytes. Zero when the provider reports none.
+    #[serde(default)]
+    pub size: u64,
+    /// Modification time as RFC 3339, when known.
+    #[serde(default)]
+    pub mtime: Option<String>,
+}
+
+/// Build entries from a walked Storage Access Framework tree.
+///
+/// No filesystem access happens here: size and mtime come from the caller,
+/// because the only thing that can stat these files is the platform that
+/// granted them.
+pub fn scan_saf_request(request: &ScanSafRequest) -> Result<ScanResultDto, ApiError> {
+    // An empty node list is a caller mistake, not an empty folder. Reporting it
+    // as success would make a failed walk look like a folder with nothing in
+    // it, which is indistinguishable from a real empty folder.
+    if request.nodes.is_empty() {
+        return Err(ApiError::invalid("nodes must not be empty"));
+    }
+    let mut entries: Vec<FileEntry> = Vec::with_capacity(request.nodes.len());
+    let mut skipped: Vec<SkippedDto> = Vec::new();
+    for node in &request.nodes {
+        if let Err(error) = batchhash_types::validate_relative_path(&node.path) {
+            skipped.push(SkippedDto {
+                path: node.path.clone(),
+                reason: error.to_string(),
+            });
+            continue;
+        }
+        entries.push(FileEntry::new(
+            "saf",
+            batchhash_types::RootKind::Saf,
+            node.path.clone(),
+            // The display path is the tree-relative path: there is no absolute
+            // path to show, and inventing one would be a lie the report would
+            // then repeat.
+            node.path.clone(),
+            node.size,
+            node.mtime.clone(),
+        ));
+    }
+    let total_bytes: u64 = entries.iter().map(|entry| entry.size).sum();
+    Ok(ScanResultDto {
+        root: request.tree_uri.clone(),
+        entries: entries.iter().map(entry_dto).collect(),
+        skipped,
+        total_bytes,
+        // A walked tree is never a single file: the caller picked a folder.
+        single_file: false,
+    })
+}
+
+/// Request for [hash_fd_entries_request].
+///
+/// Each entry is addressed by a raw descriptor, an offset and a length. The
+/// offset is honoured rather than assumed to be zero, and the descriptor is
+/// duped rather than adopted, so the caller keeps ownership of the original.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HashFdEntriesRequest {
+    /// Batch root used to label the entries.
+    pub root: String,
+    /// Entries to hash, each with its own descriptor.
+    pub entries: Vec<FdEntryDto>,
+    /// Algorithms to compute.
+    pub algorithms: Vec<String>,
+}
+
+/// One descriptor-addressed entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FdEntryDto {
+    /// Root-relative path with forward slashes.
+    pub path: String,
+    /// Raw file descriptor number, already open for reading.
+    pub fd: i32,
+    /// Byte offset to start reading at.
+    #[serde(default)]
+    pub offset: u64,
+    /// Number of bytes to read.
+    pub length: u64,
+}
+
+/// Hash entries addressed by descriptor.
+///
+/// This is the Android Storage Access Framework path: every document has its
+/// own descriptor, so a single batch-wide [FileIo] cannot describe the batch.
+/// Descriptors are looked up through a resolver that only reads a table, never
+/// opens one, which keeps every Rayon worker thread free of platform calls.
+pub fn hash_fd_entries_request(request: &HashFdEntriesRequest) -> Result<BatchResultDto, ApiError> {
+    if request.entries.is_empty() {
+        // Same rule as the rename plan: an empty selection is a caller mistake,
+        // never a successful no-op.
+        return Err(ApiError::invalid("entries must not be empty"));
+    }
+    let algorithms = parse_algorithms(&request.algorithms)?;
+
+    // The table is keyed by path and read-only for the whole call. It holds raw
+    // fd numbers, so it must not outlive the descriptors the caller opened for
+    // this batch; the caller closes them once this returns.
+    let table: std::collections::HashMap<String, (i32, u64, u64)> = request
+        .entries
+        .iter()
+        .map(|entry| (entry.path.clone(), (entry.fd, entry.offset, entry.length)))
+        .collect();
+
+    let mut entries: Vec<FileEntry> = Vec::with_capacity(request.entries.len());
+    let mut skipped: Vec<SkippedDto> = Vec::new();
+    for entry in &request.entries {
+        if let Err(error) = batchhash_types::validate_relative_path(&entry.path) {
+            skipped.push(SkippedDto {
+                path: entry.path.clone(),
+                reason: error.to_string(),
+            });
+            continue;
+        }
+        // Only the length is needed here, as the entry size. The descriptor and
+        // offset are read by the resolver straight from the table, so pulling
+        // them out here as well would just leave them unused.
+        let length = table
+            .get(&entry.path)
+            .map(|(_, _, length)| *length)
+            .unwrap_or(entry.length);
+        let file_entry = FileEntry::new(
+            "saf",
+            batchhash_types::RootKind::Saf,
+            entry.path.clone(),
+            // The display path is the tree-relative path: there is no absolute
+            // path to show, and inventing one would put a lie in the report.
+            // The resolver keys on this, so it must equal [path].
+            entry.path.clone(),
+            length,
+            None,
+        );
+        entries.push(file_entry);
+    }
+
+    let options = HashEntryOptions {
+        hasher: HashOptions::new(algorithms.clone()),
+        // Never consulted: [hash_entries_resolved] asks the resolver for every
+        // entry. It still has to name a variant, and Path is the one that reads
+        // nothing when used by mistake.
+        io: FileIo::Path,
+    };
+    let cancel = batchhash_hash::CancelToken::new();
+    let outcome = batchhash_hash::hash_entries_resolved(
+        &entries,
+        &options,
+        // The resolver reads the table captured above and nothing else: it must
+        // not open a descriptor, and must not make a platform call, because it
+        // runs on a Rayon worker thread.
+        &|entry: &FileEntry| {
+            let Some((fd, offset, length)) = table.get(&entry.display_path).copied() else {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("no descriptor for {}", entry.display_path),
+                ));
+            };
+            // Duped, never adopted: the caller owns the original descriptor and
+            // closes it as soon as this call returns.
+            Ok(FileIo::Fd {
+                fd,
+                offset,
+                length: Some(length),
+            })
+        },
+        &cancel,
+        &|_event| {},
+    );
+    let hashed = outcome.entries;
+    let hardware: HardwareReport = batchhash_hash::probe_auto().into();
+    let mut report = batchhash_core::build_report(
+        &request.root,
+        batchhash_types::RootKind::Saf,
+        batchhash_core::default_case_sensitive(),
+        &algorithms,
+        hardware,
+        &hashed,
+    );
+    report.generated_at = batchhash_core::now_rfc3339();
+    report.sort_entries();
+    report
+        .validate()
+        .map_err(|error| ApiError::new("invalid_report", error.to_string()))?;
+    let report_json = export_report(&report, ReportFormat::Json)
+        .map_err(|error| ApiError::new("export", error.to_string()))?;
+    Ok(BatchResultDto {
+        total: report.summary.total,
+        ok: report.summary.ok,
+        failed: report.summary.failed,
+        skipped_count: report.summary.skipped,
+        total_bytes: report.summary.total_bytes,
+        entries: hashed.iter().map(entry_dto).collect(),
+        skipped,
+        plan: None,
+        plan_summary: None,
+        batch_id: None,
+        renamed: 0,
+        rename_failed: 0,
+        cancelled: outcome.cancelled,
+        elapsed_ms: u64::try_from(outcome.elapsed_ms).unwrap_or(u64::MAX),
+        report_json,
+    })
+}
 /// Suffix configuration for a batch.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SuffixDto {

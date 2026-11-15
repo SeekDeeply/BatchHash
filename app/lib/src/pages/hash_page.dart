@@ -612,7 +612,9 @@ class _HashPageState extends State<HashPage> {
       setState(() {
         _entries = hashed;
         _progress = progress;
-        _elapsed = clock.elapsed();
+        // elapsed is a getter, not a method: the parentheses would call the
+        // returned Duration.
+        _elapsed = clock.elapsed;
         _computing = false;
       });
       final BatchHashAppState app = widget.state;

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -249,7 +250,7 @@ class _HashPageState extends State<HashPage> {
         // empty.
         setState(() {
           _scanning = false;
-          _error = context.strings('hash.scanFailed'),
+          _error = context.strings('hash.scanFailed');
         });
         return;
       }

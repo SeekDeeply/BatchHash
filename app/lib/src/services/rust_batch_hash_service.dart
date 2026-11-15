@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import '../bridge/native_bridge.dart';
 import '../models/models.dart';
 import '../platform/rendering_hardware.dart';
+import '../util/saf_bridge.dart';
 import 'app_config_store.dart';
 import 'batch_hash_service.dart';
 

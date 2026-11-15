@@ -1,4 +1,4 @@
-package com.seekdeeply.batchhash
+package io.github.seekdeeply.batchhash
 
 import android.content.Intent
 import android.os.ParcelFileDescriptor
@@ -230,6 +230,56 @@ class MainActivity : FlutterActivity() {
                 if (isDirectory && depth < maxDepth) {
                     walk(treeUri, documentId, relative, depth + 1, maxDepth, out)
                 }
+            }
+        }
+    }
+
+    /**
+     * Open a read-only descriptor for each of [paths] inside [treeUri].
+     *
+     * Returns the raw fd number and the descriptor's own size for every path
+     * that could be opened. Paths that cannot be opened are omitted, so the
+     * caller hashes what it could and says so rather than failing the batch.
+     */
+    private fun openFiles(
+        treeUri: Uri,
+        paths: List<String>,
+    ): List<Map<String, Any>> {
+        val rootDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
+        val opened = ArrayList<Map<String, Any>>(paths.size)
+        for (path in paths) {
+            // Address each file through its own document id, which is the tree
+            // document id plus the relative path. A path appended straight onto
+            // the tree URI is rejected by every provider.
+            val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+                treeUri,
+                rootDocumentId + "/" + path,
+            )
+            val descriptor = try {
+                contentResolver.openFileDescriptor(documentUri, "r")
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            openDescriptors[path] = descriptor
+            opened.add(
+                mapOf(
+                    "path" to path,
+                    "fd" to descriptor.fd,
+                    "size" to descriptor.statSize,
+                ),
+            )
+        }
+        return opened
+    }
+
+    private fun closeFiles(paths: List<String>) {
+        for (path in paths) {
+            val descriptor = openDescriptors.remove(path) ?: continue
+            try {
+                descriptor.close()
+            } catch (_: Exception) {
+                // Closing an already-closed descriptor is not worth failing a
+                // hash run over.
             }
         }
     }

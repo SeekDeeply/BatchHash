@@ -262,6 +262,76 @@ class RustBatchHashService implements BatchHashService {
   }
 
   @override
+  Future<List<BatchEntry>?> scanSafTree({
+    required String treeUri,
+    int maxDepth = 8,
+  }) async {
+    final List<SafNode> nodes = await SafBridge.listTree(
+      treeUri: treeUri,
+      maxDepth: maxDepth,
+    );
+    // Directories are dropped here rather than in the core: the platform knows
+    // what it walked, and a directory has no digest to compute.
+    final List<Map<String, Object?>> payload = <Map<String, Object?>>[
+      for (final SafNode node in nodes)
+        if (!node.isDirectory)
+          <String, Object?>{
+            'path': node.path,
+            'size': node.size,
+            'mtime': safMtimeToIso(node.mtimeMs),
+          },
+    ];
+    final Map<String, Object?> data = native.scanSaf(
+      treeUri: treeUri,
+      nodes: payload,
+    );
+    return _entries(data['entries']);
+  }
+
+  @override
+  Future<List<BatchEntry>> hashSafEntries({
+    required String treeUri,
+    required List<BatchEntry> entries,
+    required List<String> algorithms,
+  }) async {
+    if (entries.isEmpty || algorithms.isEmpty) {
+      // An empty selection is a caller mistake, not a successful no-op: the
+      // same trap as the rename plan, where an empty list silently meant "run
+      // wide".
+      throw StateError('entries and algorithms are required');
+    }
+    final List<BatchEntry> hashed = <BatchEntry>[];
+    for (final List<BatchEntry> group in chunk(entries, kSafFdGroupSize)) {
+      final List<String> paths = <String>[
+        for (final BatchEntry entry in group) entry.path,
+      ];
+      final List<SafOpenFile> opened = await SafBridge.openFiles(
+        treeUri: treeUri,
+        paths: paths,
+      );
+      try {
+        final Map<String, Object?> data = native.hashFdEntries(
+          entries: <Map<String, Object?>>[
+            for (final SafOpenFile file in opened)
+              <String, Object?>{
+                'path': file.path,
+                'fd': file.fd,
+                'offset': 0,
+                'length': file.size,
+              },
+          ],
+          algorithms: algorithms,
+        );
+        hashed.addAll(_entries(data['entries']));
+      } finally {
+        // Released on the failure path too: a descriptor leaked per failed
+        // batch is how a long session runs out of fds.
+        await SafBridge.closeFiles(paths);
+      }
+    }
+    return hashed;
+  }
+  @override
   Stream<HashProgress> computeHashes({
     required List<BatchEntry> entries,
     required List<String> algorithms,

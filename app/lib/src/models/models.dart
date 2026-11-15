@@ -1243,3 +1243,10 @@ class SafScanSource extends ScanSource {
   final String treeUri;
   final String displayName;
 }
+
+/// How many Storage Access Framework descriptors may be open at once.
+///
+/// Bounded because a folder can hold thousands of files and the process fd
+/// limit is finite: opening them all turns into a failure that surfaces as a
+/// corrupt file rather than as "too many open".
+const int kSafFdGroupSize = 64;

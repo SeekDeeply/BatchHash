@@ -297,6 +297,34 @@ class BatchHashNative {
     });
   }
 
+  /// Scan a folder the user granted through Android's Storage Access Framework.
+  ///
+  /// Takes the node list the platform already walked rather than a path: a
+  /// content URI is not a path, so the core cannot open it itself.
+  Map<String, Object?> scanSaf({
+    required String treeUri,
+    required List<Map<String, Object?>> nodes,
+  }) {
+    return _callMap('bh_scan_saf', <String, Object?>{
+      'tree_uri': treeUri,
+      'nodes': nodes,
+    });
+  }
+
+  /// Hash entries addressed by descriptor.
+  ///
+  /// Each entry names a raw fd, an offset and a length. The offset is honoured
+  /// rather than assumed to be zero, and the descriptor is duped rather than
+  /// adopted, so the caller keeps ownership of the original.
+  Map<String, Object?> hashFdEntries({
+    required List<Map<String, Object?>> entries,
+    required List<String> algorithms,
+  }) {
+    return _callMap('bh_hash_fd_entries', <String, Object?>{
+      'entries': entries,
+      'algorithms': algorithms,
+    });
+  }
   /// Plan or execute an undo for one batch.
   Map<String, Object?> undo({
     required String db,

@@ -91,6 +91,35 @@ class LoggingBatchHashService implements BatchHashService {
   String get lastScannedRoot => inner.lastScannedRoot;
 
   @override
+  Future<List<BatchEntry>?> scanSafTree({
+    required String treeUri,
+    int maxDepth = 8,
+  }) {
+    return _record(
+      'op.scanSafTree',
+      () => inner.scanSafTree(treeUri: treeUri, maxDepth: maxDepth),
+      detail: (List<BatchEntry>? entries) =>
+          entries == null ? 'unavailable' : '${entries.length} entries',
+    );
+  }
+
+  @override
+  Future<List<BatchEntry>> hashSafEntries({
+    required String treeUri,
+    required List<BatchEntry> entries,
+    required List<String> algorithms,
+  }) {
+    return _record(
+      'op.hashSafEntries',
+      () => inner.hashSafEntries(
+        treeUri: treeUri,
+        entries: entries,
+        algorithms: algorithms,
+      ),
+      detail: (List<BatchEntry> hashed) => '${hashed.length} entries',
+    );
+  }
+  @override
   Stream<HashProgress> computeHashes({
     required List<BatchEntry> entries,
     required List<String> algorithms,

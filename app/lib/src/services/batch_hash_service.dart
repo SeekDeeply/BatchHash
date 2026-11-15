@@ -81,6 +81,34 @@ abstract class BatchHashService {
     List<String>? restrictPaths,
   });
 
+  /// Scan a folder the user granted through Android's Storage Access Framework.
+  ///
+  /// Returns null on any other platform, where a plain path is always available.
+  /// [treeUri] is the granted tree and [maxDepth] bounds how far below it the
+  /// walk descends.
+  ///
+  /// The entries carry their tree-relative path, which is the key the caller
+  /// uses to open a descriptor for each one later.
+  Future<List<BatchEntry>?> scanSafTree({
+    required String treeUri,
+    int maxDepth = 8,
+  });
+
+  /// Hash [entries] that live inside a granted SAF tree.
+  ///
+  /// Descriptors are opened and released in bounded groups rather than all at
+  /// once: a folder with a few thousand files cannot have them all open
+  /// simultaneously, and the fd limit turns that into a failure that looks like
+  /// a corrupt file.
+  ///
+  /// Entries whose descriptor could not be come back unchanged rather than
+  /// dropped, so the caller can report them as failed instead of silently
+  /// hashing a subset.
+  Future<List<BatchEntry>> hashSafEntries({
+    required String treeUri,
+    required List<BatchEntry> entries,
+    required List<String> algorithms,
+  });
   /// Hash in-memory [text] with [algorithms].
   ///
   /// Used by the text comparison view to show each side's digest, so a user

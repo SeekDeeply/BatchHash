@@ -231,6 +231,28 @@ class FakeBatchHashService implements BatchHashService {
   }
 
   @override
+  Future<List<BatchEntry>?> scanSafTree({
+    required String treeUri,
+    int maxDepth = 8,
+  }) async {
+    // The demo service has no Android storage to walk, so it reports the
+    // feature as unavailable rather than inventing a tree that no platform
+    // granted.
+    return null;
+  }
+
+  @override
+  Future<List<BatchEntry>> hashSafEntries({
+    required String treeUri,
+    required List<BatchEntry> entries,
+    required List<String> algorithms,
+  }) async {
+    // No descriptors to open, so the entries come back unchanged: the caller
+    // sees a list of the same length with no digests, which is the honest
+    // answer for a build that cannot read the granted tree.
+    return entries;
+  }
+  @override
   Stream<HashProgress> computeHashes({
     required List<BatchEntry> entries,
     required List<String> algorithms,

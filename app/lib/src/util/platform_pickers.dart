@@ -39,6 +39,28 @@ class PlatformPickers {
     }
   }
 
+  /// Ask for one or more files. Returns an empty list when cancelled.
+  static Future<List<String>> files(
+    Future<List<String>> Function() fallback,
+  ) async {
+    try {
+      final FilePickerResult? result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+        withData: false,
+      );
+      return <String>[
+        for (final PlatformFile file in result?.files ?? const <PlatformFile>[])
+          if (file.path != null && file.path!.isNotEmpty) file.path!,
+      ];
+    } on PlatformException {
+      return fallback();
+    } on MissingPluginException {
+      return fallback();
+    } catch (_) {
+      return fallback();
+    }
+  }
   /// Save [bytes] to a file the user picks.
   ///
   /// On Android this is the only reliable way to reach shared storage: since

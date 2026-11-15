@@ -24,6 +24,17 @@ class SafNode {
   final int mtimeMs;
 }
 
+/// A folder the user granted through the Storage Access Framework.
+class SafDirectory {
+  const SafDirectory({required this.treeUri, required this.displayName});
+
+  /// The granted tree URI.
+  final String treeUri;
+
+  /// Name shown to the user, so the UI can name the folder without decoding
+  /// the URI.
+  final String displayName;
+}
 /// One file opened through the Storage Access Framework.
 class SafOpenFile {
   const SafOpenFile({

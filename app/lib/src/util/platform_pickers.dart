@@ -1,5 +1,9 @@
 
+import 'dart:io' show Platform;
+
 import 'package:file_picker/file_picker.dart';
+
+import 'saf_bridge.dart';
 import 'package:flutter/services.dart';
 
 /// Native pickers with a guaranteed fallback.
@@ -39,6 +43,28 @@ class PlatformPickers {
     }
   }
 
+  /// Open the Android system folder picker and return the granted tree.
+  ///
+  /// Returns null on any platform other than Android, where a plain path is
+  /// always available, and null when the user cancels. Throws [SafException]
+  /// when the platform refuses, which the caller must report: silently falling
+  /// back to the in-app path dialog would send the user down a route that
+  /// cannot read the folder they just picked.
+  static Future<SafDirectory?> safDirectory() async {
+    if (!Platform.isAndroid) {
+      return null;
+    }
+    final String? uri = await SafBridge.pickDirectory();
+    if (uri == null) {
+      return null;
+    }
+    // A tree URI ends with the chosen document id, whose last segment is the
+    // folder name; decode it so the UI can name the folder without showing a
+    // percent-encoded URI.
+    final String raw = uri.split('/').last;
+    final String name = Uri.decodeComponent(raw.split(':').last);
+    return SafDirectory(treeUri: uri, displayName: name);
+  }
   /// Ask for one or more files. Returns an empty list when cancelled.
   static Future<List<String>> files(
     Future<List<String>> Function() fallback,

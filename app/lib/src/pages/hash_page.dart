@@ -9,6 +9,7 @@ import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../util/formatting.dart';
 import '../util/platform_pickers.dart';
+import '../util/saf_bridge.dart';
 import '../widgets/algorithm_picker_dialog.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/entry_list.dart';
@@ -179,12 +180,115 @@ class _HashPageState extends State<HashPage> {
   }
 
   Future<void> _selectFolder() async {
+    // Android cannot hand over a folder as a path: its picker grants a
+    // content:// tree that no file API can open. That platform walks the tree
+    // through the system instead, and hashes through descriptors.
+    if (Platform.isAndroid) {
+      await _selectSafFolder();
+      return;
+    }
     final String? input = await _pickFolderPath();
     if (!mounted || input == null || input.trim().isEmpty) {
       return;
     }
     final String folder = input.trim();
-    final bool? recursive = await showDialog<bool>(
+    final bool? recursive = await _askRecursive();
+    if (!mounted || recursive == null) {
+      return;
+    }
+    widget.state.scanSource.value = PathScanSource(folder);
+    await _scanInputs(<String>[folder], recursive: recursive);
+  }
+
+  /// Walk a folder the user granted through the Storage Access Framework.
+  Future<void> _selectSafFolder() async {
+    final String treeUri;
+    try {
+      final SafDirectory? picked = await PlatformPickers.safDirectory();
+      if (!mounted || picked == null) {
+        return;
+      }
+      treeUri = picked.treeUri;
+    } on SafException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      // Reported rather than swallowed: a refused pick that looks like a
+      // cancelled one leaves the user pressing the button forever.
+      final String failure = context.strings(
+        'hash.scanFailed',
+        args: <String, String>{'error': '${error.code}: ${error.message}'},
+      );
+      setState(() => _error = failure);
+      widget.state.error.value = failure;
+      return;
+    }
+    final bool? recursive = await _askRecursive();
+    if (!mounted || recursive == null) {
+      return;
+    }
+    setState(() {
+      _scanning = true;
+      _error = null;
+      _cancelled = false;
+    });
+    try {
+      // Depth 1 is "this folder only"; the recursive dialog asks for the whole
+      // tree, which the platform walker bounds with its own limit.
+      final List<BatchEntry>? scanned = await widget.state.service
+          .scanSafTree(
+            treeUri: treeUri,
+            maxDepth: recursive ? 8 : 1,
+          );
+      if (!mounted) {
+        return;
+      }
+      if (scanned == null) {
+        // The service has no Android storage to walk, which on this platform
+        // means the native side is missing rather than that the folder is
+        // empty.
+        setState(() {
+          _scanning = false;
+          _error = context.strings('hash.scanFailed'),
+        });
+        return;
+      }
+      widget.state.scanSource.value = SafScanSource(
+        treeUri: treeUri,
+        displayName: '',
+      );
+      setState(() {
+        _entries = scanned;
+        _progress = null;
+        _elapsed = null;
+        _scanning = false;
+      });
+      final BatchHashAppState app = widget.state;
+      app.entries.value = scanned;
+      app.report.value = null;
+      app.progress.value = null;
+      app.elapsed.value = null;
+      app.error.value = null;
+      app.cancelled.value = false;
+      app.pickedFiles.value = const <String>[];
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final String failure = context.strings(
+        'hash.scanFailed',
+        args: <String, String>{'error': '$error'},
+      );
+      setState(() {
+        _scanning = false;
+        _error = failure;
+      });
+      widget.state.error.value = failure;
+    }
+  }
+
+  Future<bool?> _askRecursive() {
+    return showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
         title: Text(context.strings('hash.recursiveTitle')),
@@ -201,13 +305,6 @@ class _HashPageState extends State<HashPage> {
         ],
       ),
     );
-    if (!mounted) {
-      return;
-    }
-    if (recursive == null) {
-      return;
-    }
-    await _scanInputs(<String>[folder], recursive: recursive);
   }
 
   /// Scan exactly the files a native picker returned.
@@ -483,6 +580,59 @@ class _HashPageState extends State<HashPage> {
     }
   }
 
+  /// Hash entries that live in a granted Android tree.
+  ///
+  /// Descriptors are opened and released in bounded groups, and the whole run
+  /// is one future rather than a stream: progress is reported per group, which
+  /// is the only granularity the platform can offer.
+  Future<void> _startSafHashing(
+    SafScanSource source,
+    List<String> algorithms,
+    Stopwatch stopwatch,
+  ) async {
+    try {
+      final List<BatchEntry> hashed = await widget.state.service.hashSafEntries(
+        treeUri: source.treeUri,
+        entries: _entries,
+        algorithms: algorithms,
+      );
+      if (!mounted) {
+        return;
+      }
+      final int done = hashed
+          .where((BatchEntry entry) => entry.hashes.isNotEmpty)
+          .length;
+      final HashProgress progress = HashProgress(
+        completed: done,
+        total: hashed.length,
+        done: true,
+        entries: hashed,
+      );
+      setState(() {
+        _entries = hashed;
+        _progress = progress;
+        _elapsed = stopwatch.elapsed();
+        _computing = false;
+      });
+      final BatchHashAppState app = widget.state;
+      app.entries.value = hashed;
+      app.progress.value = progress;
+      app.elapsed.value = _elapsed;
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final String failure = context.strings(
+        'hash.hashFailed',
+        args: <String, String>{'error': '$error'},
+      );
+      setState(() {
+        _computing = false;
+        _error = failure;
+      });
+      widget.state.error.value = failure;
+    }
+  }
   void _startHashing() {
     if (_entries.isEmpty || _algorithms.isEmpty) {
       return;
@@ -498,6 +648,15 @@ class _HashPageState extends State<HashPage> {
     widget.state.cancelled.value = false;
     final Stopwatch stopwatch = Stopwatch()..start();
     final List<String> algorithms = _algorithms.toList()..sort();
+    // A granted Android tree is hashed through descriptors rather than paths,
+    // so the source decides which call runs. Falling through to the path
+    // variant would ask the core to open a content URI, which fails on every
+    // entry.
+    final ScanSource? source = widget.state.scanSource.value;
+    if (source is SafScanSource) {
+      _startSafHashing(source, algorithms, stopwatch);
+      return;
+    }
     final Stream<HashProgress> stream = widget.state.service.computeHashes(
       entries: _entries,
       algorithms: algorithms,

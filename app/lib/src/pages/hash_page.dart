@@ -589,7 +589,7 @@ class _HashPageState extends State<HashPage> {
   Future<void> _startSafHashing(
     SafScanSource source,
     List<String> algorithms,
-    Stopwatch stopwatch,
+    Stopwatch clock,
   ) async {
     try {
       final List<BatchEntry> hashed = await widget.state.service.hashSafEntries(
@@ -612,7 +612,7 @@ class _HashPageState extends State<HashPage> {
       setState(() {
         _entries = hashed;
         _progress = progress;
-        _elapsed = stopwatch.elapsed();
+        _elapsed = clock.elapsed();
         _computing = false;
       });
       final BatchHashAppState app = widget.state;

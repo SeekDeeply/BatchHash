@@ -2,6 +2,31 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.12.0] - 2026-11-15
+
+### 修复
+
+- **Android 选择文件夹无效**：这是 Android 11+ 的硬限制，不是本项目的缺陷——
+  目录选择器返回的是 `content://` 树 URI，`dart:io` 无法列举或读取它
+  （上游公认问题：flutter_file_picker#1552、dart-lang/sdk#54878）。
+  现已通过 Storage Access Framework 原生桥接解决：Kotlin 列举目录树，
+  Rust 通过文件描述符逐块哈希，全程不申请任何存储权限。
+
+### 新增
+
+- **SAF 原生桥**：Kotlin 侧 `listTree` 递归列举目录、`openFiles`/`closeFiles`
+  托管文件描述符（带引用计数式管理，防止 GC 提前关闭）。
+- **条目级 IO 解析**：`hash_entries_resolved` 让每个条目各自决定输入来源，
+  桌面行为零变化（原有 `hash_entries` 原样转发）。
+- **描述符分块哈希**：每批最多 64 个 fd，避免大目录撞进程描述符上限。
+
+### 说明
+
+- 未申请 `MANAGE_EXTERNAL_STORAGE`：该权限需 Google Play 特殊审核，
+  对哈希工具属于明显过度授权。SAF 是官方推荐且无需权限的路径。
+- 描述符由调用方打开并持有，Rust 只 dup 不 adopt，因此不会出现
+  「Rust 还在读、调用方已关」的竞态。
+- Android 上仍无法选中空文件夹（里面没有文件可点），这是不申请全盘权限的固有代价。
 ## [1.11.3] - 2026-11-15
 
 ### 修复

@@ -72,12 +72,37 @@ pub enum FileIo {
     },
 }
 
+/// Per-entry input resolver.
+///
+/// The batch-level [`FileIo`] in [`HashEntryOptions`] can only describe one
+/// input shape for the whole batch, which is wrong for Android SAF: every
+/// document has its own descriptor, so a few thousand files would need a few
+/// thousand descriptors open at once and would hit the process descriptor
+/// limit. A resolver moves the input decision to the entry, and the caller
+/// keeps control over how many descriptors are open at any moment by sending
+/// the batch in chunks.
+///
+/// # Contract for implementors
+///
+/// * Called from Rayon worker threads and must be `Sync`.
+/// * It may only **look up** a pre-opened descriptor (a map read) and hand it
+///   back. It must not open files or make any JNI/Android call: doing that from
+///   a worker thread is not safe and would also defeat the chunking that keeps
+///   the descriptor count bounded. Descriptors are always opened by the
+///   platform layer before the call and stay alive for the duration of the call.
+/// * Returning `Err` fails that one entry with [`ErrorKind::IoError`]; it never
+///   aborts the batch. It must not be used to "open on demand" a descriptor the
+///   caller did not provide.
+pub type EntryIoResolver<'a> = dyn Fn(&FileEntry) -> io::Result<FileIo> + Sync + 'a;
+
 /// Options for a batch hashing call.
 #[derive(Debug, Clone, Default)]
 pub struct HashEntryOptions {
     /// Per-file hash options.
     pub hasher: HashOptions,
-    /// Input mode shared by all entries in the batch.
+    /// Fallback input mode, used by [`hash_entries`] for every entry.
+    ///
+    /// [`hash_entries_resolved`] ignores this field: the resolver decides.
     pub io: FileIo,
 }
 
@@ -192,6 +217,7 @@ fn worker_count() -> usize {
 fn process_entry(
     entry: &mut FileEntry,
     options: &HashEntryOptions,
+    resolve: &EntryIoResolver<'_>,
     cancel: &CancelToken,
     reporter: &ProgressReporter<'_>,
 ) {
@@ -202,12 +228,25 @@ fn process_entry(
         return;
     }
 
+    // The resolver runs on a rayon worker thread, so it may only look up an
+    // already-open descriptor: opening files or calling into the platform from
+    // here would put JNI on a worker thread and serialise the pool.
+    let io = match resolve(entry) {
+        Ok(io) => io,
+        Err(error) => {
+            let (kind, message) = classify_hash_error(&error);
+            entry.fail(kind, message);
+            reporter.entry_done(entry);
+            return;
+        }
+    };
+
     let mut progress_sink = ProgressSink {
         reporter,
         current_path: entry.display_path.clone(),
     };
     let sink: &mut dyn HashSink = &mut progress_sink;
-    let result = match options.io {
+    let result = match io {
         FileIo::Path => hasher::compute_hashes_path(
             Path::new(&entry.display_path),
             &options.hasher,

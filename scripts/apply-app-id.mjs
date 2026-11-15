@@ -11,7 +11,7 @@
 // drift apart. Missing scaffolding fails the build instead of silently
 // shipping com.example.batchhash.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, renameSync, mkdirSync, rmSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { APP_ID, APP_ID_SEGMENTS, APP_NAME } from './app-id.mjs';
 
@@ -99,6 +99,40 @@ function android() {
     const body = readFileSync(label, 'utf8');
     const updated = body.replace(/android:label="[^"]*"/, 'android:label="' + APP_NAME + '"');
     if (updated !== body) writeFileSync(label, updated);
+  }
+
+  // Install the Storage Access Framework activity.
+  //
+  // "flutter create" regenerates this whole tree on every CI run and cannot
+  // know about it, so the Kotlin source lives in the repository and is copied
+  // in here. Without it, picking a folder on Android returns a content:// URI
+  // that dart:io cannot list, which is why the folder picker looked broken.
+  const safSource = join(appDir, 'android-native', 'MainActivity.kt');
+  if (existsSync(safSource)) {
+    const kotlinRoot = join(moduleDir, 'src', 'main', 'kotlin');
+    const javaRoot = join(moduleDir, 'src', 'main', 'java');
+    // Drop the template's own activity first. flutter create emits a Java
+    // MainActivity, and two activities declaring the same class name is a
+    // duplicate-class build error rather than a warning.
+    for (const root of [kotlinRoot, javaRoot]) {
+      if (!existsSync(root)) continue;
+      const walkDelete = (dir) => {
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walkDelete(full);
+            continue;
+          }
+          if (entry.name === 'MainActivity.kt' || entry.name === 'MainActivity.java') {
+            rmSync(full);
+          }
+        }
+      };
+      walkDelete(root);
+    }
+    const target = join(kotlinRoot, ...APP_ID_SEGMENTS);
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, 'MainActivity.kt'), readFileSync(safSource, 'utf8'));
   }
 }
 

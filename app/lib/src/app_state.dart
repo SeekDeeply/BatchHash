@@ -67,6 +67,15 @@ class BatchHashAppState {
   /// Lives here rather than in the page because the shell rebuilds the page on
   /// every tab switch; page-local fields would reset the suffix length each
   /// time the user looked at another tab.
+
+  /// Where the next scan reads from.
+  ///
+  /// Android can only offer a Storage Access Framework tree here, which is a
+  /// content URI rather than a path; every other platform offers a plain
+  /// directory. Keeping the two behind one value is what lets the scan call
+  /// sites stay platform-agnostic.
+  final ValueNotifier<ScanSource?> scanSource = ValueNotifier<ScanSource?>(null);
+
   final ValueNotifier<RenameConfig> renameConfig =
       ValueNotifier<RenameConfig>(const RenameConfig());
 
@@ -105,6 +114,7 @@ class BatchHashAppState {
     compareRightReport.dispose();
     compareLeftPath.dispose();
     renameConfig.dispose();
+    scanSource.dispose();
     compareRightPath.dispose();
   }
 }

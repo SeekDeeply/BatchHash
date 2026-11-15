@@ -1219,3 +1219,27 @@ class RenameLogImportResult {
   /// do" instead of looking like a failed restore.
   final int skipped;
 }
+
+/// Where a scan reads its files from.
+///
+/// A plain path on desktop, a Storage Access Framework tree on Android. The
+/// two are not interchangeable: a content URI cannot be handed to anything that
+/// expects a filesystem path, which is why this is a type rather than a String.
+sealed class ScanSource {
+  const ScanSource();
+}
+
+/// A directory the platform let us open by path.
+class PathScanSource extends ScanSource {
+  const PathScanSource(this.path);
+
+  final String path;
+}
+
+/// A directory granted through Android's Storage Access Framework.
+class SafScanSource extends ScanSource {
+  const SafScanSource({required this.treeUri, required this.displayName});
+
+  final String treeUri;
+  final String displayName;
+}

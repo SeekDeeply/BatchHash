@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
@@ -834,11 +833,7 @@ class _ComparePageState extends State<ComparePage> {
     if (report == null) {
       return;
     }
-    // Android returns an unreadable document tree from the folder picker, so
-    // derive a real folder from chosen files there instead.
-    final String? picked = Platform.isAndroid
-        ? await PlatformPickers.folderViaFiles()
-        : await PlatformPickers.directory(() async {
+    final String? picked = await PlatformPickers.directory(() async {
       if (!mounted) {
         return null;
       }

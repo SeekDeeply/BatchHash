@@ -146,8 +146,15 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p dist
-          cp app/build/app/outputs/bundle/release/app-release.aab dist/ || true
-          cp app/build/app/outputs/flutter-apk/app-*-release.apk dist/ || true
+          # Rename on the way in: the raw Gradle output names say nothing about
+          # which version or platform a downloaded file belongs to, and four
+          # APKs in one release are otherwise indistinguishable.
+          cp app/build/app/outputs/bundle/release/app-release.aab \
+            "dist/batchhash-${GITHUB_REF_NAME}-android.aab" || true
+          for apk in app/build/app/outputs/flutter-apk/app-*-release.apk; do
+            abi=$(basename "$apk" .apk | sed "s/^app-//; s/-release$//")
+            cp "$apk" "dist/batchhash-${GITHUB_REF_NAME}-android-${abi}.apk"
+          done
           ls -lh dist
       - uses: actions/upload-artifact@v4
         with:
@@ -302,10 +309,11 @@ jobs:
           cd app/build/macos/Build/Products/Release
           app_bundle=$(ls -d *.app | head -1)
           echo "packaging $app_bundle"
-          ditto -c -k --sequesterRsrc --keepParent "$app_bundle" "$GITHUB_WORKSPACE/dist/BatchHash-macos.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app_bundle" \
+            "$GITHUB_WORKSPACE/dist/batchhash-${GITHUB_REF_NAME}-macos.zip"
           cd "$GITHUB_WORKSPACE"
           ls -lh dist
-          unzip -l dist/BatchHash-macos.zip | grep 'Contents/Frameworks/libbatchhash_ffi.dylib'
+          unzip -l dist/batchhash-${GITHUB_REF_NAME}-macos.zip | grep 'Contents/Frameworks/libbatchhash_ffi.dylib'
       - uses: actions/upload-artifact@v4
         with:
           name: batchhash-macos-release
@@ -464,14 +472,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath dist/BatchHash-windows.zip
+          Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath "dist/batchhash-$env:GITHUB_REF_NAME-windows.zip"
           # Inspect the real archive with .NET rather than shelling out to tar,
           # so the check does not depend on which bsdtar the runner ships.
           # ZipFile lives in the shared framework on PowerShell 7; Add-Type is
           # only a fallback for hosts where the type is not preloaded, and must
           # never fail the step on its own.
           try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop } catch { }
-          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path "dist/BatchHash-windows.zip").Path)
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path "dist/batchhash-$env:GITHUB_REF_NAME-windows.zip").Path)
           try {
             $entries = @($zip.Entries | ForEach-Object FullName)
           } finally {
@@ -575,8 +583,8 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          tar -czf dist/BatchHash-linux.tar.gz -C app/build/linux/x64/release/bundle .
-          tar -tzf dist/BatchHash-linux.tar.gz | grep 'lib/libbatchhash_ffi.so'
+          tar -czf "dist/batchhash-${GITHUB_REF_NAME}-linux.tar.gz" -C app/build/linux/x64/release/bundle .
+          tar -tzf "dist/batchhash-${GITHUB_REF_NAME}-linux.tar.gz" | grep 'lib/libbatchhash_ffi.so'
           ls -lh dist
       - uses: actions/upload-artifact@v4
         with:
@@ -618,6 +626,10 @@ jobs:
         run: cat "$RUNNER_TEMP/notes.md"
       - uses: softprops/action-gh-release@v2
         with:
+          # Title the release "BatchHash 1.11.2" rather than the bare tag
+          # "v1.11.2": the tag is already shown as a label next to the title,
+          # so repeating it wastes the only line a reader sees first.
+          name: BatchHash ${{ github.ref_name }}
           files: dist/*
           body_path: ${{ runner.temp }}/notes.md
           generate_release_notes: false

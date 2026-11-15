@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io' show Platform;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -157,13 +156,6 @@ class _HashPageState extends State<HashPage> {
   }
 
   Future<String?> _pickFolderPath() async {
-    // Android cannot hand over a readable folder: the picker returns a document
-    // tree URI that no file API can open, so scanning it produced an empty list
-    // with no error. Picking files and deriving their folder is the only way to
-    // get a real path without asking for all-files access.
-    if (Platform.isAndroid) {
-      return PlatformPickers.folderViaFiles();
-    }
     try {
       return await PlatformPickers.directory(_fallbackFolderPath);
     } on PlatformException {

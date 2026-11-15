@@ -158,9 +158,38 @@ pub struct BatchOutcome {
 /// The event callback is called from worker threads and from the calling thread;
 /// it must be Sync and should only push into a channel or lock a short-lived
 /// buffer. It must not call hash_entries re-entrantly.
+///
+/// Every entry is read through [`HashEntryOptions::io`]; use
+/// [`hash_entries_resolved`] when each entry needs its own input.
 pub fn hash_entries(
     entries: &[FileEntry],
     options: &HashEntryOptions,
+    cancel: &CancelToken,
+    events: &(dyn Fn(BatchEvent) + Sync),
+) -> BatchOutcome {
+    let fallback = options.io;
+    hash_entries_resolved(entries, options, &|_| Ok(fallback), cancel, events)
+}
+
+/// Hash a batch where every entry resolves its own input.
+///
+/// This is the entry point for Android SAF: each document has its own
+/// descriptor, so a single batch-wide [`FileIo`] cannot describe the batch.
+/// [`resolve`] is consulted from Rayon worker threads, once per entry,
+/// and must obey the [`EntryIoResolver`] contract: look up an
+/// already-open descriptor, never open one.
+///
+/// # Descriptor lifetime
+///
+/// The resolver's backing table only has to stay alive for the duration of this
+/// call, and only the entries in `entries` need descriptors. Callers that own
+/// many files should send them in chunks and close each chunk's descriptors
+/// afterwards, so the process descriptor limit is never approached; this
+/// function makes no attempt to keep descriptors alive beyond the call.
+pub fn hash_entries_resolved(
+    entries: &[FileEntry],
+    options: &HashEntryOptions,
+    resolve: &EntryIoResolver<'_>,
     cancel: &CancelToken,
     events: &(dyn Fn(BatchEvent) + Sync),
 ) -> BatchOutcome {
@@ -180,11 +209,11 @@ pub fn hash_entries(
         Ok(pool) => pool.install(|| {
             results
                 .par_iter_mut()
-                .for_each(|entry| process_entry(entry, options, cancel, &reporter));
+                .for_each(|entry| process_entry(entry, options, resolve, cancel, &reporter));
         }),
         Err(_) => {
             for entry in results.iter_mut() {
-                process_entry(entry, options, cancel, &reporter);
+                process_entry(entry, options, resolve, cancel, &reporter);
             }
         }
     }
@@ -234,7 +263,9 @@ fn process_entry(
     let io = match resolve(entry) {
         Ok(io) => io,
         Err(error) => {
-            let (kind, message) = classify_hash_error(&error);
+            // A resolver failure means "no descriptor for this entry", so it is
+            // reported on the entry and the batch keeps going.
+            let (kind, message) = classify_resolve_error(&error);
             entry.fail(kind, message);
             reporter.entry_done(entry);
             return;
@@ -298,6 +329,21 @@ fn classify_hash_error(error: &HashError) -> (ErrorKind, String) {
             io::ErrorKind::NotFound => (ErrorKind::NotFound, source.to_string()),
             _ => (ErrorKind::IoError, source.to_string()),
         },
+    }
+}
+
+/// Classify a resolver failure.
+///
+/// The resolver reports [`io::Error`] rather than [`HashError`] because the only
+/// failure a resolver can hit is I/O-shaped: the entry it was asked about has no
+/// descriptor in the caller-supplied table. Mapping it here keeps the on-entry
+/// error kind identical to a failure raised while opening the file.
+fn classify_resolve_error(error: &io::Error) -> (ErrorKind, String) {
+    match error.kind() {
+        io::ErrorKind::PermissionDenied => (ErrorKind::PermissionDenied, error.to_string()),
+        io::ErrorKind::NotFound => (ErrorKind::NotFound, error.to_string()),
+        io::ErrorKind::Unsupported => (ErrorKind::Unsupported, error.to_string()),
+        _ => (ErrorKind::IoError, error.to_string()),
     }
 }
 

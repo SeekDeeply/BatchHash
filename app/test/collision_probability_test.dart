@@ -65,11 +65,15 @@ void main() {
       test(
         'matches the closed-form birthday bound',
         () {
-          // 100 files, 6 hex characters: 1 - exp(-100*99/(2*16^6)).
-          const double expected = 0.0293343;
+          // 1 - exp(-n(n-1)/(2*16^6)) for n = 1000.
+          expect(
+            collisionProbability(1000, 6),
+            closeTo(0.029334, 0.0001),
+          );
+          // And the same formula at n = 100, two orders of magnitude smaller.
           expect(
             collisionProbability(100, 6),
-            closeTo(expected, 0.0005),
+            closeTo(0.000295, 0.00001),
           );
         },
       );

@@ -6,9 +6,11 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings_scope.dart';
+import '../models/models.dart';
 import '../models/operation_log.dart';
 import '../models/operation_log_filter.dart';
 import '../services/archive_export.dart';
+import '../services/batch_hash_service.dart';
 import '../services/operation_log_export.dart';
 import '../services/operation_log_store.dart';
 import '../widgets/log_export_dialog.dart';

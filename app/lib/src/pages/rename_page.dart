@@ -59,9 +59,7 @@ class _RenamePageState extends State<RenamePage> {
   /// two features no longer depend on each other's state. The value lives in
   /// the app state rather than this widget because a page-local field was wiped
   /// whenever the user switched tabs, losing the selection they had just made.
-  List<BatchEntry>? get _ownEntries => widget.state.renameEntries.value;
-
-  set _ownEntries(List<BatchEntry>? value) {
+  void _setOwnEntries(List<BatchEntry>? value) {
     widget.state.renameEntries.value = value;
   }
   bool _scanning = false;
@@ -141,7 +139,7 @@ class _RenamePageState extends State<RenamePage> {
       }
       setState(() {
         _scanning = false;
-        _ownEntries = hashed;
+        _setOwnEntries(hashed);
         _plan = null;
       });
     } catch (error) {

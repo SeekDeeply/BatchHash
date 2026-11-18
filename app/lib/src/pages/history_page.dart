@@ -88,8 +88,12 @@ class _HistoryPageState extends State<HistoryPage> {
         return;
       }
       if (json == null) {
+        // A null export means there is no log to write, and saying nothing at
+        // all is what made the button look broken: the tap cleared the spinner
+        // and the page stayed exactly as it was.
         setState(() {
           _busy = false;
+          _message = context.strings('rename.logExportEmpty');
         });
         return;
       }
@@ -104,8 +108,12 @@ class _HistoryPageState extends State<HistoryPage> {
         return;
       }
       if (saved == null) {
+        // The user cancelled, or the platform refused to write. Either way the
+        // tap must leave a trace, otherwise "nothing happened" is the only
+        // thing they can conclude.
         setState(() {
           _busy = false;
+          _message = context.strings('rename.logExportCancelled');
         });
         return;
       }

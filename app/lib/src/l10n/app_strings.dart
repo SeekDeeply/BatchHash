@@ -155,6 +155,8 @@ class AppStrings {
     'rename.exportLog': '导出写名记录',
     'rename.importLog': '导入写名记录',
     'rename.logExported': '写名记录已导出',
+    'rename.logExportEmpty': '没有可导出的写名记录：还没有执行过写名，或记录库不在当前目录。',
+    'rename.logExportCancelled': '已取消导出。',
     'rename.logImported': '写名记录已导入：恢复 {batches} 批，跳过 {skipped} 批',
     'rename.importFailed': '写名记录处理失败：{error}',
     'rename.independentHint': '写名使用自己的算法与长度设置，与首页的哈希选择互不影响。',
@@ -600,6 +602,9 @@ class AppStrings {
     'rename.exportLog': 'Export rename log',
     'rename.importLog': 'Import rename log',
     'rename.logExported': 'Rename log exported',
+    'rename.logExportEmpty':
+        'Nothing to export: no rename has been applied yet, or the log database is not in the current folder.',
+    'rename.logExportCancelled': 'Export cancelled.',
     'rename.logImported': 'Rename log imported: {batches} restored, {skipped} skipped',
     'rename.importFailed': 'Rename log failed: {error}',
     'rename.independentHint': 'Renaming uses its own algorithms and length, independent of the hash page.',

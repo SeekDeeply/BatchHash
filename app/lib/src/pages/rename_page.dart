@@ -152,6 +152,40 @@ class _RenamePageState extends State<RenamePage> {
     }
   }
 
+  /// Algorithms the user may write, taken from the hash page selection.
+  ///
+  /// The rename page used to offer the whole catalogue, which let a user write
+  /// a suffix from an algorithm the main page never computed. The two pages
+  /// then disagreed about what "the hash" means for the same file. The list is
+  /// now the hash page selection intersected with the algorithms that can
+  /// actually produce a filename suffix; when that intersection is empty the
+  /// fallback keeps the page usable instead of showing an empty dropdown.
+  List<AlgorithmInfo> _availableAlgorithms() {
+    final Set<String> selected = widget.state.algorithms.value;
+    final List<AlgorithmInfo> usable = <AlgorithmInfo>[
+      for (final AlgorithmInfo info in kSuffixUsableAlgorithms)
+        if (selected.contains(info.id)) info,
+    ];
+    if (usable.isEmpty) {
+      return kSuffixUsableAlgorithms;
+    }
+    return usable;
+  }
+
+  /// The algorithm the dropdown shows, guaranteed to be in its item list.
+  String _primaryAlgorithm() {
+    final List<AlgorithmInfo> available = _availableAlgorithms();
+    final String stored = _config.algorithms.isEmpty
+        ? kDefaultRenameAlgorithm
+        : _config.algorithms.first;
+    for (final AlgorithmInfo info in available) {
+      if (info.id == stored) {
+        return stored;
+      }
+    }
+    return available.first.id;
+  }
+
   /// Write [next] into the shared state, which is what persists it.
   ///
   /// Going through the notifier instead of a local field is what makes the
@@ -347,7 +381,11 @@ class _RenamePageState extends State<RenamePage> {
                             key: const ValueKey<String>(
                               'rename-algorithm-dropdown',
                             ),
-                            value: _config.algorithms.first,
+                            // Must be one of the offered items, or Dropdown
+                            // asserts: the hash page selection can exclude the
+                            // stored primary, so fall back to the first offered
+                            // algorithm rather than crash.
+                            value: _primaryAlgorithm(),
                             isDense: true,
                             isExpanded: true,
                             onChanged: (String? value) {
@@ -371,7 +409,7 @@ class _RenamePageState extends State<RenamePage> {
                             },
                             items: <DropdownMenuItem<String>>[
                               for (final AlgorithmInfo info
-                                  in kSuffixUsableAlgorithms)
+                                  in _availableAlgorithms())
                                 DropdownMenuItem<String>(
                                   value: info.id,
                                   child: Text(info.displayName),
@@ -430,7 +468,7 @@ class _RenamePageState extends State<RenamePage> {
                     context.strings('rename.moreAlgorithmsHint'),
                   ),
                   children: <Widget>[
-                    for (final AlgorithmInfo info in kSuffixUsableAlgorithms)
+                    for (final AlgorithmInfo info in _availableAlgorithms())
                       CheckboxListTile(
                         key: ValueKey<String>(
                           'rename-extra-${info.id}',

@@ -1125,13 +1125,41 @@ int recommendedSuffixLength(int fileCount) {
 }
 
 /// Birthday bound estimate of a suffix collision over the hex alphabet.
+///
+/// Returns the probability that at least two of [fileCount] files share the
+/// same [length]-character hex token, using the standard birthday bound
+/// `1 - exp(-n(n-1) / (2 * 16^length))`.
+///
+/// The alphabet space is computed in floating point on purpose. `math.pow(16,
+/// length)` stays in the integer domain, and `16^16` is exactly `2^64`, which
+/// overflows a 64-bit int and comes back as **0**. A zero space made the
+/// exponent `-pairs / 0`, so `1 - exp(-infinity)` collapsed to exactly 1.0 and
+/// the UI reported a 100% collision chance at the maximum suffix length, which
+/// is the opposite of the truth. `math.pow` is a `num` result here, so `toDouble`
+/// after a float base keeps the whole computation in `double`.
 double collisionProbability(int fileCount, int length) {
   if (fileCount <= 1 || length <= 0) {
     return 0.0;
   }
-  final double space = math.pow(16, length).toDouble();
-  final double pairs = fileCount * (fileCount - 1) / 2;
-  return 1 - math.exp(-pairs / space);
+  // 16.0, not 16: a floating-point base keeps pow in the double domain, so
+  // 16^16 is 1.8446744e19 instead of wrapping to zero.
+  final double space = math.pow(16.0, length).toDouble();
+  if (!space.isFinite || space <= 0) {
+    // An unrepresentable space cannot collide. Returning 0 rather than 1 keeps
+    // a numeric failure from masquerading as a certainty.
+    return 0.0;
+  }
+  // Counted in doubles: `fileCount * (fileCount - 1)` overflows an int well
+  // before the file count gets large.
+  final double count = fileCount.toDouble();
+  final double pairs = count * (count - 1.0) / 2.0;
+  final double probability = 1.0 - math.exp(-pairs / space);
+  if (!probability.isFinite) {
+    return 1.0;
+  }
+  // Clamped because rounding at the extremes can leave a value a hair outside
+  // the range, and the formatter multiplies by 100.
+  return probability.clamp(0.0, 1.0);
 }
 
 /// Settings the rename page keeps between visits and across restarts.

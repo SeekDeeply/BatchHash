@@ -98,7 +98,10 @@ class PlatformPickers {
   /// Desktop still works the same way; the plugin writes the bytes itself, so
   /// callers do not need to know which mechanism was used.
   ///
-  /// Returns the saved path, or null when the user cancelled.
+  /// Returns the written path, or null when the user cancelled. A platform
+  /// failure is thrown rather than reported as a cancellation: swallowing it
+  /// made a broken save look exactly like a cancelled one, and the caller had
+  /// no way to tell the user what went wrong.
   static Future<String?> saveBytes({
     required String suggestedName,
     required List<int> bytes,
@@ -113,12 +116,12 @@ class PlatformPickers {
         return null;
       }
       return path.trim();
-    } on PlatformException {
-      return null;
-    } on MissingPluginException {
-      return null;
-    } catch (_) {
-      return null;
+    } on MissingPluginException catch (error) {
+      // No picker at all: this platform cannot save through a dialog.
+      throw StateError('save dialog unavailable: $error');
+    } on PlatformException catch (error) {
+      // A real failure, with a code the caller can show.
+      throw StateError('${error.code}: ${error.message ?? error.details ?? ''}');
     }
   }
 }

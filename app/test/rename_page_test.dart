@@ -47,7 +47,10 @@ void main() {
     await tester.pumpAndSettle();
     final String after = estimateOf(tester);
     expect(after, isNot(before));
-    expect(after, contains('length 16'));
+    // Dragging right now reaches the selected algorithm's own hex length
+    // rather than a global 16: the suffix cannot be longer than the digest it
+    // is taken from, and BLAKE3 produces 64 hex characters.
+    expect(after, contains('length 64'));
   });
 
   testWidgets('execute is disabled until a dry run has been requested', (

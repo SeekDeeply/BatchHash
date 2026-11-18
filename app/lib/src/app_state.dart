@@ -79,6 +79,16 @@ class BatchHashAppState {
   final ValueNotifier<RenameConfig> renameConfig =
       ValueNotifier<RenameConfig>(const RenameConfig());
 
+  /// Entries the rename page scanned for itself.
+  ///
+  /// This lived in the page state, so switching tabs and coming back cleared
+  /// the list the user had just selected. Holding it here keeps the selection
+  /// alive for the lifetime of the app, the same way the hash page list is.
+  /// Null means "the rename page has not scanned anything yet", which is
+  /// distinct from an empty selection.
+  final ValueNotifier<List<BatchEntry>?> renameEntries =
+      ValueNotifier<List<BatchEntry>?>(null);
+
   /// Paths typed or picked for the comparison panes.
   final ValueNotifier<String> compareLeftPath = ValueNotifier<String>('');
   final ValueNotifier<String> compareRightPath = ValueNotifier<String>('');
@@ -114,6 +124,7 @@ class BatchHashAppState {
     compareRightReport.dispose();
     compareLeftPath.dispose();
     renameConfig.dispose();
+    renameEntries.dispose();
     scanSource.dispose();
     compareRightPath.dispose();
   }

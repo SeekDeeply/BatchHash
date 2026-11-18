@@ -22,10 +22,21 @@ import '../widgets/empty_state.dart';
 /// about undoable batches, this lists what the app did and when, including
 /// failures, so a user can tell why a scan or export did not happen.
 class OperationLogPage extends StatefulWidget {
-  const OperationLogPage({super.key, required this.store});
+  const OperationLogPage({
+    super.key,
+    required this.store,
+    required this.service,
+  });
 
   /// Source of the recorded entries.
   final OperationLogStore store;
+
+  /// Renderer used for the report-shaped export formats.
+  ///
+  /// The digest formats are rendered by the native core rather than re-
+  /// implemented here, so an export from this page matches the report page
+  /// byte for byte.
+  final BatchHashService service;
 
   @override
   State<OperationLogPage> createState() => _OperationLogPageState();
@@ -50,6 +61,19 @@ class _OperationLogPageState extends State<OperationLogPage> {
   String _typeFilter = _allTypes;
   String _statusFilter = _statusAll;
   bool _newestFirst = true;
+
+  /// Indices (into the filtered list) the user has ticked for export.
+  ///
+  /// Selection is by position in the filtered list rather than by entry
+  /// identity because [OperationLogEntry] has no id: two runs of the same
+  /// operation at the same second are genuinely indistinguishable, and
+  /// pretending otherwise would let a user tick one row and export another.
+  /// The set is cleared whenever the filter changes, since positions no
+  /// longer mean the same rows.
+  final Set<int> _selected = <int>{};
+
+  /// Whether the list is in selection mode.
+  bool _selecting = false;
 
   @override
   void initState() {
@@ -149,6 +173,24 @@ class _OperationLogPageState extends State<OperationLogPage> {
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
+            key: const ValueKey<String>('operation-log-select'),
+            tooltip: context.strings(
+              _selecting ? 'log.selectExit' : 'log.selectEnter',
+            ),
+            onPressed: entries == null || entries.isEmpty
+                ? null
+                : () => setState(() {
+                    _selecting = !_selecting;
+                    // Leaving selection mode drops the ticks: keeping hidden
+                    // state would make the next export include rows the user
+                    // can no longer see.
+                    if (!_selecting) {
+                      _selected.clear();
+                    }
+                  }),
+            icon: Icon(_selecting ? Icons.close : Icons.checklist),
+          ),
+          IconButton(
             key: const ValueKey<String>('operation-log-export'),
             tooltip: context.strings('log.export'),
             onPressed: entries == null || entries.isEmpty
@@ -192,26 +234,51 @@ class _OperationLogPageState extends State<OperationLogPage> {
   /// Ask for the export options, then write the file.
   Future<void> _export(List<OperationLogEntry> entries) async {
     final List<OperationLogEntry> visible = _visibleEntries(context, entries);
+    // A ticked selection wins over "everything visible": the user pointed at
+    // specific rows, and exporting more than they asked for is the same class
+    // of mistake as exporting rows their filter hid.
+    final List<OperationLogEntry> chosen = _selected.isEmpty
+        ? visible
+        : <OperationLogEntry>[
+            for (int i = 0; i < visible.length; i++)
+              if (_selected.contains(i)) visible[i],
+          ];
+    // Only a selection whose every entry carries digests can be rendered in a
+    // report format: the others have no digest table to write.
+    final bool hashOnly = chosen.isNotEmpty &&
+        chosen.every((OperationLogEntry entry) => entry.hashes.isNotEmpty);
     final ExportOptions? options = await showDialog<ExportOptions>(
       context: context,
       builder: (BuildContext context) =>
-          LogExportDialog(count: visible.length),
+          LogExportDialog(count: chosen.length, hashOnly: hashOnly),
     );
     if (options == null || !mounted) {
       return;
     }
-    if (visible.isEmpty) {
+    if (chosen.isEmpty) {
       _snack(context.strings('log.exportNoEntries'));
       return;
     }
     try {
       final String stamp = exportTimestamp();
-      final String body = options.format == ExportFormat.json
-          ? encodeLogAsJson(visible)
-          : encodeLogAsMarkdown(visible);
-      final String extension = options.format == ExportFormat.json
-          ? '.json'
-          : '.md';
+      // The report formats go through the native renderer, so a digest export
+      // here is byte-identical to the same export from the report page.
+      final ReportFormat? reportFormat = _reportFormatFor(options.format);
+      final String body;
+      final String extension;
+      if (reportFormat != null) {
+        body = await widget.service.renderReport(
+          report: _asReport(chosen),
+          format: reportFormat,
+        );
+        extension = reportFormat.fileExtension;
+      } else if (options.format == ExportFormat.json) {
+        body = encodeLogAsJson(chosen);
+        extension = '.json';
+      } else {
+        body = encodeLogAsMarkdown(chosen);
+        extension = '.md';
+      }
       final String base = 'batchhash-operation-log-$stamp';
 
       // The digest belongs to whatever file the user ends up with, so it has to
@@ -245,6 +312,9 @@ class _OperationLogPageState extends State<OperationLogPage> {
         return;
       }
       if (saved == null) {
+        // Cancelled, or the platform refused. Either way silence would read as
+        // a broken button.
+        _snack(context.strings('log.exportCancelled'));
         return;
       }
       _snack(
@@ -263,6 +333,62 @@ class _OperationLogPageState extends State<OperationLogPage> {
     }
   }
 
+
+  /// The report format [format] maps to, or null for the log-specific ones.
+  static ReportFormat? _reportFormatFor(ExportFormat format) {
+    switch (format) {
+      case ExportFormat.csv:
+        return ReportFormat.csv;
+      case ExportFormat.txt:
+        return ReportFormat.txt;
+      case ExportFormat.md5sum:
+        return ReportFormat.md5sum;
+      case ExportFormat.bsd:
+        return ReportFormat.bsd;
+      case ExportFormat.json:
+      case ExportFormat.markdown:
+        // Handled by the log encoders, which carry the log envelope.
+        return null;
+    }
+  }
+
+  /// Flatten the selected entries into a report the renderer accepts.
+  ///
+  /// One log entry can hold many digests, so the report is built from the
+  /// digests rather than from the entries: a user who selected three hash runs
+  /// expects every file they covered, not three summary rows.
+  static ReportModel _asReport(List<OperationLogEntry> chosen) {
+    final Map<String, BatchEntry> byPath = <String, BatchEntry>{};
+    final List<String> algorithms = <String>[];
+    DateTime earliest = chosen.first.startedAt;
+    for (final OperationLogEntry entry in chosen) {
+      if (entry.startedAt.isBefore(earliest)) {
+        earliest = entry.startedAt;
+      }
+      for (final HashDigestRecord record in entry.hashes) {
+        if (!algorithms.contains(record.algorithm)) {
+          algorithms.add(record.algorithm);
+        }
+        final BatchEntry? existing = byPath[record.path];
+        byPath[record.path] = BatchEntry(
+          path: record.path,
+          // The log does not record file sizes; zero keeps the column honest
+          // rather than inventing a number the user could act on.
+          size: existing?.size ?? 0,
+          hashes: <String, String>{
+            ...?existing?.hashes,
+            record.algorithm: record.digest,
+          },
+        );
+      }
+    }
+    return ReportModel(
+      root: 'operation-log',
+      generatedAt: earliest,
+      algorithms: algorithms,
+      entries: byPath.values.toList(growable: false),
+    );
+  }
 
   void _snack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -495,11 +621,27 @@ class _OperationLogPageState extends State<OperationLogPage> {
         final OperationLogEntry entry = visible[index];
         final Widget tile = ListTile(
           dense: true,
-          leading: Icon(
-            entry.status ? Icons.check_circle : Icons.error,
-            color: entry.status ? scheme.tertiary : scheme.error,
-            size: 20,
-          ),
+          // A checkbox replaces the status icon while selecting, so the row
+          // keeps one leading slot and does not reflow when selection starts.
+          leading: _selecting
+              ? Checkbox(
+                  key: ValueKey<String>('operation-log-select-$index'),
+                  value: _selected.contains(index),
+                  onChanged: (bool? checked) {
+                    setState(() {
+                      if (checked == true) {
+                        _selected.add(index);
+                      } else {
+                        _selected.remove(index);
+                      }
+                    });
+                  },
+                )
+              : Icon(
+                  entry.status ? Icons.check_circle : Icons.error,
+                  color: entry.status ? scheme.tertiary : scheme.error,
+                  size: 20,
+                ),
           title: Text(
             context.strings(entry.kind),
             style: theme.textTheme.bodyMedium,

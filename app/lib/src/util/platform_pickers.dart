@@ -1,5 +1,5 @@
 
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:file_picker/file_picker.dart';
 
@@ -110,12 +110,26 @@ class PlatformPickers {
       final String? path = await FilePicker.platform.saveFile(
         dialogTitle: suggestedName,
         fileName: suggestedName,
-        bytes: Uint8List.fromList(bytes),
+        // Only honoured on mobile. Desktop ignores this argument and merely
+        // returns the chosen path, so the bytes are written below instead of
+        // trusting the plugin to have done it.
+        bytes: Platform.isAndroid || Platform.isIOS
+            ? Uint8List.fromList(bytes)
+            : null,
       );
       if (path == null || path.trim().isEmpty) {
         return null;
       }
-      return path.trim();
+      final String target = path.trim();
+      if (!Platform.isAndroid && !Platform.isIOS) {
+        // Desktop: the dialog chose a destination, nothing was written yet.
+        // Writing here is what makes the reported success true; without it the
+        // UI announced an export that never reached the disk.
+        final File file = File(target);
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(bytes, flush: true);
+      }
+      return target;
     } on MissingPluginException catch (error) {
       // No picker at all: this platform cannot save through a dialog.
       throw StateError('save dialog unavailable: $error');

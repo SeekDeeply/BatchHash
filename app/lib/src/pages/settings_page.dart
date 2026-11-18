@@ -134,6 +134,7 @@ class SettingsPage extends StatelessWidget {
                         builder: (BuildContext context) =>
                             OperationLogPage(
                               store: logStore ?? OperationLogStore(),
+                              service: service,
                             ),
                       ),
                     );

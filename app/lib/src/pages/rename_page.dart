@@ -51,13 +51,19 @@ class _RenamePageState extends State<RenamePage> {
   /// Whether the next plan strips existing suffixes instead of writing them.
   bool _clearSuffix = false;
 
-  /// Entries this page hashed itself.
+  /// Entries this page hashed itself, kept in the app state.
   ///
   /// The rename page used to read the hash page's result, which forced the user
   /// to run a full hash job elsewhere before writing a suffix. It now scans and
   /// hashes its own selection; the shared list is only a starting hint, so the
-  /// two features no longer depend on each other's state.
-  List<BatchEntry>? _ownEntries;
+  /// two features no longer depend on each other's state. The value lives in
+  /// the app state rather than this widget because a page-local field was wiped
+  /// whenever the user switched tabs, losing the selection they had just made.
+  List<BatchEntry>? get _ownEntries => widget.state.renameEntries.value;
+
+  set _ownEntries(List<BatchEntry>? value) {
+    widget.state.renameEntries.value = value;
+  }
   bool _scanning = false;
   String? _message;
   RenamePlanModel? _plan;
@@ -186,6 +192,21 @@ class _RenamePageState extends State<RenamePage> {
     return available.first.id;
   }
 
+  /// The longest suffix the current primary algorithm can produce.
+  ///
+  /// A digest has a fixed number of hex characters; asking for more would
+  /// require padding or silent truncation, and asking for exactly that many is
+  /// the most a user can legitimately write.
+  int _maxSuffixLength() {
+    final String primary = _primaryAlgorithm();
+    for (final AlgorithmInfo info in kSuffixUsableAlgorithms) {
+      if (info.id == primary && info.hexLength > 0) {
+        return info.hexLength;
+      }
+    }
+    return kMaxRenameLength;
+  }
+
   /// Write [next] into the shared state, which is what persists it.
   ///
   /// Going through the notifier instead of a local field is what makes the
@@ -276,355 +297,369 @@ class _RenamePageState extends State<RenamePage> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    return ValueListenableBuilder<List<BatchEntry>>(
-      valueListenable: widget.state.entries,
-      builder: (BuildContext context, List<BatchEntry> shared, Widget? child) {
-        // Own entries win when present: a scan started here is what the user is
-        // looking at, and quietly mixing in the other page's list would rename
-        // files they did not pick here.
-        final List<BatchEntry> entries = _ownEntries ?? shared;
-        final int hashedCount = entries
-            .where((BatchEntry entry) => entry.hashes.isNotEmpty)
-            .length;
-        final int fileCount = hashedCount > 0 ? hashedCount : entries.length;
-        final int recommended = recommendedSuffixLength(fileCount);
-        final double probability = collisionProbability(fileCount, _config.length);
-        final RenamePlanModel? plan = _plan;
-        final String? error = _error;
-        final String? message = _message;
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Expanded(
-                    child: Text(
-                      context.strings('rename.title'),
-                      style: theme.textTheme.headlineSmall,
-                    ),
-                  ),
-                  // Recording entry point: kept in the header so it is reachable
-                  // even when there is nothing to rename yet.
-                  IconButton(
-                    key: const ValueKey<String>('rename-open-history'),
-                    onPressed: _openHistory,
-                    icon: const Icon(Icons.history),
-                    tooltip: context.strings('history.open'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                context.strings('rename.subtitle'),
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 12),
-              // Local source selection: this page hashes what it is given here
-              // instead of waiting for the hash page to produce a list first.
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: <Widget>[
-                  OutlinedButton.icon(
-                    key: const ValueKey<String>('rename-scan-directory'),
-                    onPressed: _scanning ? null : _scanDirectoryHere,
-                    icon: const Icon(Icons.folder_open_outlined),
-                    label: Text(context.strings('rename.pickDirectory')),
-                  ),
-                  OutlinedButton.icon(
-                    key: const ValueKey<String>('rename-scan-files'),
-                    onPressed: _scanning ? null : _scanFilesHere,
-                    icon: const Icon(Icons.insert_drive_file_outlined),
-                    label: Text(context.strings('rename.pickFiles')),
-                  ),
-                ],
-              ),
-              if (_scanning) ...<Widget>[
-                const SizedBox(height: 12),
-                const LinearProgressIndicator(),
-              ],
-              if (entries.isEmpty) ...<Widget>[
-                const SizedBox(height: 48),
-                EmptyState(
-                  icon: Icons.drive_file_rename_outline,
-                  title: context.strings('rename.noHashed'),
-                  message: context.strings('rename.noHashedHint'),
-                ),
-              ] else ...<Widget>[
-                const SizedBox(height: 20),
+    // Two listenables: the shared list and this page's own scan. The inner
+    // builder is what makes a scan started here repaint without a tab switch.
+    return ValueListenableBuilder<List<BatchEntry>?>(
+      valueListenable: widget.state.renameEntries,
+      builder: (BuildContext context, List<BatchEntry>? own, Widget? child) {
+        return ValueListenableBuilder<List<BatchEntry>>(
+          valueListenable: widget.state.entries,
+          builder: (BuildContext context, List<BatchEntry> shared, Widget? _) {
+          // Own entries win when present: a scan started here is what the user is
+          // looking at, and quietly mixing in the other page's list would rename
+          // files they did not pick here.
+          final List<BatchEntry> entries = own ?? shared;
+          final int hashedCount = entries
+              .where((BatchEntry entry) => entry.hashes.isNotEmpty)
+              .length;
+          final int fileCount = hashedCount > 0 ? hashedCount : entries.length;
+          final int recommended = recommendedSuffixLength(fileCount);
+          final double probability = collisionProbability(fileCount, _config.length);
+          final RenamePlanModel? plan = _plan;
+          final String? error = _error;
+          final String? message = _message;
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    SizedBox(
-                      width: 120,
-                      child: Text(
-                        context.strings('rename.algorithm'),
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ),
                     Expanded(
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            key: const ValueKey<String>(
-                              'rename-algorithm-dropdown',
-                            ),
-                            // Must be one of the offered items, or Dropdown
-                            // asserts: the hash page selection can exclude the
-                            // stored primary, so fall back to the first offered
-                            // algorithm rather than crash.
-                            value: _primaryAlgorithm(),
-                            isDense: true,
-                            isExpanded: true,
-                            onChanged: (String? value) {
-                              if (value == null) {
-                                return;
-                              }
-                              setState(() {
-                                // Replacing the first entry keeps the primary
-                                // algorithm as the one shown in the dropdown;
-                                // extra algorithms are managed below it.
-                                _updateConfig(
-                                  _config.copyWith(
-                                    algorithms: <String>[
-                                      value,
-                                      ..._config.algorithms.skip(1),
-                                    ],
-                                  ),
-                                );
-                                _plan = null;
-                              });
-                            },
-                            items: <DropdownMenuItem<String>>[
-                              for (final AlgorithmInfo info
-                                  in _availableAlgorithms())
-                                DropdownMenuItem<String>(
-                                  value: info.id,
-                                  child: Text(info.displayName),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: <Widget>[
-                    SizedBox(
-                      width: 120,
                       child: Text(
-                        context.strings('rename.length'),
-                        style: theme.textTheme.bodyMedium,
+                        context.strings('rename.title'),
+                        style: theme.textTheme.headlineSmall,
                       ),
                     ),
-                    Expanded(
-                      child: Slider(
-                        key: const ValueKey<String>('rename-length-slider'),
-                        value: _config.length.toDouble(),
-                        min: kMinRenameLength.toDouble(),
-                        max: kMaxRenameLength.toDouble(),
-                        divisions: kMaxRenameLength - kMinRenameLength,
-                        label: '${_config.length}',
-                        onChanged: (double value) {
-                          setState(() {
-                            _updateConfig(
-                              _config.copyWith(length: value.round()),
-                            );
-                            _plan = null;
-                            _message = null;
-                          });
-                        },
-                      ),
-                    ),
-                    SizedBox(
-                      width: 32,
-                      child: Text('${_config.length}', textAlign: TextAlign.end),
+                    // Recording entry point: kept in the header so it is reachable
+                    // even when there is nothing to rename yet.
+                    IconButton(
+                      key: const ValueKey<String>('rename-open-history'),
+                      onPressed: _openHistory,
+                      icon: const Icon(Icons.history),
+                      tooltip: context.strings('history.open'),
                     ),
                   ],
                 ),
-                // Extra algorithms: the primary one is the dropdown above, and
-                // any ticked here is appended to the same bracket group. Restricted
-                // to suffix-usable algorithms because writing an algorithm whose
-                // digest length is ambiguous would make the name unparseable.
-                ExpansionTile(
-                  key: const ValueKey<String>('rename-extra-algorithms'),
-                  tilePadding: EdgeInsets.zero,
-                  title: Text(context.strings('rename.moreAlgorithms')),
-                  subtitle: Text(
-                    context.strings('rename.moreAlgorithmsHint'),
-                  ),
-                  children: <Widget>[
-                    for (final AlgorithmInfo info in _availableAlgorithms())
-                      CheckboxListTile(
-                        key: ValueKey<String>(
-                          'rename-extra-${info.id}',
-                        ),
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(info.displayName),
-                        value: _config.algorithms.contains(info.id),
-                        // The primary algorithm is never removable here: the
-                        // dropdown above owns it, and unchecking it from a second
-                        // control would leave the page with no algorithm at all.
-                        onChanged: info.id == _config.algorithms.first
-                            ? null
-                            : (bool? selected) {
-                                final List<String> next = <String>[
-                                  ..._config.algorithms,
-                                ];
-                                if (selected == true) {
-                                  if (!next.contains(info.id)) {
-                                    next.add(info.id);
-                                  }
-                                } else {
-                                  next.remove(info.id);
-                                }
-                                setState(() {
-                                  _updateConfig(
-                                    _config.copyWith(algorithms: next),
-                                  );
-                                  _plan = null;
-                                });
-                              },
-                      ),
-                  ],
-                ),
-                SwitchListTile(
-                  key: const ValueKey<String>('rename-strict-switch'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(context.strings('rename.strictMode')),
-                  subtitle: Text(context.strings('rename.strictModeHint')),
-                  value: _config.strict,
-                  onChanged: (bool value) {
-                    setState(() {
-                      _updateConfig(_config.copyWith(strict: value));
-                      _plan = null;
-                    });
-                  },
-                ),
-                SwitchListTile(
-                  key: const ValueKey<String>('rename-clear-suffix-switch'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(context.strings('rename.clearSuffix')),
-                  subtitle: Text(context.strings('rename.clearSuffixHint')),
-                  value: _clearSuffix,
-                  onChanged: (bool value) {
-                    setState(() {
-                      _clearSuffix = value;
-                      _plan = null;
-                    });
-                  },
-                ),
-                SwitchListTile(
-                  key: const ValueKey<String>('rename-uppercase-switch'),
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(context.strings('rename.uppercase')),
-                  value: _config.uppercase,
-                  onChanged: (bool value) {
-                    setState(() {
-                      _updateConfig(_config.copyWith(uppercase: value));
-                      _plan = null;
-                    });
-                  },
-                ),
+                const SizedBox(height: 4),
                 Text(
-                  context.strings(
-                    'rename.collisionEstimate',
-                    args: <String, String>{
-                      'length': '${_config.length}',
-                      'files': '$fileCount',
-                      'probability': formatProbabilityPercent(probability),
-                      'recommended': '$recommended',
-                    },
+                  context.strings('rename.subtitle'),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
-                  key: const ValueKey<String>('rename-collision-estimate'),
-                  style: theme.textTheme.bodyMedium,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+                // Local source selection: this page hashes what it is given here
+                // instead of waiting for the hash page to produce a list first.
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: <Widget>[
-                    FilledButton.icon(
-                      key: const ValueKey<String>('rename-dry-run-button'),
-                      onPressed: _planning || _executing
-                          ? null
-                          : () => _preview(entries),
-                      icon: const Icon(Icons.preview),
-                      label: Text(context.strings('rename.preview')),
+                    OutlinedButton.icon(
+                      key: const ValueKey<String>('rename-scan-directory'),
+                      onPressed: _scanning ? null : _scanDirectoryHere,
+                      icon: const Icon(Icons.folder_open_outlined),
+                      label: Text(context.strings('rename.pickDirectory')),
                     ),
-                    FilledButton.tonalIcon(
-                      key: const ValueKey<String>('rename-execute-button'),
-                      onPressed:
-                          plan == null || plan.readyCount == 0 || _executing
-                          ? null
-                          : _execute,
-                      icon: const Icon(Icons.drive_file_rename_outline),
-                      label: Text(context.strings('rename.apply')),
+                    OutlinedButton.icon(
+                      key: const ValueKey<String>('rename-scan-files'),
+                      onPressed: _scanning ? null : _scanFilesHere,
+                      icon: const Icon(Icons.insert_drive_file_outlined),
+                      label: Text(context.strings('rename.pickFiles')),
                     ),
                   ],
                 ),
-                if (_planning) ...<Widget>[
+                if (_scanning) ...<Widget>[
                   const SizedBox(height: 12),
                   const LinearProgressIndicator(),
                 ],
-                if (error != null) ...<Widget>[
-                  const SizedBox(height: 12),
-                  _InlineMessage(message: error, isError: true),
-                ],
-                if (message != null) ...<Widget>[
-                  const SizedBox(height: 12),
-                  _InlineMessage(message: message, isError: false),
-                ],
-                if (plan != null) ...<Widget>[
+                if (entries.isEmpty) ...<Widget>[
+                  const SizedBox(height: 48),
+                  EmptyState(
+                    icon: Icons.drive_file_rename_outline,
+                    title: context.strings('rename.noHashed'),
+                    message: context.strings('rename.noHashedHint'),
+                  ),
+                ] else ...<Widget>[
                   const SizedBox(height: 20),
                   Row(
                     children: <Widget>[
-                      Expanded(
+                      SizedBox(
+                        width: 120,
                         child: Text(
-                          context.strings('rename.dryRun'),
-                          style: theme.textTheme.titleMedium,
+                          context.strings('rename.algorithm'),
+                          style: theme.textTheme.bodyMedium,
                         ),
                       ),
-                      Text(
-                        context.strings(
-                          'rename.planCounts',
-                          args: <String, String>{
-                            'ready': '${plan.readyCount}',
-                            'conflict': '${plan.conflictCount}',
-                          },
+                      Expanded(
+                        child: InputDecorator(
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              key: const ValueKey<String>(
+                                'rename-algorithm-dropdown',
+                              ),
+                              // Must be one of the offered items, or Dropdown
+                              // asserts: the hash page selection can exclude the
+                              // stored primary, so fall back to the first offered
+                              // algorithm rather than crash.
+                              value: _primaryAlgorithm(),
+                              isDense: true,
+                              isExpanded: true,
+                              onChanged: (String? value) {
+                                if (value == null) {
+                                  return;
+                                }
+                                setState(() {
+                                  // Replacing the first entry keeps the primary
+                                  // algorithm as the one shown in the dropdown;
+                                  // extra algorithms are managed below it.
+                                  _updateConfig(
+                                    _config.copyWith(
+                                      algorithms: <String>[
+                                        value,
+                                        ..._config.algorithms.skip(1),
+                                      ],
+                                    ),
+                                  );
+                                  _plan = null;
+                                });
+                              },
+                              items: <DropdownMenuItem<String>>[
+                                for (final AlgorithmInfo info
+                                    in _availableAlgorithms())
+                                  DropdownMenuItem<String>(
+                                    value: info.id,
+                                    child: Text(info.displayName),
+                                  ),
+                              ],
+                            ),
+                          ),
                         ),
-                        style: theme.textTheme.bodySmall,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Card(
-                    child: Column(
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      SizedBox(
+                        width: 120,
+                        child: Text(
+                          context.strings('rename.length'),
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                      Expanded(
+                        // The upper bound is the selected algorithm's own hex
+                        // length: taking more characters than the digest holds
+                        // would either pad or silently truncate. Zero is allowed
+                        // because a zero-length suffix is a meaningful choice —
+                        // it writes the separator only.
+                        child: Slider(
+                          key: const ValueKey<String>('rename-length-slider'),
+                          value: _config.length
+                              .clamp(0, _maxSuffixLength())
+                              .toDouble(),
+                          min: 0,
+                          max: _maxSuffixLength().toDouble(),
+                          divisions: _maxSuffixLength(),
+                          label: '${_config.length}',
+                          onChanged: (double value) {
+                            setState(() {
+                              _updateConfig(
+                                _config.copyWith(length: value.round()),
+                              );
+                              _plan = null;
+                              _message = null;
+                            });
+                          },
+                        ),
+                      ),
+                      SizedBox(
+                        width: 32,
+                        child: Text('${_config.length}', textAlign: TextAlign.end),
+                      ),
+                    ],
+                  ),
+                  // Extra algorithms: the primary one is the dropdown above, and
+                  // any ticked here is appended to the same bracket group. Restricted
+                  // to suffix-usable algorithms because writing an algorithm whose
+                  // digest length is ambiguous would make the name unparseable.
+                  ExpansionTile(
+                    key: const ValueKey<String>('rename-extra-algorithms'),
+                    tilePadding: EdgeInsets.zero,
+                    title: Text(context.strings('rename.moreAlgorithms')),
+                    subtitle: Text(
+                      context.strings('rename.moreAlgorithmsHint'),
+                    ),
+                    children: <Widget>[
+                      for (final AlgorithmInfo info in _availableAlgorithms())
+                        CheckboxListTile(
+                          key: ValueKey<String>(
+                            'rename-extra-${info.id}',
+                          ),
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(info.displayName),
+                          value: _config.algorithms.contains(info.id),
+                          // The primary algorithm is never removable here: the
+                          // dropdown above owns it, and unchecking it from a second
+                          // control would leave the page with no algorithm at all.
+                          onChanged: info.id == _config.algorithms.first
+                              ? null
+                              : (bool? selected) {
+                                  final List<String> next = <String>[
+                                    ..._config.algorithms,
+                                  ];
+                                  if (selected == true) {
+                                    if (!next.contains(info.id)) {
+                                      next.add(info.id);
+                                    }
+                                  } else {
+                                    next.remove(info.id);
+                                  }
+                                  setState(() {
+                                    _updateConfig(
+                                      _config.copyWith(algorithms: next),
+                                    );
+                                    _plan = null;
+                                  });
+                                },
+                        ),
+                    ],
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey<String>('rename-strict-switch'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(context.strings('rename.strictMode')),
+                    subtitle: Text(context.strings('rename.strictModeHint')),
+                    value: _config.strict,
+                    onChanged: (bool value) {
+                      setState(() {
+                        _updateConfig(_config.copyWith(strict: value));
+                        _plan = null;
+                      });
+                    },
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey<String>('rename-clear-suffix-switch'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(context.strings('rename.clearSuffix')),
+                    subtitle: Text(context.strings('rename.clearSuffixHint')),
+                    value: _clearSuffix,
+                    onChanged: (bool value) {
+                      setState(() {
+                        _clearSuffix = value;
+                        _plan = null;
+                      });
+                    },
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey<String>('rename-uppercase-switch'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(context.strings('rename.uppercase')),
+                    value: _config.uppercase,
+                    onChanged: (bool value) {
+                      setState(() {
+                        _updateConfig(_config.copyWith(uppercase: value));
+                        _plan = null;
+                      });
+                    },
+                  ),
+                  Text(
+                    context.strings(
+                      'rename.collisionEstimate',
+                      args: <String, String>{
+                        'length': '${_config.length}',
+                        'files': '$fileCount',
+                        'probability': formatProbabilityPercent(probability),
+                        'recommended': '$recommended',
+                      },
+                    ),
+                    key: const ValueKey<String>('rename-collision-estimate'),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      FilledButton.icon(
+                        key: const ValueKey<String>('rename-dry-run-button'),
+                        onPressed: _planning || _executing
+                            ? null
+                            : () => _preview(entries),
+                        icon: const Icon(Icons.preview),
+                        label: Text(context.strings('rename.preview')),
+                      ),
+                      FilledButton.tonalIcon(
+                        key: const ValueKey<String>('rename-execute-button'),
+                        onPressed:
+                            plan == null || plan.readyCount == 0 || _executing
+                            ? null
+                            : _execute,
+                        icon: const Icon(Icons.drive_file_rename_outline),
+                        label: Text(context.strings('rename.apply')),
+                      ),
+                    ],
+                  ),
+                  if (_planning) ...<Widget>[
+                    const SizedBox(height: 12),
+                    const LinearProgressIndicator(),
+                  ],
+                  if (error != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _InlineMessage(message: error, isError: true),
+                  ],
+                  if (message != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _InlineMessage(message: message, isError: false),
+                  ],
+                  if (plan != null) ...<Widget>[
+                    const SizedBox(height: 20),
+                    Row(
                       children: <Widget>[
-                        for (final RenamePlanRowModel row in plan.rows)
-                          _RenamePlanTile(row: row),
+                        Expanded(
+                          child: Text(
+                            context.strings('rename.dryRun'),
+                            style: theme.textTheme.titleMedium,
+                          ),
+                        ),
+                        Text(
+                          context.strings(
+                            'rename.planCounts',
+                            args: <String, String>{
+                              'ready': '${plan.readyCount}',
+                              'conflict': '${plan.conflictCount}',
+                            },
+                          ),
+                          style: theme.textTheme.bodySmall,
+                        ),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Column(
+                        children: <Widget>[
+                          for (final RenamePlanRowModel row in plan.rows)
+                            _RenamePlanTile(row: row),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ],
-            ],
-          ),
+            ),
+          );
+          },
         );
       },
     );

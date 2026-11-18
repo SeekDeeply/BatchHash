@@ -243,7 +243,11 @@ class _BatchHashAppState extends State<BatchHashApp> {
       algorithms: keptRename.isEmpty
           ? const <String>[kDefaultRenameAlgorithm]
           : keptRename,
-      length: length.clamp(kMinRenameLength, kMaxRenameLength),
+      // Zero is valid: a zero-length suffix writes only the separator. The
+      // upper bound stays at the global maximum here because the per-algorithm
+      // ceiling is only known once the page picks a primary algorithm, and the
+      // page clamps to that when rendering.
+      length: length.clamp(0, kMaxRenameLength),
       uppercase: stored.renameUppercase ?? true,
       strict: stored.renameStrict ?? true,
     );

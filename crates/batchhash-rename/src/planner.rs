@@ -1164,8 +1164,10 @@ mod tests {
         let path = temp.path().join("a.txt");
         let options = RenamePlanOptions {
             format: SuffixFormat {
-                // Past the digest width is the only remaining invalid length:
-                // zero and every value up to the width are accepted.
+                // MD5, not the default BLAKE3: the ceiling is the selected
+                // algorithm's own width, so 33 is only invalid for a 32-
+                // character digest.
+                algorithm: AlgorithmId::Md5,
                 length: 33,
                 ..SuffixFormat::default()
             }

@@ -57,6 +57,20 @@ class _BlockingExportService extends FakeBatchHashService {
 }
 
 void main() {
+  /// Open the export menu and choose [format].
+  ///
+  /// The toolbar used to carry one button per format; it now carries a single
+  /// menu, so every export test has to make the same two taps.
+  Future<void> pickFormat(WidgetTester tester, String label) async {
+    final Finder menu = find.byKey(const ValueKey<String>('hash-export-menu'));
+    await tester.ensureVisible(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(label).last);
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('a second tap while exporting is ignored', (
     WidgetTester tester,
   ) async {
@@ -68,24 +82,19 @@ void main() {
     await tester.pumpWidget(wrapInApp(HashPage(state: state)));
     await tester.pumpAndSettle();
 
-    final Finder json = find.byKey(const ValueKey<String>('hash-export-json'));
-    await tester.ensureVisible(json);
-    await tester.tap(json);
-    await tester.pumpAndSettle();
+    await pickFormat(tester, 'JSON');
 
     // The destination chooser is still open and the export has not finished:
     // both buttons must be disabled so a second tap cannot open another
     // chooser or start a concurrent write.
     expect(
-      tester.widget<OutlinedButton>(json).onPressed,
-      isNull,
-      reason: 'the JSON button must be disabled while exporting',
-    );
-    final Finder csv = find.byKey(const ValueKey<String>('hash-export-csv'));
-    expect(
-      tester.widget<OutlinedButton>(csv).onPressed,
-      isNull,
-      reason: 'the CSV button must be disabled while exporting',
+      tester
+          .widget<PopupMenuButton<ReportFormat>>(
+            find.byKey(const ValueKey<String>('hash-export-menu')),
+          )
+          .enabled,
+      isFalse,
+      reason: 'the export menu must be disabled while exporting',
     );
     expect(
       find.byKey(const ValueKey<String>('path-input-field')),
@@ -115,14 +124,7 @@ void main() {
     await tester.pumpWidget(wrapInApp(HashPage(state: state)));
     await tester.pumpAndSettle();
 
-    final Finder exportButton = find.byKey(
-      const ValueKey<String>('hash-export-json'),
-    );
-    expect(exportButton, findsOneWidget);
-    await tester.ensureVisible(exportButton);
-    await tester.pumpAndSettle();
-    await tester.tap(exportButton);
-    await tester.pumpAndSettle();
+    await pickFormat(tester, 'JSON');
 
     // Without a platform picker the app falls back to its own path dialog;
     // the export must not have run before a directory was confirmed.
@@ -152,13 +154,7 @@ void main() {
     await tester.pumpWidget(wrapInApp(HashPage(state: state)));
     await tester.pumpAndSettle();
 
-    final Finder exportButton = find.byKey(
-      const ValueKey<String>('hash-export-csv'),
-    );
-    await tester.ensureVisible(exportButton);
-    await tester.pumpAndSettle();
-    await tester.tap(exportButton);
-    await tester.pumpAndSettle();
+    await pickFormat(tester, 'CSV');
     await tester.tap(find.byKey(const ValueKey<String>('path-cancel')));
     await tester.pumpAndSettle();
 

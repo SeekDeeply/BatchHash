@@ -148,6 +148,10 @@ class _BatchHashAppState extends State<BatchHashApp> {
     // the selection another way must still be remembered.
     _appState.algorithms.addListener(_persistSettings);
     _appState.renameConfig.addListener(_persistSettings);
+    _appState.exportSql.addListener(_persistSettings);
+    // The hash page cannot reach the shell's tab index, so it asks through
+    // this counter; the report tab is index 2 in [_sections].
+    _appState.reportFocus.addListener(_showReportTab);
     _sections = <AppSection>[
       AppSection(
         key: 'nav.hash',
@@ -251,6 +255,7 @@ class _BatchHashAppState extends State<BatchHashApp> {
       uppercase: stored.renameUppercase ?? true,
       strict: stored.renameStrict ?? true,
     );
+    _appState.exportSql.value = stored.exportSql ?? true;
     _restoring = false;
   }
 
@@ -276,6 +281,7 @@ class _BatchHashAppState extends State<BatchHashApp> {
           renameLength: _appState.renameConfig.value.length,
           renameAlgorithms: _appState.renameConfig.value.algorithms,
           renameStrict: _appState.renameConfig.value.strict,
+          exportSql: _appState.exportSql.value,
           renameUppercase: _appState.renameConfig.value.uppercase,
         ),
       );
@@ -342,6 +348,16 @@ class _BatchHashAppState extends State<BatchHashApp> {
         );
       },
     );
+  }
+
+  /// Switch to the report tab when something bumps [BatchHashAppState.reportFocus].
+  void _showReportTab() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _selectedIndex = 2;
+    });
   }
 
   /// The home route, wrapped in the first-run gate for the real app only.

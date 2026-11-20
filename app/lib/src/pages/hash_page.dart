@@ -484,6 +484,18 @@ class _HashPageState extends State<HashPage> {
     widget.state.algorithms.value = <String>{..._algorithms};
   }
 
+  /// Icon for [format], matching the report page so one format looks the same
+  /// wherever it is offered.
+  static IconData _iconForFormat(ReportFormat format) => switch (format) {
+    ReportFormat.json => Icons.data_object,
+    ReportFormat.csv => Icons.table_chart,
+    ReportFormat.markdown => Icons.article_outlined,
+    ReportFormat.txt => Icons.notes,
+    ReportFormat.md5sum => Icons.tag,
+    ReportFormat.bsd => Icons.format_list_bulleted,
+    ReportFormat.tree => Icons.account_tree_outlined,
+  };
+
   /// Ask for an export destination, preferring the native folder picker.
   ///
   /// Returns null when the user cancels, which must not fall through to the
@@ -547,6 +559,9 @@ class _HashPageState extends State<HashPage> {
             report: report,
             formats: <ReportFormat>{format},
             directory: directory,
+            // The switch defaults on: the log is what makes a later undo or
+            // import possible, and a user who loses it cannot recover it.
+            includeLog: widget.state.exportSql.value,
           );
       if (!mounted) {
         return;
@@ -570,6 +585,9 @@ class _HashPageState extends State<HashPage> {
           ),
         ),
       );
+      // The export produced a report, so show it: leaving the user on the hash
+      // page would hide the very thing they just asked for.
+      widget.state.reportFocus.value = widget.state.reportFocus.value + 1;
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -1036,22 +1054,56 @@ class _HashPageState extends State<HashPage> {
               alignment: Alignment.centerRight,
               child: Wrap(
                 spacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: <Widget>[
-                  OutlinedButton.icon(
-                    key: const ValueKey<String>('hash-export-json'),
-                    onPressed: _computing || _exporting
-                        ? null
-                        : () => _exportQuick(ReportFormat.json),
-                    icon: const Icon(Icons.data_object),
-                    label: Text(context.strings('hash.exportJson')),
+                  // One menu instead of a button per format: the report page
+                  // already offers seven, and two buttons could never show
+                  // them all without turning the toolbar into a wall.
+                  PopupMenuButton<ReportFormat>(
+                    key: const ValueKey<String>('hash-export-menu'),
+                    enabled: !_computing && !_exporting,
+                    tooltip: context.strings('hash.export'),
+                    onSelected: _exportQuick,
+                    itemBuilder: (BuildContext context) => <
+                        PopupMenuEntry<ReportFormat>>[
+                      for (final ReportFormat format in ReportFormat.values)
+                        PopupMenuItem<ReportFormat>(
+                          value: format,
+                          child: Row(
+                            children: <Widget>[
+                              Icon(_iconForFormat(format), size: 18),
+                              const SizedBox(width: 10),
+                              Text(format.label),
+                            ],
+                          ),
+                        ),
+                    ],
+                    child: OutlinedButton.icon(
+                      onPressed: null,
+                      icon: const Icon(Icons.ios_share),
+                      label: Text(context.strings('hash.export')),
+                    ),
                   ),
-                  OutlinedButton.icon(
-                    key: const ValueKey<String>('hash-export-csv'),
-                    onPressed: _computing || _exporting
-                        ? null
-                        : () => _exportQuick(ReportFormat.csv),
-                    icon: const Icon(Icons.table_chart_outlined),
-                    label: Text(context.strings('hash.exportCsv')),
+                  // On by default: the log is what a later undo or import
+                  // reads, and a user who loses it cannot get it back. It is
+                  // switchable because it is noise for a report-only export.
+                  ValueListenableBuilder<bool>(
+                    valueListenable: widget.state.exportSql,
+                    builder: (BuildContext context, bool value, Widget? _) {
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Checkbox(
+                            key: const ValueKey<String>('hash-export-sql'),
+                            value: value,
+                            onChanged: (bool? next) {
+                              widget.state.exportSql.value = next ?? true;
+                            },
+                          ),
+                          Text(context.strings('hash.exportSql')),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),

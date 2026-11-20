@@ -37,16 +37,28 @@ pub const MULTI_SUFFIX_SEPARATOR: char = '+';
 /// once the stem is truncated.
 pub const MAX_SUFFIX_PARTS: usize = 16;
 
-/// Minimum accepted suffix length in hex characters (the contract is 4..=16).
-pub const MIN_SUFFIX_LENGTH: u8 = 4;
+/// Minimum accepted suffix length in hex characters.
+///
+/// Zero is allowed on purpose: a zero-length suffix writes only the separator
+/// and the prefix, which is a legitimate way to tag a batch without embedding
+/// any digest. Rejecting it forced the UI to start at 4 while still offering
+/// the slider, so the page and the core disagreed about the same control.
+pub const MIN_SUFFIX_LENGTH: u8 = 0;
 
-/// Maximum accepted suffix length in hex characters (the contract is 4..=16).
-pub const MAX_SUFFIX_LENGTH: u8 = 16;
+/// Maximum accepted suffix length in hex characters.
+///
+/// This is the hard ceiling for parsing. A written format is additionally
+/// bounded by the digest it reads from, which is per algorithm; see
+/// [SuffixFormat::validate].
+pub const MAX_SUFFIX_LENGTH: u8 = 64;
 
 /// Configuration for the filename suffix written by a rename batch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SuffixFormat {
-    /// Number of leading digest hex characters placed in the suffix (4..=16).
+    /// Number of leading digest hex characters placed in the suffix.
+    ///
+    /// Bounded by 0..=MAX_SUFFIX_LENGTH here and further by the selected
+    /// algorithm's own digest width in [SuffixFormat::validate].
     pub length: u8,
     /// Letter case used for the hex token.
     pub case: HexCase,
@@ -71,15 +83,21 @@ impl Default for SuffixFormat {
 impl SuffixFormat {
     /// Validate the suffix length bounds and the algorithm usability.
     ///
-    /// Returns [`SuffixError::InvalidLength`] for a length outside 4..=16 and
+    /// Returns [`SuffixError::InvalidLength`] when the length exceeds either
+    /// the hard ceiling or the selected algorithm's digest width, and
     /// [`SuffixError::AlgorithmNotSuffixUsable`] for an algorithm that must not
     /// be written into a filename.
+    ///
+    /// The per-algorithm ceiling matters: asking for more hex characters than
+    /// the digest holds could only pad or silently truncate, and both make the
+    /// written suffix disagree with the digest it claims to encode.
     pub fn validate(&self) -> Result<(), SuffixError> {
-        if !(MIN_SUFFIX_LENGTH..=MAX_SUFFIX_LENGTH).contains(&self.length) {
-            return Err(SuffixError::InvalidLength(self.length));
-        }
         if !self.algorithm.spec().suffix_usable {
             return Err(SuffixError::AlgorithmNotSuffixUsable(self.algorithm));
+        }
+        let ceiling = self.algorithm.spec().hex_len.min(usize::from(MAX_SUFFIX_LENGTH));
+        if usize::from(self.length) > ceiling {
+            return Err(SuffixError::InvalidLength(self.length));
         }
         Ok(())
     }
@@ -280,8 +298,8 @@ enum LegacyOrParts {
 /// Failure modes for suffix formatting and configuration validation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SuffixError {
-    /// The configured suffix length is outside 4..=16.
-    #[error("suffix length must be between 4 and 16, got {0}")]
+    /// The configured suffix length exceeds the algorithm's digest width.
+    #[error("suffix length {0} exceeds the digest width available for this algorithm")]
     InvalidLength(u8),
     /// The algorithm is registered but must not be used in a filename suffix.
     #[error("algorithm {0} is not usable for filename suffixes")]
@@ -385,7 +403,8 @@ pub enum SuffixParseResult {
     NotSuffixed,
     /// A valid `[token]` or `[prefix:hex]` suffix was found.
     Parsed(ParsedSuffix),
-    /// A bracket group exists but its content is neither hex of length 4..=16
+    /// A bracket group exists but its content is neither hex of a length the
+    /// parser accepts
     /// nor a recognized `prefix:hex` token. A rename planner must skip such
     /// names rather than nesting a new suffix.
     Unparseable,
@@ -733,8 +752,11 @@ fn max_parse_token_length() -> usize {
 }
 
 fn is_hex_token(value: &str) -> bool {
-    let min = usize::from(MIN_SUFFIX_LENGTH);
-    (min..=max_parse_token_length()).contains(&value.len()) && is_hex(value)
+    // Parsing still needs at least one character: an empty token is not a
+    // suffix, and accepting it would make every `name[]` look parseable. The
+    // zero-length *writing* case never produces a token to parse back.
+    const MIN_PARSE_LENGTH: usize = 1;
+    (MIN_PARSE_LENGTH..=max_parse_token_length()).contains(&value.len()) && is_hex(value)
 }
 
 /// A multi-algorithm group whose parts split cleanly yields one [`ParsedSuffix`]
@@ -1244,18 +1266,39 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_out_of_range_lengths() {
-        for length in [0u8, 3, 17, 255] {
-            let format = upper_format(length);
+    fn validate_accepts_zero_and_rejects_beyond_the_digest_width() {
+        // Zero is a legitimate suffix: it writes only the separator, so a
+        // batch can be tagged without embedding any digest.
+        assert!(upper_format(0).validate().is_ok());
+        // The ceiling is the algorithm's own digest width. upper_format uses
+        // BLAKE3, whose digest is 64 hex characters.
+        let blake3_width = u8::try_from(default_suffix_algorithm().spec().hex_len)
+            .expect("digest width fits u8");
+        assert!(upper_format(blake3_width).validate().is_ok());
+        for length in [blake3_width + 1, 255] {
             assert_eq!(
-                format.validate(),
+                upper_format(length).validate(),
                 Err(SuffixError::InvalidLength(length)),
                 "length {length}"
             );
         }
-        for length in MIN_SUFFIX_LENGTH..=MAX_SUFFIX_LENGTH {
-            assert!(upper_format(length).validate().is_ok(), "length {length}");
-        }
+        // A shorter algorithm must reject a length that only BLAKE3 could fill.
+        let md5 = SuffixFormat {
+            algorithm: AlgorithmId::Md5,
+            ..upper_format(0)
+        };
+        assert!(
+            md5.clone().validate().is_ok(),
+            "zero length is valid for every algorithm"
+        );
+        let md5_too_long = SuffixFormat {
+            length: u8::try_from(AlgorithmId::Md5.spec().hex_len).expect("width") + 1,
+            ..md5
+        };
+        assert!(matches!(
+            md5_too_long.validate(),
+            Err(SuffixError::InvalidLength(_))
+        ));
         // Only suffix-capable algorithms may be written into a filename; the
         // rest must be rejected so a filename never carries an unidentifiable
         // digest (e.g. a variable-length or non-hex-safe encoding).

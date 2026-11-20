@@ -498,7 +498,7 @@ pub fn hash_fd_entries_request(request: &HashFdEntriesRequest) -> Result<BatchRe
 pub struct SuffixDto {
     /// Algorithm whose digest supplies the token.
     pub algorithm: String,
-    /// Number of hex characters (4..=16).
+    /// Number of hex characters, from 0 up to the algorithm's digest width.
     #[serde(default = "default_suffix_length")]
     pub length: u8,
     /// "upper" | "lower" (defaults to upper).
@@ -1291,7 +1291,7 @@ pub struct PlanRenamesRequest {
     /// fallback so a client that predates multi-algorithm support still works.
     #[serde(default)]
     pub algorithms: Vec<String>,
-    /// Number of hex characters (4..=16), applied to every algorithm.
+    /// Number of hex characters, from 0 up to the algorithm's digest width.
     #[serde(default = "default_suffix_length")]
     pub length: u8,
     /// "upper" | "lower" (defaults to upper).

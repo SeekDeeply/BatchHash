@@ -424,6 +424,7 @@ class FakeBatchHashService implements BatchHashService {
     required Set<ReportFormat> formats,
     String? directory,
     String? locale,
+    bool includeLog = false,
   }) async {
     lastExportLocale = locale;
     lastExportContents.clear();

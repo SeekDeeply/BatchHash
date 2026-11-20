@@ -48,6 +48,20 @@ class BatchHashAppState {
   /// Destination directory for report export; empty means the service default.
   final ValueNotifier<String> exportDirectory = ValueNotifier<String>('');
 
+  /// Whether an export also writes the rename log database into the target.
+  ///
+  /// On by default because the log is what makes a later undo or import
+  /// possible, and losing it is not something a user can recover from. It is
+  /// switchable because the file is noise for someone who only wants a report.
+  final ValueNotifier<bool> exportSql = ValueNotifier<bool>(true);
+
+  /// Bumped when something wants the report tab shown.
+  ///
+  /// The shell owns the tab index, and the hash page has no handle on it, so
+  /// a counter is the smallest way to ask. The shell listens and switches,
+  /// then ignores the value: only the change matters.
+  final ValueNotifier<int> reportFocus = ValueNotifier<int>(0);
+
   /// Result of the last comparison run.
   ///
   /// Held here rather than in the page because the shell rebuilds each page from
@@ -119,6 +133,8 @@ class BatchHashAppState {
     pickedFiles.dispose();
     recentPaths.dispose();
     exportDirectory.dispose();
+    exportSql.dispose();
+    reportFocus.dispose();
     compareRows.dispose();
     compareLeftReport.dispose();
     compareRightReport.dispose();

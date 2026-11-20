@@ -21,6 +21,7 @@ class AppSettings {
     this.renameLength,
     this.renameAlgorithms,
     this.renameStrict,
+    this.exportSql,
     this.renameUppercase,
   });
 
@@ -47,6 +48,9 @@ class AppSettings {
   /// Whether the rename page last ran in strict-match mode.
   final bool? renameStrict;
 
+  /// Whether an export also copies the rename log database.
+  final bool? exportSql;
+
   /// Whether the rename suffix was written uppercase.
   final bool? renameUppercase;
 
@@ -64,6 +68,7 @@ class AppSettings {
     int? renameLength,
     List<String>? renameAlgorithms,
     bool? renameStrict,
+    bool? exportSql,
     bool? renameUppercase,
   }) {
     return AppSettings(
@@ -73,6 +78,7 @@ class AppSettings {
       renameLength: renameLength ?? this.renameLength,
       renameAlgorithms: renameAlgorithms ?? this.renameAlgorithms,
       renameStrict: renameStrict ?? this.renameStrict,
+      exportSql: exportSql ?? this.exportSql,
       renameUppercase: renameUppercase ?? this.renameUppercase,
     );
   }
@@ -84,6 +90,7 @@ class AppSettings {
     if (renameLength != null) 'rename_length': renameLength,
     if (renameAlgorithms != null) 'rename_algorithms': renameAlgorithms,
     if (renameStrict != null) 'rename_strict': renameStrict,
+    if (exportSql != null) 'export_sql': exportSql,
     if (renameUppercase != null) 'rename_uppercase': renameUppercase,
   };
 
@@ -101,6 +108,7 @@ class AppSettings {
     final Object? renameLength = raw['rename_length'];
     final Object? renameAlgorithms = raw['rename_algorithms'];
     final Object? renameStrict = raw['rename_strict'];
+    final Object? exportSql = raw['export_sql'];
     final Object? renameUppercase = raw['rename_uppercase'];
     return AppSettings(
       locale: locale is String && locale.trim().isNotEmpty
@@ -121,6 +129,7 @@ class AppSettings {
             ]
           : null,
       renameStrict: renameStrict is bool ? renameStrict : null,
+      exportSql: exportSql is bool ? exportSql : null,
       renameUppercase: renameUppercase is bool ? renameUppercase : null,
     );
   }

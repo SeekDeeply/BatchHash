@@ -1039,10 +1039,18 @@ class HistoryBatchModel {
     required this.createdAt,
     required this.fileCount,
     required this.appliedCount,
+    this.root = '',
     this.undone = false,
   });
 
   final String id;
+
+  /// Folder the batch renamed, as recorded when it ran.
+  ///
+  /// Shown instead of the batch id: a UUID tells a user nothing, while the
+  /// folder is what they actually remember. Empty for logs written before the
+  /// column existed, so the UI falls back to the id.
+  final String root;
   final DateTime createdAt;
   final int fileCount;
   final int appliedCount;
@@ -1054,6 +1062,7 @@ class HistoryBatchModel {
       createdAt: createdAt,
       fileCount: fileCount,
       appliedCount: appliedCount,
+      root: root,
       undone: undone ?? this.undone,
     );
   }

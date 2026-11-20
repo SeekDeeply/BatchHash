@@ -35,6 +35,26 @@ class _HistoryPageState extends State<HistoryPage> {
     _future = widget.service.loadHistory();
   }
 
+  /// The last path segment of [root], for use as a title.
+  ///
+  /// A full path is long and the trailing segment is the part that names the
+  /// folder. A SAF tree URI is handled the same way: its last segment is the
+  /// document id, whose part after the colon is the folder name.
+  static String _folderLabel(String root) {
+    final String trimmed = root.trim();
+    if (trimmed.isEmpty) {
+      return root;
+    }
+    final String withoutTrailing = trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1)
+        : trimmed;
+    final String last = withoutTrailing.split(RegExp(r'[/\\]')).last;
+    final String decoded = Uri.decodeComponent(last);
+    final int colon = decoded.lastIndexOf(':');
+    final String name = colon >= 0 ? decoded.substring(colon + 1) : decoded;
+    return name.isEmpty ? root : name;
+  }
+
   Future<void> _undo(HistoryBatchModel batch) async {
     final String id = batch.id;
     final String undoneMessage = context.strings(
@@ -301,11 +321,21 @@ class _HistoryPageState extends State<HistoryPage> {
                                     ? scheme.outline
                                     : scheme.tertiary,
                               ),
+                              // The folder is what the user remembers; the
+                              // batch id is a UUID they never saw. Only a log
+                              // written before the root column existed has no
+                              // folder to show, and that falls back to the id.
                               title: Text(
-                                context.strings(
-                                  'history.batch',
-                                  args: <String, String>{'id': batch.id},
-                                ),
+                                batch.root.isEmpty
+                                    ? context.strings(
+                                        'history.batch',
+                                        args: <String, String>{
+                                          'id': batch.id,
+                                        },
+                                      )
+                                    : _folderLabel(batch.root),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                               subtitle: Text(
                                 '$fileCountLabel · $renamedLabel · $createdLabel',

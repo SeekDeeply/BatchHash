@@ -140,11 +140,17 @@ abstract class BatchHashService {
     String? locale,
   });
 
+  /// Export [report] in each of [formats].
+  ///
+  /// [includeLog] also copies the rename log database beside the report: it is
+  /// what makes a later undo or import possible, and copying it is how a batch
+  /// moves to another machine.
   Future<List<ExportedReport>> exportReport({
     required ReportModel report,
     required Set<ReportFormat> formats,
     String? directory,
     String? locale,
+    bool includeLog = false,
   });
 
   Future<ReportModel> importReport(String path);

@@ -31,7 +31,7 @@ pub enum HexCase {
 /// Suffix configuration recorded in a report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SuffixConfig {
-    /// Number of hex characters written into the suffix (4..=16).
+    /// Number of hex characters written into the suffix, 0 up to the digest width.
     pub length: u8,
     #[serde(rename = "case")]
     pub case: HexCase,

@@ -670,6 +670,7 @@ class RustBatchHashService implements BatchHashService {
     required Set<ReportFormat> formats,
     String? directory,
     String? locale,
+    bool includeLog = false,
   }) async {
     final reportJson = _reportJson(report);
     final target = Directory(await _exportDirectory(directory));
@@ -678,6 +679,22 @@ class RustBatchHashService implements BatchHashService {
     }
     final dirPath = target.path;
     final written = <ExportedReport>[];
+    // The rename log travels with the report when asked: it is the only thing
+    // that makes a later undo or import possible, and copying it beside the
+    // report is how a user moves a batch to another machine.
+    if (includeLog) {
+      final String? db = await _resolveLogDb();
+      if (db != null && db.isNotEmpty) {
+        final File source = File(db);
+        if (source.existsSync()) {
+          final File copy = _claimFileName(dirPath, 'db');
+          await source.copy(copy.path);
+          written.add(
+            ExportedReport(format: ReportFormat.json, path: copy.path),
+          );
+        }
+      }
+    }
     for (final format in formats) {
       final text = native.exportReport(
         reportJson: reportJson,
@@ -690,6 +707,29 @@ class RustBatchHashService implements BatchHashService {
       written.add(ExportedReport(format: format, path: file.path));
     }
     return written;
+  }
+
+  /// Reserve a free path for a binary file that the caller writes itself.
+  ///
+  /// Same no-overwrite rule as [_claimExportFile], but the file is created
+  /// empty and left to the caller: a database copy cannot go through a text
+  /// write without corrupting it.
+  File _claimFileName(String dirPath, String extension) {
+    for (int index = 0; index < _exportNameAttempts; index += 1) {
+      final String suffix = index == 0 ? '' : ' ($index)';
+      final File candidate = File(
+        '$dirPath/batchhash-report$suffix.$extension',
+      );
+      try {
+        candidate.createSync(exclusive: true);
+      } on FileSystemException {
+        continue;
+      }
+      return candidate;
+    }
+    throw StateError(
+      'no free report filename in $dirPath after $_exportNameAttempts attempts',
+    );
   }
 
   /// Write [text] to the first free name, never replacing an existing report.
@@ -982,6 +1022,7 @@ class RustBatchHashService implements BatchHashService {
             createdAt: createdAt,
             fileCount: (batch['file_count'] as num?)?.toInt() ?? 0,
             appliedCount: (batch['applied_count'] as num?)?.toInt() ?? 0,
+            root: batch['root'] as String? ?? '',
             undone: ((batch['undone_count'] as num?)?.toInt() ?? 0) > 0,
           ),
         );

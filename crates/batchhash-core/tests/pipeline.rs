@@ -265,7 +265,9 @@ fn applying_renames_without_a_log_path_is_rejected() {
 fn invalid_suffix_format_is_rejected_before_scanning() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut format = md5_format();
-    format.length = 3;
+    // One past MD5's 32 hex characters: the only length that is now invalid,
+    // since 0 and anything up to the digest width are accepted.
+    format.length = 33;
     let request =
         BatchRequest::new(temp.path(), vec![AlgorithmId::Md5]).with_suffix_dry_run(format);
     let error = run_batch(&request, &CancelToken::new(), &no_events).expect_err("must fail");

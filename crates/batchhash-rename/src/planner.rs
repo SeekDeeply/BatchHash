@@ -1164,7 +1164,9 @@ mod tests {
         let path = temp.path().join("a.txt");
         let options = RenamePlanOptions {
             format: SuffixFormat {
-                length: 3,
+                // Past the digest width is the only remaining invalid length:
+                // zero and every value up to the width are accepted.
+                length: 33,
                 ..SuffixFormat::default()
             }
             .into(),

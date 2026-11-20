@@ -95,7 +95,11 @@ impl SuffixFormat {
         if !self.algorithm.spec().suffix_usable {
             return Err(SuffixError::AlgorithmNotSuffixUsable(self.algorithm));
         }
-        let ceiling = self.algorithm.spec().hex_len.min(usize::from(MAX_SUFFIX_LENGTH));
+        let ceiling = self
+            .algorithm
+            .spec()
+            .hex_len
+            .min(usize::from(MAX_SUFFIX_LENGTH));
         if usize::from(self.length) > ceiling {
             return Err(SuffixError::InvalidLength(self.length));
         }
@@ -1272,8 +1276,8 @@ mod tests {
         assert!(upper_format(0).validate().is_ok());
         // The ceiling is the algorithm's own digest width. upper_format uses
         // BLAKE3, whose digest is 64 hex characters.
-        let blake3_width = u8::try_from(default_suffix_algorithm().spec().hex_len)
-            .expect("digest width fits u8");
+        let blake3_width =
+            u8::try_from(default_suffix_algorithm().spec().hex_len).expect("digest width fits u8");
         assert!(upper_format(blake3_width).validate().is_ok());
         for length in [blake3_width + 1, 255] {
             assert_eq!(

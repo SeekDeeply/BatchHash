@@ -44,6 +44,7 @@ class _FixedExportService extends FakeBatchHashService {
     required Set<ReportFormat> formats,
     String? directory,
     String? locale,
+    bool includeLog = false,
   }) async {
     lastDirectory = directory;
     // The page also forwards the active language; keep the parameter so this

@@ -18,6 +18,7 @@ class _RecordingService extends FakeBatchHashService {
     required Set<ReportFormat> formats,
     String? directory,
     String? locale,
+    bool includeLog = false,
   }) async {
     exportCalled = true;
     lastDirectory = directory;
@@ -26,6 +27,7 @@ class _RecordingService extends FakeBatchHashService {
       formats: formats,
       directory: directory,
       locale: locale,
+      includeLog: includeLog,
     );
   }
 }
@@ -41,6 +43,7 @@ class _BlockingExportService extends FakeBatchHashService {
     required Set<ReportFormat> formats,
     String? directory,
     String? locale,
+    bool includeLog = false,
   }) async {
     exportCalls += 1;
     return super.exportReport(
@@ -48,6 +51,7 @@ class _BlockingExportService extends FakeBatchHashService {
       formats: formats,
       directory: directory,
       locale: locale,
+      includeLog: includeLog,
     );
   }
 }

@@ -74,7 +74,11 @@ impl SuffixConfig {
                 "algorithm is not usable for filename suffixes",
             ));
         }
-        let ceiling = self.algorithm.spec().hex_len.min(usize::from(Self::MAX_LENGTH));
+        let ceiling = self
+            .algorithm
+            .spec()
+            .hex_len
+            .min(usize::from(Self::MAX_LENGTH));
         if usize::from(self.length) > ceiling {
             return Err(ReportValidationError::InvalidSuffixConfig(
                 "suffix length exceeds the digest width of the algorithm",

@@ -553,6 +553,56 @@ mod tests {
         ));
     }
 
+    /// The report layer must accept exactly what the rename layer accepts.
+    ///
+    /// These two used to disagree: rename allowed 0..=digest width while the
+    /// report still demanded 4..=16, so a plan previewed fine and then failed at
+    /// execution with "suffix length must be between 4 and 16".
+    #[test]
+    fn suffix_config_accepts_zero_and_the_algorithm_width() {
+        for algorithm in [AlgorithmId::Md5, AlgorithmId::Sha256, AlgorithmId::Blake3] {
+            let width = u8::try_from(algorithm.hex_len()).expect("width fits u8");
+            for length in [0u8, 1, width] {
+                let config = SuffixConfig {
+                    length,
+                    algorithm,
+                    ..SuffixConfig::default()
+                };
+                assert!(
+                    config.validate().is_ok(),
+                    "{algorithm:?} at length {length} must be accepted",
+                );
+            }
+            let too_long = SuffixConfig {
+                length: width + 1,
+                algorithm,
+                ..SuffixConfig::default()
+            };
+            assert!(
+                matches!(
+                    too_long.validate(),
+                    Err(ReportValidationError::InvalidSuffixConfig(_))
+                ),
+                "{algorithm:?} at length {} must be rejected",
+                width + 1
+            );
+        }
+    }
+
+    #[test]
+    fn suffix_config_rejects_an_unusable_algorithm() {
+        let config = SuffixConfig {
+            algorithm: AlgorithmId::Sha512_224,
+            length: 0,
+            ..SuffixConfig::default()
+        };
+        // Whatever the length, a non-suffix algorithm must never be recorded.
+        assert!(matches!(
+            config.validate(),
+            Err(ReportValidationError::InvalidSuffixConfig(_))
+        ));
+    }
+
     #[test]
     fn summary_counters_saturate_instead_of_panicking() {
         let mut report = make_report(vec![entry("a.mkv", u64::MAX, EntryStatus::Ok, 'a')]);

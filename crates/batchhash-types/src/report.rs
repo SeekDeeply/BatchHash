@@ -51,19 +51,33 @@ impl Default for SuffixConfig {
     }
 }
 impl SuffixConfig {
-    pub const MIN_LENGTH: u8 = 4;
-    pub const MAX_LENGTH: u8 = 16;
+    /// Lowest accepted suffix length.
+    ///
+    /// Zero is valid: it writes only the separator and the prefix, which is a
+    /// legitimate way to tag a batch without embedding any digest.
+    pub const MIN_LENGTH: u8 = 0;
+
+    /// Hard ceiling for a suffix length.
+    ///
+    /// The effective ceiling is the selected algorithm's digest width, which
+    /// [SuffixConfig::validate] enforces on top of this bound.
+    pub const MAX_LENGTH: u8 = 64;
 
     /// Validate suffix length bounds and algorithm usability.
+    ///
+    /// The per-algorithm ceiling matters: a suffix longer than the digest it
+    /// is taken from could only be padded or silently truncated, and either
+    /// makes the filename disagree with the digest the report records.
     pub fn validate(&self) -> Result<(), ReportValidationError> {
-        if !(Self::MIN_LENGTH..=Self::MAX_LENGTH).contains(&self.length) {
-            return Err(ReportValidationError::InvalidSuffixConfig(
-                "suffix length must be between 4 and 16",
-            ));
-        }
         if !self.algorithm.spec().suffix_usable {
             return Err(ReportValidationError::InvalidSuffixConfig(
                 "algorithm is not usable for filename suffixes",
+            ));
+        }
+        let ceiling = self.algorithm.spec().hex_len.min(usize::from(Self::MAX_LENGTH));
+        if usize::from(self.length) > ceiling {
+            return Err(ReportValidationError::InvalidSuffixConfig(
+                "suffix length exceeds the digest width of the algorithm",
             ));
         }
         Ok(())

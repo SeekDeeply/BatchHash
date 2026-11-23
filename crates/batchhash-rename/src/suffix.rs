@@ -1013,20 +1013,19 @@ mod tests {
 
     #[test]
     fn compare_lists_every_algorithm_that_agrees_with_a_bare_token() {
-        // Sixteen hex characters is a width shared by more than one algorithm,
-        // so a bare token of that length cannot be attributed to a single one.
-        // Both digests start with the same sixteen characters here.
+        // Xxh3_64 and Xxh64 both print 16 hex characters, so a bare token of
+        // that width belongs to neither by name alone. Both digests start with
+        // the same 16 characters here, so both must be reported as matching.
         let shared = "abcd1234abcd1234";
         let hashes = hash_map(&[
-            (AlgorithmId::Sha256, "abcd1234abcd1234aaaaaaaaaaaaaaaa"),
-            (AlgorithmId::Blake3, "abcd1234abcd1234bbbbbbbbbbbbbbbb"),
+            (AlgorithmId::Xxh3_64, "abcd1234abcd1234"),
+            (AlgorithmId::Xxh64, "abcd1234abcd1234"),
         ]);
-        let verdict =
-            compare_existing_suffix(&format!("movie[{shared}].mkv"), &hashes);
+        let verdict = compare_existing_suffix(&format!("movie[{shared}].mkv"), &hashes);
         match verdict {
             ExistingSuffixVerdict::Ambiguous { matched, .. } => {
-                assert!(matched.contains(&AlgorithmId::Sha256));
-                assert!(matched.contains(&AlgorithmId::Blake3));
+                assert!(matched.contains(&AlgorithmId::Xxh3_64));
+                assert!(matched.contains(&AlgorithmId::Xxh64));
             }
             other => panic!("expected ambiguity, got {other:?}"),
         }

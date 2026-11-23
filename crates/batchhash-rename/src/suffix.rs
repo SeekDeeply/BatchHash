@@ -996,8 +996,8 @@ mod tests {
 
     #[test]
     fn compare_infers_when_the_width_names_one_algorithm() {
-        // A 4-character token cannot identify its algorithm, but 4 is also not
-        // the width of any registered digest, so this stays ambiguous.
+        // A 4-character token matches no registered digest width, so it cannot
+        // be attributed to an algorithm at all; the verdict must not invent one.
         let hashes = hash_map(&[(AlgorithmId::Md5, "abcd1234")]);
         match compare_existing_suffix("movie[ABCD].mkv", &hashes) {
             ExistingSuffixVerdict::Ambiguous { hex, .. } => {
@@ -1013,13 +1013,16 @@ mod tests {
 
     #[test]
     fn compare_lists_every_algorithm_that_agrees_with_a_bare_token() {
-        // Both digests start with the same eight characters, so a bare token
-        // of that width cannot be attributed to one of them.
+        // Sixteen hex characters is a width shared by more than one algorithm,
+        // so a bare token of that length cannot be attributed to a single one.
+        // Both digests start with the same sixteen characters here.
+        let shared = "abcd1234abcd1234";
         let hashes = hash_map(&[
-            (AlgorithmId::Sha256, "abcd1234aaaaaaaa"),
-            (AlgorithmId::Blake3, "abcd1234bbbbbbbb"),
+            (AlgorithmId::Sha256, "abcd1234abcd1234aaaaaaaaaaaaaaaa"),
+            (AlgorithmId::Blake3, "abcd1234abcd1234bbbbbbbbbbbbbbbb"),
         ]);
-        let verdict = compare_existing_suffix("movie[ABCD1234].mkv", &hashes);
+        let verdict =
+            compare_existing_suffix(&format!("movie[{shared}].mkv"), &hashes);
         match verdict {
             ExistingSuffixVerdict::Ambiguous { matched, .. } => {
                 assert!(matched.contains(&AlgorithmId::Sha256));

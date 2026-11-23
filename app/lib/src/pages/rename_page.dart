@@ -316,11 +316,11 @@ class _RenamePageState extends State<RenamePage> {
           },
         );
         if (logPath != null) {
-          _message = '${_message!}\n';
-          _message = '${_message!}${context.strings('rename.logCopied', args: <String, String>{'path': logPath!})}';
+          _message = '$_message\n';
+          _message = '$_message${context.strings('rename.logCopied', args: <String, String>{'path': logPath})}';
         } else if (logError != null) {
           _message = '${_message!}\n';
-          _message = '${_message!}${context.strings('rename.logCopyFailed', args: <String, String>{'error': logError!})}';
+          _message = '$_message${context.strings('rename.logCopyFailed', args: <String, String>{'error': logError})}';
         }
       });
     } catch (error) {
@@ -704,6 +704,7 @@ class _RenamePageState extends State<RenamePage> {
                               'conflict': '${plan.conflictCount}',
                             },
                           ),
+                          style: theme.textTheme.bodySmall,
                         ),
                         // Permission failures are called out on their own: the
                         // files are present and unchanged, so the user can fix
@@ -722,8 +723,6 @@ class _RenamePageState extends State<RenamePage> {
                             ),
                           ),
                         ],
-                          style: theme.textTheme.bodySmall,
-                        ),
                       ],
                     ),
                     const SizedBox(height: 8),

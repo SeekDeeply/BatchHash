@@ -159,7 +159,11 @@ impl BatchRequest {
     }
 
     /// Request suffix planning and execution with the given format.
-    pub fn with_suffix(mut self, format: impl Into<MultiSuffixFormat>, log_db: impl Into<PathBuf>) -> Self {
+    pub fn with_suffix(
+        mut self,
+        format: impl Into<MultiSuffixFormat>,
+        log_db: impl Into<PathBuf>,
+    ) -> Self {
         self.suffix = Some(format.into());
         self.apply_renames = true;
         self.log_db = Some(log_db.into());

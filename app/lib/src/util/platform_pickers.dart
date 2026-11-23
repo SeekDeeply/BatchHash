@@ -173,9 +173,12 @@ class PlatformPickers {
       // Bounded on purpose: a platform channel that never answers (a test
       // harness, or a desktop plugin that failed to register) must not hold the
       // dialog back. Timing out simply means no pinning.
-      final Size? size = await windowManager
-          .getSize()
-          .timeout(const Duration(milliseconds: 200), onTimeout: () => null);
+      final Size? size = await windowManager.getSize().timeout(
+        const Duration(milliseconds: 200),
+        // A timeout means "no pinning", not "the current size is null":
+        // returning null here keeps the caller on the un-pinned path.
+        onTimeout: () => const Size(0, 0),
+      ).then((Size value) => value.width > 0 ? value : null);
       if (size != null) {
         width = size.width;
         height = size.height;

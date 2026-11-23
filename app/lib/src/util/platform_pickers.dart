@@ -161,15 +161,34 @@ class PlatformPickers {
     if (!Platform.isLinux && !Platform.isWindows && !Platform.isMacOS) {
       return open();
     }
+    // Under `flutter test` there is no real window and no plugin channel, so
+    // pinning can only stall the caller. The mitigation is for a live desktop
+    // session; skipping it keeps the test harness honest about the dialog.
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      return open();
+    }
     double? width;
     double? height;
     try {
-      final Size size = await windowManager.getSize();
-      width = size.width;
-      height = size.height;
-      await windowManager.setResizable(false);
-      await windowManager.setMinimumSize(size);
-      await windowManager.setMaximumSize(size);
+      // Bounded on purpose: a platform channel that never answers (a test
+      // harness, or a desktop plugin that failed to register) must not hold the
+      // dialog back. Timing out simply means no pinning.
+      final Size? size = await windowManager
+          .getSize()
+          .timeout(const Duration(milliseconds: 200), onTimeout: () => null);
+      if (size != null) {
+        width = size.width;
+        height = size.height;
+        await windowManager
+            .setResizable(false)
+            .timeout(const Duration(milliseconds: 200), onTimeout: () {});
+        await windowManager
+            .setMinimumSize(size)
+            .timeout(const Duration(milliseconds: 200), onTimeout: () {});
+        await windowManager
+            .setMaximumSize(size)
+            .timeout(const Duration(milliseconds: 200), onTimeout: () {});
+      }
     } catch (_) {
       // Pinning is a mitigation, not a requirement.
     }

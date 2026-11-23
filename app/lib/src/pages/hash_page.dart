@@ -559,9 +559,7 @@ class _HashPageState extends State<HashPage> {
             report: report,
             formats: <ReportFormat>{format},
             directory: directory,
-            // The switch defaults on: the log is what makes a later undo or
-            // import possible, and a user who loses it cannot recover it.
-            includeLog: widget.state.exportSql.value,
+
           );
       if (!mounted) {
         return;
@@ -1084,27 +1082,7 @@ class _HashPageState extends State<HashPage> {
                       label: Text(context.strings('hash.export')),
                     ),
                   ),
-                  // On by default: the log is what a later undo or import
-                  // reads, and a user who loses it cannot get it back. It is
-                  // switchable because it is noise for a report-only export.
-                  ValueListenableBuilder<bool>(
-                    valueListenable: widget.state.exportSql,
-                    builder: (BuildContext context, bool value, Widget? _) {
-                      return Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          Checkbox(
-                            key: const ValueKey<String>('hash-export-sql'),
-                            value: value,
-                            onChanged: (bool? next) {
-                              widget.state.exportSql.value = next ?? true;
-                            },
-                          ),
-                          Text(context.strings('hash.exportSql')),
-                        ],
-                      );
-                    },
-                  ),
+
                 ],
               ),
             ),

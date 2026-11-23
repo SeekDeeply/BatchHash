@@ -564,6 +564,15 @@ class FakeBatchHashService implements BatchHashService {
   /// and import without a database file.
   final List<String> _renameLog = <String>[];
 
+  /// Directory the fake recorded for [exportLogTo].
+  String? lastLogExportDirectory;
+
+  @override
+  Future<String?> exportLogTo(String directory) async {
+    lastLogExportDirectory = directory;
+    return '$directory/.batchhash-rename.db';
+  }
+
   @override
   Future<String?> exportRenameLog() async {
     // A JSON array keeps the demo payload self-describing, and an empty log

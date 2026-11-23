@@ -502,6 +502,11 @@ class LoggingBatchHashService implements BatchHashService {
   Future<List<HistoryBatchModel>> loadHistory() => inner.loadHistory();
 
   @override
+  Future<String?> exportLogTo(String directory) {
+    return _record('op.exportLogTo', () => inner.exportLogTo(directory));
+  }
+
+  @override
   Future<String?> exportRenameLog() {
     return _record(
       'op.exportRenameLog',

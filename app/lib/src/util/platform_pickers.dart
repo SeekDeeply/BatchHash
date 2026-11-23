@@ -2,6 +2,8 @@
 import 'dart:io' show File, Platform;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/widgets.dart' show Size;
+import 'package:window_manager/window_manager.dart';
 
 import 'saf_bridge.dart';
 import 'package:flutter/services.dart';
@@ -27,7 +29,16 @@ class PlatformPickers {
     Future<String?> Function() fallback,
   ) async {
     try {
-      final String? picked = await FilePicker.platform.getDirectoryPath();
+      // On Windows `getDirectoryPath` runs a modal system dialog that blocks
+      // the platform thread the Flutter window draws on (file_picker #1478).
+      // Resizing the app window while it is open leaves the framebuffer stale,
+      // which shows up as a large black area, and the dialog can then return
+      // without the selection reaching Dart. Pinning the window for the
+      // duration removes the resize that triggers it; the caller shows its own
+      // busy indicator so the frozen frame reads as "waiting", not "broken".
+      final String? picked = await _withWindowPinned(
+        () => FilePicker.platform.getDirectoryPath(),
+      );
       if (picked == null || picked.trim().isEmpty) {
         return null;
       }
@@ -136,6 +147,45 @@ class PlatformPickers {
     } on PlatformException catch (error) {
       // A real failure, with a code the caller can show.
       throw StateError('${error.code}: ${error.message ?? error.details ?? ''}');
+    }
+  }
+
+  /// Run [open] with the desktop window pinned at its current size.
+  ///
+  /// A modal system dialog on Windows blocks the platform thread, so the
+  /// Flutter window cannot repaint while it is open. A resize during that gap
+  /// leaves a stale, partly black framebuffer, and the dialog may then close
+  /// without delivering the picked path. Refusing the resize for the duration
+  /// removes the trigger. Failures are swallowed: a platform without
+  /// window_manager must still be able to open a file dialog.
+  static Future<T> _withWindowPinned<T>(Future<T> Function() open) async {
+    if (!Platform.isLinux && !Platform.isWindows && !Platform.isMacOS) {
+      return open();
+    }
+    double? width;
+    double? height;
+    try {
+      final Size size = await windowManager.getSize();
+      width = size.width;
+      height = size.height;
+      await windowManager.setResizable(false);
+      await windowManager.setMinimumSize(size);
+      await windowManager.setMaximumSize(size);
+    } catch (_) {
+      // Pinning is a mitigation, not a requirement.
+    }
+    try {
+      return await open();
+    } finally {
+      try {
+        await windowManager.setResizable(true);
+        if (width != null && height != null) {
+          await windowManager.setMinimumSize(const Size(640, 480));
+          await windowManager.setMaximumSize(const Size(16384, 16384));
+        }
+      } catch (_) {
+        // Nothing to restore on a platform that refused to pin.
+      }
     }
   }
 }

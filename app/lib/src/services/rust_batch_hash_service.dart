@@ -651,6 +651,37 @@ class RustBatchHashService implements BatchHashService {
     );
   }
 
+  /// Copy the rename log into [directory] after a batch.
+  ///
+  /// The log normally lives beside the scanned root, which is not always the
+  /// folder the user thinks of as "the result". Writing a copy into the target
+  /// makes the record travel with the files, so a later undo or import on
+  /// another machine still has it. Returns the written path, or null when there
+  /// was no log to copy.
+  @override
+  Future<String?> exportLogTo(String directory) async {
+    final String? db = await _resolveLogDb();
+    if (db == null || db.isEmpty) {
+      return null;
+    }
+    final File source = File(db);
+    if (!source.existsSync()) {
+      return null;
+    }
+    final Directory target = Directory(directory);
+    if (!target.existsSync()) {
+      await target.create(recursive: true);
+    }
+    // Named after the source, not a fixed name: two roots exported into one
+    // folder must not silently overwrite each other.
+    final File copy = File('${target.path}/${source.uri.pathSegments.last}');
+    if (copy.path == source.path) {
+      return copy.path;
+    }
+    await source.copy(copy.path);
+    return copy.path;
+  }
+
   @override
   Future<String> renderReport({
     required ReportModel report,

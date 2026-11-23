@@ -1007,6 +1007,15 @@ class RenamePlanModel {
       .length;
 
   int get blockedCount => rows.length - readyCount;
+
+  /// Rows skipped because a path could not be read or written.
+  ///
+  /// Counted separately from [blockedCount] because it is the one reason a
+  /// user can usually fix: the files are still there, the process just lacks
+  /// permission. Rolling it into "blocked" hid an actionable problem.
+  int get noPermissionCount => rows
+      .where((RenamePlanRowModel row) => row.status == RenameRowStatus.noPermission)
+      .length;
 }
 
 /// Result of applying a rename plan.

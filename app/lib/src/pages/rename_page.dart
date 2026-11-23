@@ -250,6 +250,26 @@ class _RenamePageState extends State<RenamePage> {
     }
   }
 
+  /// Folder the batch renames into, taken from the first planned row.
+  ///
+  /// Every row of one plan shares a root, so the first ready row names it. A
+  /// plan with nothing ready has no target and returns null.
+  static String? _renameTargetDirectory(RenamePlanModel plan) {
+    for (final RenamePlanRowModel row in plan.rows) {
+      if (row.status != RenameRowStatus.ready) {
+        continue;
+      }
+      final int slash = row.path.lastIndexOf('/');
+      final int backslash = row.path.lastIndexOf('\\');
+      final int cut = slash > backslash ? slash : backslash;
+      if (cut <= 0) {
+        return null;
+      }
+      return row.path.substring(0, cut);
+    }
+    return null;
+  }
+
   Future<void> _execute() async {
     final RenamePlanModel? plan = _plan;
     if (plan == null) {
@@ -266,6 +286,25 @@ class _RenamePageState extends State<RenamePage> {
       if (!mounted) {
         return;
       }
+      // The record is what makes a later undo possible, so when the user asked
+      // for it the copy goes beside the renamed files rather than only next to
+      // the scanned root. A failure here must not read as a failed rename: the
+      // files are already renamed and saying otherwise would be a lie.
+      String? logPath;
+      String? logError;
+      if (widget.state.exportSql.value) {
+        final String? directory = _renameTargetDirectory(plan);
+        if (directory != null) {
+          try {
+            logPath = await widget.state.service.exportLogTo(directory);
+          } catch (error) {
+            logError = '$error';
+          }
+        }
+      }
+      if (!mounted) {
+        return;
+      }
       setState(() {
         _executing = false;
         _message = context.strings(
@@ -276,6 +315,13 @@ class _RenamePageState extends State<RenamePage> {
             'failed': '${result.failed}',
           },
         );
+        if (logPath != null) {
+          _message = '${_message!}\n';
+          _message = '${_message!}${context.strings('rename.logCopied', args: <String, String>{'path': logPath!})}';
+        } else if (logError != null) {
+          _message = '${_message!}\n';
+          _message = '${_message!}${context.strings('rename.logCopyFailed', args: <String, String>{'error': logError!})}';
+        }
       });
     } catch (error) {
       if (!mounted) {
@@ -534,6 +580,25 @@ class _RenamePageState extends State<RenamePage> {
                         ),
                     ],
                   ),
+                  // Default on: the record is what makes a later undo possible,
+                  // and a user who loses it cannot get it back. It is switchable
+                  // because the file is noise for someone who only wants the
+                  // renamed files.
+                  ValueListenableBuilder<bool>(
+                    valueListenable: widget.state.exportSql,
+                    builder: (BuildContext context, bool value, Widget? _) {
+                      return SwitchListTile(
+                        key: const ValueKey<String>('rename-copy-log-switch'),
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(context.strings('rename.copyLog')),
+                        subtitle: Text(context.strings('rename.copyLogHint')),
+                        value: value,
+                        onChanged: (bool next) {
+                          widget.state.exportSql.value = next;
+                        },
+                      );
+                    },
+                  ),
                   SwitchListTile(
                     key: const ValueKey<String>('rename-strict-switch'),
                     contentPadding: EdgeInsets.zero,
@@ -639,6 +704,24 @@ class _RenamePageState extends State<RenamePage> {
                               'conflict': '${plan.conflictCount}',
                             },
                           ),
+                        ),
+                        // Permission failures are called out on their own: the
+                        // files are present and unchanged, so the user can fix
+                        // this by granting access rather than by editing names.
+                        if (plan.noPermissionCount > 0) ...<Widget>[
+                          const SizedBox(height: 4),
+                          Text(
+                            context.strings(
+                              'rename.noPermissionNotice',
+                              args: <String, String>{
+                                'count': '${plan.noPermissionCount}',
+                              },
+                            ),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.error,
+                            ),
+                          ),
+                        ],
                           style: theme.textTheme.bodySmall,
                         ),
                       ],

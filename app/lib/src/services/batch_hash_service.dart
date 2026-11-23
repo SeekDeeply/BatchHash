@@ -207,6 +207,12 @@ abstract class BatchHashService {
   /// instead of offering a button that cannot work.
   Future<String?> exportRenameLog();
 
+  /// Copy the rename log into [directory], returning the written path.
+  ///
+  /// Null when there is no log yet. Used to drop the record beside the
+  /// renamed files so it travels with them.
+  Future<String?> exportLogTo(String directory);
+
   /// Import a previously exported rename log.
   ///
   /// Returns what was restored. Throws when [json] is not a log document,

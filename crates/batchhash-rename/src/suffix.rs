@@ -827,9 +827,216 @@ fn parse_suffix_token(content: &str) -> Option<ParsedSuffix> {
     })
 }
 
+/// How an existing suffix on disk relates to the digests computed now.
+///
+/// The rename planner used to treat every already-suffixed name as a skip, so a
+/// user could not tell "this file is already tagged correctly" from "this file
+/// was tagged by a different tool, or changed since". These variants separate
+/// those cases so the UI can ask the right question.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExistingSuffixVerdict {
+    /// No bracket group before the extension.
+    Absent,
+    /// The suffix names an algorithm and its hex matches the current digest.
+    Matches {
+        /// Algorithm the suffix names.
+        algorithm: AlgorithmId,
+        /// Hex characters the suffix carries.
+        hex: String,
+    },
+    /// The suffix names an algorithm, but its hex disagrees with the digest
+    /// computed now. The file changed since it was tagged, or was tagged from
+    /// different bytes.
+    Mismatch {
+        /// Algorithm the suffix names.
+        algorithm: AlgorithmId,
+        /// Hex characters found in the suffix.
+        found: String,
+        /// Hex characters the current digest starts with.
+        current: String,
+    },
+    /// The suffix carries no algorithm prefix and its width maps to several
+    /// algorithms, so which one produced it is undecidable from the name.
+    ///
+    /// [matched] lists the algorithms whose current digest does agree, which is
+    /// the only evidence available without re-reading history.
+    Ambiguous {
+        /// Hex characters found in the suffix.
+        hex: String,
+        /// Algorithms whose current digest starts with [hex].
+        matched: Vec<AlgorithmId>,
+    },
+    /// The suffix carries no algorithm prefix, but its width maps to exactly one
+    /// algorithm, so the comparison is still decidable.
+    Inferred {
+        /// Algorithm the width implies.
+        algorithm: AlgorithmId,
+        /// Whether its current digest agrees with the suffix.
+        agrees: bool,
+    },
+    /// A bracket group exists but is not a suffix this tool understands.
+    Unparseable,
+}
+
+/// Compare the suffix already on [name] with the digests in [hashes].
+///
+/// [hashes] holds the current digest per algorithm, so a caller that hashed the
+/// file can answer without touching the disk again. The comparison is prefix
+/// based because a suffix is a truncation, and it never guesses: a bare token
+/// whose width fits several algorithms is reported as ambiguous rather than
+/// being assigned to whichever one happens to match first.
+pub fn compare_existing_suffix(
+    name: &str,
+    hashes: &std::collections::HashMap<AlgorithmId, String>,
+) -> ExistingSuffixVerdict {
+    let parsed = match parse_filename(name) {
+        SuffixParseResult::NotSuffixed => return ExistingSuffixVerdict::Absent,
+        SuffixParseResult::Unparseable => return ExistingSuffixVerdict::Unparseable,
+        SuffixParseResult::Parsed(parsed) => parsed,
+    };
+    let hex = parsed.hex.to_ascii_lowercase();
+    // An explicit prefix is authoritative: the suffix itself says which
+    // algorithm produced it, so no inference is needed or wanted.
+    if let Some(algorithm) = parsed.algorithm {
+        let Some(current) = hashes.get(&algorithm) else {
+            // The caller did not compute this algorithm, so nothing can be
+            // claimed about the suffix.
+            return ExistingSuffixVerdict::Unparseable;
+        };
+        let current_prefix: String = current
+            .chars()
+            .take(hex.chars().count())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if current_prefix == hex {
+            return ExistingSuffixVerdict::Matches { algorithm, hex };
+        }
+        return ExistingSuffixVerdict::Mismatch {
+            algorithm,
+            found: hex,
+            current: current_prefix,
+        };
+    }
+    // No prefix. Widths that map to one algorithm stay decidable; wider ones
+    // are reported with every algorithm that agrees.
+    let candidates = AlgorithmId::infer_suffix_by_hex_len(hex.chars().count());
+    if candidates.len() == 1 {
+        let algorithm = candidates[0];
+        let agrees = hashes.get(&algorithm).is_some_and(|current| {
+            current
+                .chars()
+                .take(hex.chars().count())
+                .collect::<String>()
+                .to_ascii_lowercase()
+                == hex
+        });
+        return ExistingSuffixVerdict::Inferred { algorithm, agrees };
+    }
+    let matched: Vec<AlgorithmId> = candidates
+        .into_iter()
+        .filter(|algorithm| {
+            hashes.get(algorithm).is_some_and(|current| {
+                current
+                    .chars()
+                    .take(hex.chars().count())
+                    .collect::<String>()
+                    .to_ascii_lowercase()
+                    == hex
+            })
+        })
+        .collect();
+    ExistingSuffixVerdict::Ambiguous { hex, matched }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hash_map(entries: &[(AlgorithmId, &str)]) -> std::collections::HashMap<AlgorithmId, String> {
+        entries
+            .iter()
+            .map(|(algorithm, digest)| (*algorithm, (*digest).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn compare_reports_absent_when_there_is_no_suffix() {
+        let hashes = hash_map(&[(AlgorithmId::Sha256, "abcd1234")]);
+        assert_eq!(
+            compare_existing_suffix("movie.mkv", &hashes),
+            ExistingSuffixVerdict::Absent
+        );
+    }
+
+    #[test]
+    fn compare_accepts_a_prefixed_suffix_that_matches() {
+        let hashes = hash_map(&[(AlgorithmId::Sha256, "abcd1234ffff")]);
+        assert_eq!(
+            compare_existing_suffix("movie[sha256:ABCD1234].mkv", &hashes),
+            ExistingSuffixVerdict::Matches {
+                algorithm: AlgorithmId::Sha256,
+                hex: "abcd1234".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn compare_flags_a_prefixed_suffix_that_disagrees() {
+        // The suffix says sha256 but the file now hashes to something else:
+        // exactly the "content changed since it was tagged" case.
+        let hashes = hash_map(&[(AlgorithmId::Sha256, "99998888ffff")]);
+        assert_eq!(
+            compare_existing_suffix("movie[sha256:ABCD1234].mkv", &hashes),
+            ExistingSuffixVerdict::Mismatch {
+                algorithm: AlgorithmId::Sha256,
+                found: "abcd1234".to_string(),
+                current: "99998888".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn compare_infers_when_the_width_names_one_algorithm() {
+        // A 4-character token cannot identify its algorithm, but 4 is also not
+        // the width of any registered digest, so this stays ambiguous.
+        let hashes = hash_map(&[(AlgorithmId::Md5, "abcd1234")]);
+        match compare_existing_suffix("movie[ABCD].mkv", &hashes) {
+            ExistingSuffixVerdict::Ambiguous { hex, .. } => {
+                assert_eq!(hex, "abcd");
+            }
+            ExistingSuffixVerdict::Inferred { agrees, .. } => {
+                // Either shape is acceptable as long as the prefix agrees.
+                assert!(agrees);
+            }
+            other => panic!("unexpected verdict: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compare_lists_every_algorithm_that_agrees_with_a_bare_token() {
+        // Both digests start with the same eight characters, so a bare token
+        // of that width cannot be attributed to one of them.
+        let hashes = hash_map(&[
+            (AlgorithmId::Sha256, "abcd1234aaaaaaaa"),
+            (AlgorithmId::Blake3, "abcd1234bbbbbbbb"),
+        ]);
+        let verdict = compare_existing_suffix("movie[ABCD1234].mkv", &hashes);
+        match verdict {
+            ExistingSuffixVerdict::Ambiguous { matched, .. } => {
+                assert!(matched.contains(&AlgorithmId::Sha256));
+                assert!(matched.contains(&AlgorithmId::Blake3));
+            }
+            other => panic!("expected ambiguity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn compare_never_claims_a_match_for_an_algorithm_it_was_not_given() {
+        // No digests at all: the suffix cannot be verified, and inventing a
+        // verdict would be worse than admitting the gap.
+        let hashes = hash_map(&[]);
+        let verdict = compare_existing_suffix("movie[sha256:ABCD1234].mkv", &hashes);
+        assert_eq!(verdict, ExistingSuffixVerdict::Unparseable);
+    }
     use batchhash_types::{AlgorithmId, HexCase};
 
     fn digest() -> String {

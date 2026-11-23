@@ -181,6 +181,7 @@ class AppStrings {
     'rename.status.missingHash': '缺少哈希',
     'rename.status.invalidName': '文件名无效',
     'rename.status.noPermission': '无权限',
+    'rename.androidUnsupported': '安卓暂不支持重命名：系统只授予目录的内容访问权，无法按路径改写文件名。哈希与校验功能可正常使用。',
     'rename.copyLog': '写名后把记录存到目标目录',
     'rename.copyLogHint': '完成后在目标文件夹放一份写名记录，便于以后导入撤销。',
     'rename.logCopied': '记录已保存：{path}',
@@ -637,6 +638,8 @@ class AppStrings {
     'rename.status.missingHash': 'missing hash',
     'rename.status.invalidName': 'invalid name',
     'rename.status.noPermission': 'no permission',
+    'rename.androidUnsupported':
+        'Renaming is not available on Android yet: the system grants content access to a folder, not the ability to rewrite file names by path. Hashing and verification work normally.',
     'rename.copyLog': 'Save the record into the target folder',
     'rename.copyLogHint':
         'Writes a copy of the rename log beside the renamed files, so it can be imported later to undo.',

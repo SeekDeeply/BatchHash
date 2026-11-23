@@ -85,6 +85,17 @@ class _RenamePageState extends State<RenamePage> {
   /// job, and requiring a full hash run first made the feature unusable on its
   /// own.
   Future<void> _scanDirectoryHere() async {
+    // Renaming needs to open, stat and rename each file by path, and Android
+    // gives a content:// tree that no path API can address. Scanning works
+    // there (it goes through descriptors), but planning and applying a rename
+    // do not yet, so the page says so instead of failing later with a
+    // permission error that is not really about permission.
+    if (Platform.isAndroid) {
+      setState(() {
+        _error = context.strings('rename.androidUnsupported');
+      });
+      return;
+    }
     final String? directory = await PlatformPickers.directory(
       () async => Directory.current.path,
     );

@@ -160,7 +160,7 @@ impl BatchRequest {
 
     /// Request suffix planning and execution with the given format.
     pub fn with_suffix(mut self, format: impl Into<MultiSuffixFormat>, log_db: impl Into<PathBuf>) -> Self {
-        self.suffix = Some(format);
+        self.suffix = Some(format.into());
         self.apply_renames = true;
         self.log_db = Some(log_db.into());
         self
@@ -168,7 +168,7 @@ impl BatchRequest {
 
     /// Request suffix planning without touching the filesystem.
     pub fn with_suffix_dry_run(mut self, format: impl Into<MultiSuffixFormat>) -> Self {
-        self.suffix = Some(format);
+        self.suffix = Some(format.into());
         self.apply_renames = false;
         self
     }
@@ -400,15 +400,20 @@ pub fn run_batch(
                 // undoing a rename the log never confirmed would both corrupt the
                 // batch, and plan_undo refuses to touch unresolved rows anyway.
                 reconcile_log(&mut store, cancel)?;
+                // The batch records every algorithm written into the suffix, in
+                // filename order, so a later undo can rebuild the same group.
+                let batch_algorithms: Vec<AlgorithmId> =
+                    format.parts().iter().map(|part| part.algorithm).collect();
+                let primary = format.parts().first().copied().unwrap_or_default();
                 let batch = BatchRecord::new(
                     request.root.clone(),
                     scanned.root_kind,
-                    vec![format.algorithm],
-                    format,
+                    batch_algorithms,
+                    primary,
                 );
                 store.create_batch(&batch)?;
                 let operation_ids =
-                    insert_pending_operations(&mut store, &batch, &hashed, &plan, format)?;
+                    insert_pending_operations(&mut store, &batch, &hashed, &plan, primary)?;
                 // Cancellation can have landed while the `applying_suffix` event
                 // was being delivered, so re-check before the first destructive
                 // rename. The log batch and its pending rows are already written

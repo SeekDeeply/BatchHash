@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -7,7 +5,6 @@ import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../theme.dart';
 import '../util/formatting.dart';
-import '../util/platform_pickers.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/status_chip.dart';
 import 'history_page.dart';
@@ -631,9 +628,9 @@ class _RenamePageState extends State<RenamePage> {
                 ],
               ],
             ),
-          ),
-        );
+          );
       },
+    );
   }
 }
 

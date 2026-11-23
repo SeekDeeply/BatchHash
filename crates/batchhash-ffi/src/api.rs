@@ -2230,9 +2230,8 @@ mod tests {
     fn suffix_request(root: &std::path::Path, log_db: Option<&std::path::Path>) -> BatchRequestDto {
         let mut request = batch_request(root, vec!["md5"]);
         request.suffix = Some(SuffixDto {
-            algorithm:
+            algorithm: "md5".to_string(),
             algorithms: Vec::new(),
-        "md5".to_string(),
             length: 8,
             case: None,
             prefix: false,

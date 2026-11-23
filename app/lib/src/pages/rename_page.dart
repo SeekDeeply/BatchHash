@@ -52,17 +52,6 @@ class _RenamePageState extends State<RenamePage> {
   bool _clearSuffix = false;
 
   /// Entries this page hashed itself, kept in the app state.
-  ///
-  /// The rename page used to read the hash page's result, which forced the user
-  /// to run a full hash job elsewhere before writing a suffix. It now scans and
-  /// hashes its own selection; the shared list is only a starting hint, so the
-  /// two features no longer depend on each other's state. The value lives in
-  /// the app state rather than this widget because a page-local field was wiped
-  /// whenever the user switched tabs, losing the selection they had just made.
-  void _setOwnEntries(List<BatchEntry>? value) {
-    widget.state.renameEntries.value = value;
-  }
-  bool _scanning = false;
   String? _message;
   RenamePlanModel? _plan;
 
@@ -77,94 +66,6 @@ class _RenamePageState extends State<RenamePage> {
             HistoryPage(service: widget.state.service),
       ),
     );
-  }
-
-  /// Pick a folder here and hash it with the rename page's own algorithms.
-  ///
-  /// Independent of the hash page on purpose: writing a suffix is a separate
-  /// job, and requiring a full hash run first made the feature unusable on its
-  /// own.
-  Future<void> _scanDirectoryHere() async {
-    // Renaming needs to open, stat and rename each file by path, and Android
-    // gives a content:// tree that no path API can address. Scanning works
-    // there (it goes through descriptors), but planning and applying a rename
-    // do not yet, so the page says so instead of failing later with a
-    // permission error that is not really about permission.
-    if (Platform.isAndroid) {
-      setState(() {
-        _error = context.strings('rename.androidUnsupported');
-      });
-      return;
-    }
-    final String? directory = await PlatformPickers.directory(
-      () async => Directory.current.path,
-    );
-    if (directory == null) {
-      return;
-    }
-    await _hashSelection(() => widget.state.service.scanDirectory(
-          directory,
-          recursive: true,
-        ));
-  }
-
-  /// Pick individual files here and hash them.
-  Future<void> _scanFilesHere() async {
-    final List<String> picked = await PlatformPickers.files(
-      () async => const <String>[],
-    );
-    if (picked.isEmpty) {
-      return;
-    }
-    await _hashSelection(() => widget.state.service.scanFiles(picked));
-  }
-
-  /// Run [scan] then hash the result with the configured algorithms.
-  ///
-  /// Every algorithm configured is required: a row missing one of them cannot
-  /// produce the suffix the user asked for, and computing a partial set would
-  /// only move the failure to the planning step with less context.
-  Future<void> _hashSelection(
-    Future<List<BatchEntry>> Function() scan,
-  ) async {
-    setState(() {
-      _scanning = true;
-      _error = null;
-      _message = null;
-    });
-    try {
-      final List<BatchEntry> scanned = await scan();
-      final List<BatchEntry> hashed = <BatchEntry>[];
-      await for (final HashProgress progress in widget.state.service
-          .computeHashes(
-        entries: scanned,
-        algorithms: _config.algorithms,
-      )) {
-        // The progress stream repeats the full set per tick; the last one wins.
-        hashed
-          ..clear()
-          ..addAll(progress.entries);
-      }
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _scanning = false;
-        _setOwnEntries(hashed);
-        _plan = null;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _scanning = false;
-        _error = context.strings(
-          'rename.previewFailed',
-          args: <String, String>{'error': '$error'},
-        );
-      });
-    }
   }
 
   /// Algorithms the user may write, taken from the hash page selection.
@@ -352,18 +253,12 @@ class _RenamePageState extends State<RenamePage> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    // Two listenables: the shared list and this page's own scan. The inner
-    // builder is what makes a scan started here repaint without a tab switch.
-    return ValueListenableBuilder<List<BatchEntry>?>(
-      valueListenable: widget.state.renameEntries,
-      builder: (BuildContext context, List<BatchEntry>? own, Widget? child) {
-        return ValueListenableBuilder<List<BatchEntry>>(
-          valueListenable: widget.state.entries,
-          builder: (BuildContext context, List<BatchEntry> shared, Widget? _) {
-          // Own entries win when present: a scan started here is what the user is
-          // looking at, and quietly mixing in the other page's list would rename
-          // files they did not pick here.
-          final List<BatchEntry> entries = own ?? shared;
+    // One listenable: the hash page owns the file list now, so this page only
+    // has to repaint when that list changes.
+    return ValueListenableBuilder<List<BatchEntry>>(
+      valueListenable: widget.state.entries,
+      builder: (BuildContext context, List<BatchEntry> entries, Widget? _) {
+
           final int hashedCount = entries
               .where((BatchEntry entry) => entry.hashes.isNotEmpty)
               .length;
@@ -405,30 +300,17 @@ class _RenamePageState extends State<RenamePage> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                // Local source selection: this page hashes what it is given here
-                // instead of waiting for the hash page to produce a list first.
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: <Widget>[
-                    OutlinedButton.icon(
-                      key: const ValueKey<String>('rename-scan-directory'),
-                      onPressed: _scanning ? null : _scanDirectoryHere,
-                      icon: const Icon(Icons.folder_open_outlined),
-                      label: Text(context.strings('rename.pickDirectory')),
-                    ),
-                    OutlinedButton.icon(
-                      key: const ValueKey<String>('rename-scan-files'),
-                      onPressed: _scanning ? null : _scanFilesHere,
-                      icon: const Icon(Icons.insert_drive_file_outlined),
-                      label: Text(context.strings('rename.pickFiles')),
-                    ),
-                  ],
+                // No source picker here on purpose: the hash page already owns
+                // that job, and a second entry point meant two lists that could
+                // disagree about what "the current files" are. This page reads
+                // whatever the hash page produced, so switching tabs is the
+                // whole workflow.
+                Text(
+                  context.strings('rename.followsHashPage'),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
-                if (_scanning) ...<Widget>[
-                  const SizedBox(height: 12),
-                  const LinearProgressIndicator(),
-                ],
                 if (entries.isEmpty) ...<Widget>[
                   const SizedBox(height: 48),
                   EmptyState(
@@ -749,11 +631,9 @@ class _RenamePageState extends State<RenamePage> {
                 ],
               ],
             ),
-          );
-          },
+          ),
         );
       },
-    );
   }
 }
 

@@ -577,6 +577,12 @@ class RustBatchHashService implements BatchHashService {
       algorithms: effective,
       length: length,
       uppercase: uppercase,
+      // A combined group of bare hex tokens cannot be parsed back: nothing in
+      // `[ABCD1234+EF567890]` says which half is which algorithm. The core
+      // forces the prefix for multi-algorithm output for that reason, and this
+      // flag is what lets it; without it a two-algorithm plan silently wrote a
+      // single unlabelled token.
+      prefix: effective.length > 1,
       strict: strict,
       clearSuffix: clearSuffix,
     );
@@ -624,15 +630,23 @@ class RustBatchHashService implements BatchHashService {
     }
     final recurse = recursive ?? _lastScanRecursive;
     final logDb = _logDbPath ?? defaultLogDbFor(root);
+    // Every algorithm the plan was previewed with, in the same order: sending
+    // only the first one dropped the rest, so a two-algorithm plan renamed with
+    // a single unlabelled token instead of `[sha256:xx+md5:yy]`.
+    final List<String> effective = plan.effectiveAlgorithms;
     final data = native.runBatch(
       root: root,
-      algorithms: <String>[plan.algorithm],
+      algorithms: effective,
       recursive: recurse,
       restrictPaths: paths,
       suffix: <String, Object?>{
-        'algorithm': plan.algorithm,
+        // The single-algorithm field is kept for the core's legacy path; the
+        // list above is what actually drives a multi-algorithm suffix.
+        'algorithm': effective.first,
         'length': plan.length,
         'case': plan.uppercase ? 'upper' : 'lower',
+        // Required for a combined group: bare hex tokens cannot be parsed back.
+        'prefix': effective.length > 1,
       },
       applyRenames: true,
       logDb: logDb,

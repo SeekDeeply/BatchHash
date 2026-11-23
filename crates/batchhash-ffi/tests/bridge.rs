@@ -169,6 +169,7 @@ fn suffix_dry_run_plans_but_does_not_rename() {
     let mut request = batch_request(temp.path(), vec!["md5"]);
     request.suffix = Some(SuffixDto {
         algorithm: "md5".to_string(),
+        algorithms: Vec::new(),
         length: 8,
         case: None,
         prefix: false,
@@ -191,6 +192,7 @@ fn suffix_apply_then_undo_round_trips_through_the_log() {
     let mut request = batch_request(temp.path(), vec!["md5"]);
     request.suffix = Some(SuffixDto {
         algorithm: "md5".to_string(),
+        algorithms: Vec::new(),
         length: 8,
         case: Some("lower".to_string()),
         prefix: false,
@@ -711,6 +713,7 @@ fn rename_log_export_and_import_round_trip_through_the_c_abi() {
     let mut request = batch_request(temp.path(), vec!["md5"]);
     request.suffix = Some(SuffixDto {
         algorithm: "md5".to_string(),
+        algorithms: Vec::new(),
         length: 8,
         case: None,
         prefix: false,
@@ -790,6 +793,7 @@ fn import_diff_and_history_round_trip() {
     let mut request = batch_request(temp.path(), vec!["md5"]);
     request.suffix = Some(SuffixDto {
         algorithm: "md5".to_string(),
+        algorithms: Vec::new(),
         length: 8,
         case: None,
         prefix: false,

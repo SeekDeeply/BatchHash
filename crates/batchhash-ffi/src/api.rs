@@ -497,7 +497,18 @@ pub fn hash_fd_entries_request(request: &HashFdEntriesRequest) -> Result<BatchRe
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SuffixDto {
     /// Algorithm whose digest supplies the token.
+    ///
+    /// Kept for older clients: when [SuffixDto::algorithms] is absent or empty
+    /// this single value is used.
+    #[serde(default)]
     pub algorithm: String,
+    /// Algorithms written into the suffix, in filename order.
+    ///
+    /// A list of more than one produces a combined `[a:xx+b:yy]` group, and the
+    /// core forces the algorithm prefix there because a group of bare hex
+    /// tokens cannot be parsed back.
+    #[serde(default)]
+    pub algorithms: Vec<String>,
     /// Number of hex characters, from 0 up to the algorithm's digest width.
     #[serde(default = "default_suffix_length")]
     pub length: u8,
@@ -1031,9 +1042,7 @@ fn parse_algorithms(ids: &[String]) -> Result<Vec<AlgorithmId>, ApiError> {
     Ok(algorithms)
 }
 
-fn parse_suffix(suffix: &SuffixDto) -> Result<SuffixFormat, ApiError> {
-    let algorithm = AlgorithmId::from_stable_id(&suffix.algorithm)
-        .ok_or_else(|| ApiError::invalid(format!("unknown algorithm '{}'", suffix.algorithm)))?;
+fn parse_suffix(suffix: &SuffixDto) -> Result<MultiSuffixFormat, ApiError> {
     let case = match suffix.case.as_deref() {
         None | Some("upper") => HexCase::Upper,
         Some("lower") => HexCase::Lower,
@@ -1043,16 +1052,31 @@ fn parse_suffix(suffix: &SuffixDto) -> Result<SuffixFormat, ApiError> {
             )))
         }
     };
-    let format = SuffixFormat {
-        length: suffix.length,
-        case,
-        algorithm,
-        prefix_enabled: suffix.prefix,
+    // The list wins when present; the single field is the older shape and must
+    // keep working so a client that predates multi-algorithm output is not
+    // broken by this change.
+    let ids: Vec<String> = if suffix.algorithms.is_empty() {
+        vec![suffix.algorithm.clone()]
+    } else {
+        suffix.algorithms.clone()
     };
-    format
-        .validate()
-        .map_err(|error| ApiError::invalid(error.to_string()))?;
-    Ok(format)
+    let mut parts = Vec::with_capacity(ids.len());
+    for id in &ids {
+        let algorithm = AlgorithmId::from_stable_id(id)
+            .ok_or_else(|| ApiError::invalid(format!("unknown algorithm '{id}'")))?;
+        let part = SuffixFormat {
+            length: suffix.length,
+            case,
+            algorithm,
+            // A combined group must be self-describing, so the prefix is forced
+            // whenever more than one algorithm is written.
+            prefix_enabled: suffix.prefix || ids.len() > 1,
+        };
+        part.validate()
+            .map_err(|error| ApiError::invalid(error.to_string()))?;
+        parts.push(part);
+    }
+    MultiSuffixFormat::new(parts).map_err(|error| ApiError::invalid(error.to_string()))
 }
 
 fn parse_format(name: &str) -> Result<ReportFormat, ApiError> {
@@ -1602,19 +1626,18 @@ pub fn hash_entries_request_with_progress(
 /// renaming.
 pub fn plan_renames_request(request: &PlanRenamesRequest) -> Result<RenamePlanDto, ApiError> {
     let algorithms = request_algorithms(request)?;
-    let parts: Vec<SuffixFormat> = algorithms
-        .iter()
-        .map(|algorithm| {
-            parse_suffix(&SuffixDto {
-                algorithm: algorithm.stable_id().to_string(),
-                length: request.length,
-                case: request.case.clone(),
-                prefix: request.prefix,
-            })
-        })
-        .collect::<Result<_, _>>()?;
-    let format =
-        MultiSuffixFormat::new(parts).map_err(|error| ApiError::invalid(error.to_string()))?;
+    // One DTO for the whole group: the algorithm list is what drives a combined
+    // suffix, so building it here keeps the prefix rule in exactly one place.
+    let format = parse_suffix(&SuffixDto {
+        algorithm: String::new(),
+        algorithms: algorithms
+            .iter()
+            .map(|algorithm| algorithm.stable_id().to_string())
+            .collect(),
+        length: request.length,
+        case: request.case.clone(),
+        prefix: request.prefix,
+    })?;
     let root = request.root.clone().unwrap_or_else(|| ".".to_string());
     let entries: Vec<FileEntry> = request
         .entries
@@ -2204,7 +2227,9 @@ mod tests {
     fn suffix_request(root: &std::path::Path, log_db: Option<&std::path::Path>) -> BatchRequestDto {
         let mut request = batch_request(root, vec!["md5"]);
         request.suffix = Some(SuffixDto {
-            algorithm: "md5".to_string(),
+            algorithm:
+            algorithms: Vec::new(),
+        "md5".to_string(),
             length: 8,
             case: None,
             prefix: false,

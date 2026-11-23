@@ -167,8 +167,6 @@ class PlatformPickers {
     if (Platform.environment.containsKey('FLUTTER_TEST')) {
       return open();
     }
-    double? width;
-    double? height;
     try {
       // Bounded on purpose: a platform channel that never answers (a test
       // harness, or a desktop plugin that failed to register) must not hold the
@@ -180,16 +178,12 @@ class PlatformPickers {
         onTimeout: () => const Size(0, 0),
       ).then((Size value) => value.width > 0 ? value : null);
       if (size != null) {
-        width = size.width;
-        height = size.height;
+        // Only the resize grip is disabled. Pinning the min and max size as
+        // well made the window completely rigid for the duration of the
+        // dialog, which read as a frozen application rather than a guarded
+        // one: the user could not move or resize at all.
         await windowManager
             .setResizable(false)
-            .timeout(const Duration(milliseconds: 200), onTimeout: () {});
-        await windowManager
-            .setMinimumSize(size)
-            .timeout(const Duration(milliseconds: 200), onTimeout: () {});
-        await windowManager
-            .setMaximumSize(size)
             .timeout(const Duration(milliseconds: 200), onTimeout: () {});
       }
     } catch (_) {
@@ -199,11 +193,9 @@ class PlatformPickers {
       return await open();
     } finally {
       try {
-        await windowManager.setResizable(true);
-        if (width != null && height != null) {
-          await windowManager.setMinimumSize(const Size(640, 480));
-          await windowManager.setMaximumSize(const Size(16384, 16384));
-        }
+        await windowManager
+            .setResizable(true)
+            .timeout(const Duration(milliseconds: 200), onTimeout: () {});
       } catch (_) {
         // Nothing to restore on a platform that refused to pin.
       }

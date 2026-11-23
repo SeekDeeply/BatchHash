@@ -142,8 +142,6 @@ class AppStrings {
 
     'rename.title': '文件名写名',
     'rename.subtitle': '把摘要前缀写入文件名，便于肉眼比对；正式校验仍使用报告中的完整哈希。',
-    'rename.pickDirectory': '选择目录',
-    'rename.pickFiles': '选择文件',
     'rename.moreAlgorithms': '附加算法',
     'rename.moreAlgorithmsHint': '勾选后会在文件名里同时写入多个算法的截断值。',
     'rename.strictMode': '严格匹配历史校验',
@@ -182,6 +180,7 @@ class AppStrings {
     'rename.status.invalidName': '文件名无效',
     'rename.status.noPermission': '无权限',
     'rename.androidUnsupported': '安卓暂不支持重命名：系统只授予目录的内容访问权，无法按路径改写文件名。哈希与校验功能可正常使用。',
+    'rename.followsHashPage': '本页使用「哈希」页已选中的文件。先在哈希页选择并计算，再回到这里写名。',
     'rename.copyLog': '写名后把记录存到目标目录',
     'rename.copyLogHint': '完成后在目标文件夹放一份写名记录，便于以后导入撤销。',
     'rename.logCopied': '记录已保存：{path}',
@@ -597,8 +596,6 @@ class AppStrings {
     'metric.elapsed': 'Elapsed',
     'rename.title': 'Filename suffixes',
     'rename.subtitle': 'Write a digest prefix into filenames for quick eyeballing; real verification still uses the full hashes in the report.',
-    'rename.pickDirectory': 'Choose folder',
-    'rename.pickFiles': 'Choose files',
     'rename.moreAlgorithms': 'Extra algorithms',
     'rename.moreAlgorithmsHint': 'Also write a truncated digest for each ticked algorithm.',
     'rename.strictMode': 'Match recorded hashes strictly',
@@ -640,6 +637,8 @@ class AppStrings {
     'rename.status.noPermission': 'no permission',
     'rename.androidUnsupported':
         'Renaming is not available on Android yet: the system grants content access to a folder, not the ability to rewrite file names by path. Hashing and verification work normally.',
+    'rename.followsHashPage':
+        'This page renames the files selected on the Hash page. Choose and hash there first, then come back.',
     'rename.copyLog': 'Save the record into the target folder',
     'rename.copyLogHint':
         'Writes a copy of the rename log beside the renamed files, so it can be imported later to undo.',

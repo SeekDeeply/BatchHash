@@ -33,7 +33,9 @@ use batchhash_rename::planner::{
     execute_plan_with_policy_and_cancel, plan_renames, RenamePlan, RenamePlanOptions, RenameResult,
     RenameResultStatus, RenameRowStatus, StdFsBackend, StdRenameFs,
 };
-use batchhash_rename::suffix::{parse_filename, SuffixError, SuffixFormat, SuffixParseResult};
+use batchhash_rename::suffix::{
+    parse_filename, MultiSuffixFormat, SuffixError, SuffixFormat, SuffixParseResult,
+};
 use batchhash_types::{
     validate_relative_path, AlgorithmId, FileEntry, HardwareReport, Report, ReportEntry,
     ReportValidationError, RootKind,
@@ -123,7 +125,7 @@ pub struct BatchRequest {
     /// the plan did not show.
     pub restrict_paths: Vec<String>,
     /// Suffix format to plan when Some.
-    pub suffix: Option<SuffixFormat>,
+    pub suffix: Option<MultiSuffixFormat>,
     /// Whether the planned renames are executed (requires log_db).
     pub apply_renames: bool,
     /// SQLite rename log path; required when apply_renames is true.
@@ -157,7 +159,7 @@ impl BatchRequest {
     }
 
     /// Request suffix planning and execution with the given format.
-    pub fn with_suffix(mut self, format: SuffixFormat, log_db: impl Into<PathBuf>) -> Self {
+    pub fn with_suffix(mut self, format: impl Into<MultiSuffixFormat>, log_db: impl Into<PathBuf>) -> Self {
         self.suffix = Some(format);
         self.apply_renames = true;
         self.log_db = Some(log_db.into());
@@ -165,7 +167,7 @@ impl BatchRequest {
     }
 
     /// Request suffix planning without touching the filesystem.
-    pub fn with_suffix_dry_run(mut self, format: SuffixFormat) -> Self {
+    pub fn with_suffix_dry_run(mut self, format: impl Into<MultiSuffixFormat>) -> Self {
         self.suffix = Some(format);
         self.apply_renames = false;
         self
@@ -286,8 +288,10 @@ pub fn run_batch(
             "at least one algorithm is required".to_string(),
         ));
     }
-    if let Some(format) = request.suffix {
-        format.validate()?;
+    if let Some(format) = &request.suffix {
+        for part in format.parts() {
+            part.validate()?;
+        }
         if request.apply_renames && request.log_db.is_none() {
             return Err(PipelineError::InvalidRequest(
                 "applying suffix renames requires a rename log path".to_string(),
@@ -375,12 +379,12 @@ pub fn run_batch(
         if !run.cancelled {
             events(PipelineEvent::Phase(BatchPhase::PlanningSuffix));
             let plan_options = RenamePlanOptions {
-                format: format.into(),
+                format: format.clone(),
                 overwrite: request.overwrite,
                 ..RenamePlanOptions::default()
             };
             let plan = plan_renames(&hashed, &plan_options, &StdRenameFs);
-            annotate_suffix(&mut run.report, &hashed, &plan, format);
+            annotate_suffix(&mut run.report, &hashed, &plan, &format);
             if request.apply_renames && plan.summary.ready > 0 && !cancel.is_cancelled() {
                 events(PipelineEvent::Phase(BatchPhase::ApplyingSuffix));
                 let log_db = request
@@ -578,13 +582,17 @@ fn annotate_suffix(
     report: &mut Report,
     entries: &[FileEntry],
     plan: &RenamePlan,
-    format: SuffixFormat,
+    format: &MultiSuffixFormat,
 ) {
+    // The report records one primary algorithm; the token written into the
+    // filename carries all of them. `parts` is never empty (the constructor
+    // rejects that), so indexing the first part is safe.
+    let primary = format.parts().first().copied().unwrap_or_default();
     report.suffix_config = batchhash_types::SuffixConfig {
-        length: format.length,
-        case: format.case,
+        length: primary.length,
+        case: primary.case,
         enabled: true,
-        algorithm: format.algorithm,
+        algorithm: primary.algorithm,
     };
     for row in &plan.rows {
         if row.status != RenameRowStatus::Ready {
@@ -595,7 +603,7 @@ fn annotate_suffix(
         }
         if let Some(report_entry) = report.entries.get_mut(row.entry_index) {
             report_entry.suffix_applied = suffix_token(&row.proposed_name);
-            report_entry.suffix_algorithm = Some(format.algorithm);
+            report_entry.suffix_algorithm = Some(primary.algorithm);
             report_entry.renamed_to = Some(proposed_relative_path(&report_entry.path, row));
         }
     }

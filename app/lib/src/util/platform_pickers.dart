@@ -1,6 +1,5 @@
 
 import 'dart:io' show File, Platform;
-import 'dart:ui' show Size;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:window_manager/window_manager.dart';

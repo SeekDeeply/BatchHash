@@ -372,7 +372,7 @@ fn cmd_hash(args: &[String]) -> CliResult<()> {
             Some(path) => PathBuf::from(path),
             None => default_log_path(&root_path),
         };
-        request.suffix = Some(suffix);
+        request.suffix = Some(suffix.into());
         request.apply_renames = !parsed.switch("dry-run");
         request.log_db = Some(db_path);
     }
@@ -628,7 +628,7 @@ fn cmd_suffix_plan(args: &[String], apply: bool) -> CliResult<()> {
         follow_links: parsed.switch("follow-links"),
         ..ScanOptions::default()
     };
-    request.suffix = Some(format);
+    request.suffix = Some(format.into());
     request.apply_renames = execute;
     request.log_db = Some(db_path.clone());
 

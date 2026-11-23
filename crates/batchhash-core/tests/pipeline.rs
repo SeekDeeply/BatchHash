@@ -254,7 +254,7 @@ fn applying_renames_without_a_log_path_is_rejected() {
     let temp = tempfile::tempdir().expect("tempdir");
     write(&temp.path().join("movie.mkv"), b"movie");
     let mut request = BatchRequest::new(temp.path(), vec![AlgorithmId::Md5]);
-    request.suffix = Some(md5_format());
+    request.suffix = Some(md5_format().into());
     request.apply_renames = true;
     request.log_db = None;
     let error = run_batch(&request, &CancelToken::new(), &no_events).expect_err("must fail");

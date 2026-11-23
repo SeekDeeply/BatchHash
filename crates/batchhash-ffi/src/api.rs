@@ -831,8 +831,11 @@ pub fn run_batch_request_with_progress(
         ..ScanOptions::default()
     };
     pipeline_request.restrict_paths = request.restrict_paths.clone();
+    // Read `is_some` before moving: MultiSuffixFormat is not Copy, and the flag
+    // is derived from the same value that is about to be moved into the request.
+    let has_suffix = suffix.is_some();
     pipeline_request.suffix = suffix;
-    pipeline_request.apply_renames = request.apply_renames && suffix.is_some();
+    pipeline_request.apply_renames = request.apply_renames && has_suffix;
     pipeline_request.log_db = request.log_db.as_ref().map(std::path::PathBuf::from);
     pipeline_request.overwrite = request.overwrite;
 

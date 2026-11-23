@@ -375,7 +375,7 @@ pub fn run_batch(
     run.report.recompute_summary();
     run.cancelled = outcome.cancelled || cancel.is_cancelled();
 
-    if let Some(format) = request.suffix {
+    if let Some(format) = &request.suffix {
         if !run.cancelled {
             events(PipelineEvent::Phase(BatchPhase::PlanningSuffix));
             let plan_options = RenamePlanOptions {
@@ -384,7 +384,7 @@ pub fn run_batch(
                 ..RenamePlanOptions::default()
             };
             let plan = plan_renames(&hashed, &plan_options, &StdRenameFs);
-            annotate_suffix(&mut run.report, &hashed, &plan, &format);
+            annotate_suffix(&mut run.report, &hashed, &plan, format);
             if request.apply_renames && plan.summary.ready > 0 && !cancel.is_cancelled() {
                 events(PipelineEvent::Phase(BatchPhase::ApplyingSuffix));
                 let log_db = request

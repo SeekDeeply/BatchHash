@@ -906,10 +906,7 @@ impl DigestLookup for indexmap::IndexMap<AlgorithmId, String> {
 /// `IndexMap` a [`FileEntry`] carries. The lookup is abstracted rather than
 /// taking one concrete map type so neither caller has to copy its digests into
 /// the other shape just to ask this question.
-pub fn compare_existing_suffix<M: DigestLookup>(
-    name: &str,
-    hashes: &M,
-) -> ExistingSuffixVerdict {
+pub fn compare_existing_suffix<M: DigestLookup>(name: &str, hashes: &M) -> ExistingSuffixVerdict {
     let parsed = match parse_filename(name) {
         SuffixParseResult::NotSuffixed => return ExistingSuffixVerdict::Absent,
         SuffixParseResult::Unparseable => return ExistingSuffixVerdict::Unparseable,

@@ -255,14 +255,14 @@ fn existing_suffix_reason(verdict: &ExistingSuffixVerdict) -> String {
             if matched.is_empty() {
                 format!("suffix {hex} names no algorithm and matches none that were computed")
             } else {
-                let names: Vec<String> =
-                    matched.iter().map(|a| a.to_string()).collect();
-                format!("suffix {hex} matches several algorithms: {}", names.join(", "))
+                let names: Vec<String> = matched.iter().map(|a| a.to_string()).collect();
+                format!(
+                    "suffix {hex} matches several algorithms: {}",
+                    names.join(", ")
+                )
             }
         }
-        ExistingSuffixVerdict::Unparseable => {
-            "existing suffix cannot be interpreted".to_string()
-        }
+        ExistingSuffixVerdict::Unparseable => "existing suffix cannot be interpreted".to_string(),
     }
 }
 
@@ -1084,7 +1084,10 @@ mod tests {
         // checked at all; claiming a match or a mismatch would both be guesses.
         let entry = entry_with_blake3_prefix("a[sha256:abcdef01].txt", "abcdef01");
         let plan = plan_renames(&[entry], &RenamePlanOptions::default(), &NoRenameFs);
-        assert_eq!(plan.rows[0].status, RenameRowStatus::ExistingSuffixUnverified);
+        assert_eq!(
+            plan.rows[0].status,
+            RenameRowStatus::ExistingSuffixUnverified
+        );
         assert_eq!(plan.summary.suffix_unverified, 1);
     }
 

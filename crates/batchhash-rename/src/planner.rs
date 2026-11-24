@@ -1191,7 +1191,7 @@ mod tests {
     }
 
     #[test]
-    fn planner_skips_already_suffixed_names() {
+    fn planner_reports_a_suffix_it_cannot_attribute_to_an_algorithm() {
         let temp = tempdir().expect("tempdir");
         let path = temp.path().join("a[ABCDEF].txt");
         let plan = plan_renames(
@@ -1199,8 +1199,15 @@ mod tests {
             &RenamePlanOptions::default(),
             &StdRenameFs,
         );
-        assert_eq!(plan.rows[0].status, RenameRowStatus::SkippedAlreadySuffixed);
-        assert_eq!(plan.summary.skipped, 1);
+        // Six hex characters is not the digest width of any algorithm, so the
+        // token names nothing and no digest can be compared against it. It is
+        // reported as unverifiable rather than "already suffixed": the user has
+        // to be told the name carries a value that cannot be checked.
+        assert_eq!(
+            plan.rows[0].status,
+            RenameRowStatus::ExistingSuffixUnverified
+        );
+        assert_eq!(plan.summary.suffix_unverified, 1);
     }
 
     #[test]
@@ -1376,13 +1383,18 @@ mod tests {
         fs::write(&source, b"movie").expect("source file");
         let entry = make_entry(&source, true);
 
-        // Without the switch the name is skipped, as it always was.
+        // Without the switch the old token is not rewritten. `999999` is six
+        // hex characters, which matches no digest width, so it cannot be
+        // verified and is reported as such instead of being trusted.
         let plan = plan_renames(
             std::slice::from_ref(&entry),
             &RenamePlanOptions::default(),
             &StdRenameFs,
         );
-        assert_eq!(plan.rows[0].status, RenameRowStatus::SkippedAlreadySuffixed);
+        assert_eq!(
+            plan.rows[0].status,
+            RenameRowStatus::ExistingSuffixUnverified
+        );
 
         // With it, the old token is replaced by a freshly computed one.
         let options = RenamePlanOptions {

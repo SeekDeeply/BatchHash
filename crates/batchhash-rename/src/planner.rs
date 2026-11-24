@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 use batchhash_types::AlgorithmId;
 
 use crate::suffix::{
-    format_filename_multi, parse_filename, MultiSuffixFormat, SuffixError, SuffixParseResult,
-    DEFAULT_MAX_UTF16_LEN,
+    compare_existing_suffix, format_filename_multi, parse_filename, ExistingSuffixVerdict,
+    MultiSuffixFormat, SuffixError, SuffixParseResult, DEFAULT_MAX_UTF16_LEN,
 };
 
 /// Read-only filesystem probe used by the pure planner.
@@ -192,6 +192,21 @@ pub enum RenameRowStatus {
     ConflictTargetExists,
     /// The original filename already carries a parseable suffix.
     SkippedAlreadySuffixed,
+    /// The existing suffix names an algorithm, but its hex no longer agrees
+    /// with that algorithm's digest for the current bytes.
+    ///
+    /// This is the "the file changed since it was tagged" case. It is a skip
+    /// rather than a rename: labelling the file with the new digest while the
+    /// old label still claims otherwise would leave two contradictory values in
+    /// one name, so the user has to decide what the old label is worth.
+    ExistingSuffixMismatch,
+    /// The existing suffix cannot be checked against the current digests.
+    ///
+    /// Either the token carries no algorithm name and its width matches several
+    /// algorithms, or the algorithm it names was not computed for this file. In
+    /// both cases nothing can be concluded about whether the file changed, so
+    /// the row is reported instead of being silently rewritten.
+    ExistingSuffixUnverified,
     /// The entry has no usable hash for the configured suffix algorithm.
     MissingHash,
     /// The file no longer matches the historical digest the caller supplied.
@@ -209,6 +224,46 @@ pub enum RenameRowStatus {
     Unsupported,
     /// An unexpected formatting or configuration error occurred.
     Error,
+}
+
+/// Explain an [`ExistingSuffixVerdict`] in one line for the plan row.
+///
+/// The text is for logs and debugging; the UI keys off the row status. It still
+/// names the algorithms involved, because "unverified" without saying which
+/// algorithm was missing is not actionable.
+fn existing_suffix_reason(verdict: &ExistingSuffixVerdict) -> String {
+    match verdict {
+        ExistingSuffixVerdict::Absent => "no existing suffix".to_string(),
+        ExistingSuffixVerdict::Matches { algorithm, hex } => {
+            format!("existing {algorithm} suffix {hex} matches the current digest")
+        }
+        ExistingSuffixVerdict::Mismatch {
+            algorithm,
+            found,
+            current,
+        } => format!(
+            "existing {algorithm} suffix {found} does not match the current digest {current}"
+        ),
+        ExistingSuffixVerdict::Inferred { algorithm, agrees } => {
+            if *agrees {
+                format!("existing suffix agrees with the current {algorithm} digest")
+            } else {
+                format!("existing suffix disagrees with the current {algorithm} digest")
+            }
+        }
+        ExistingSuffixVerdict::Ambiguous { hex, matched } => {
+            if matched.is_empty() {
+                format!("suffix {hex} names no algorithm and matches none that were computed")
+            } else {
+                let names: Vec<String> =
+                    matched.iter().map(|a| a.to_string()).collect();
+                format!("suffix {hex} matches several algorithms: {}", names.join(", "))
+            }
+        }
+        ExistingSuffixVerdict::Unparseable => {
+            "existing suffix cannot be interpreted".to_string()
+        }
+    }
 }
 
 /// One row of a dry-run rename plan.
@@ -240,6 +295,10 @@ pub struct RenamePlanSummary {
     pub conflicts: usize,
     /// Rows with [`RenameRowStatus::SkippedAlreadySuffixed`].
     pub skipped: usize,
+    /// Rows with [`RenameRowStatus::ExistingSuffixMismatch`].
+    pub suffix_mismatch: usize,
+    /// Rows with [`RenameRowStatus::ExistingSuffixUnverified`].
+    pub suffix_unverified: usize,
     /// Rows with [`RenameRowStatus::MissingHash`].
     pub missing_hash: usize,
     /// Rows with [`RenameRowStatus::HashMismatch`].
@@ -711,13 +770,34 @@ fn build_row(entry_index: usize, entry: &FileEntry, options: &RenamePlanOptions)
     match parse_filename(&original_name) {
         SuffixParseResult::Parsed(parsed) => {
             if !options.clear_existing_suffix {
+                // The old suffix is evidence, not noise: it names an algorithm,
+                // so the file can be checked against that algorithm's current
+                // digest before anything is decided. A match means the file is
+                // unchanged since it was tagged and the label may be extended or
+                // replaced; a mismatch means the bytes moved under the old label
+                // and the user has to choose what to keep.
+                let verdict = compare_existing_suffix(&original_name, &entry.hashes);
+                let status = match &verdict {
+                    ExistingSuffixVerdict::Mismatch { .. } => {
+                        RenameRowStatus::ExistingSuffixMismatch
+                    }
+                    ExistingSuffixVerdict::Ambiguous { .. }
+                    | ExistingSuffixVerdict::Unparseable => {
+                        RenameRowStatus::ExistingSuffixUnverified
+                    }
+                    ExistingSuffixVerdict::Absent
+                    | ExistingSuffixVerdict::Matches { .. }
+                    | ExistingSuffixVerdict::Inferred { .. } => {
+                        RenameRowStatus::SkippedAlreadySuffixed
+                    }
+                };
                 return RenamePlanRow {
                     entry_index,
                     original_path,
                     original_name,
                     proposed_name: String::new(),
-                    status: RenameRowStatus::SkippedAlreadySuffixed,
-                    reason: Some("filename already carries a parseable suffix".to_string()),
+                    status,
+                    reason: Some(existing_suffix_reason(&verdict)),
                 };
             }
             base_name = strip_suffix_group(&original_name, &parsed);
@@ -896,6 +976,8 @@ fn summarize(rows: &[RenamePlanRow]) -> RenamePlanSummary {
             RenameRowStatus::Ready => summary.ready += 1,
             RenameRowStatus::ConflictTargetExists => summary.conflicts += 1,
             RenameRowStatus::SkippedAlreadySuffixed => summary.skipped += 1,
+            RenameRowStatus::ExistingSuffixMismatch => summary.suffix_mismatch += 1,
+            RenameRowStatus::ExistingSuffixUnverified => summary.suffix_unverified += 1,
             RenameRowStatus::MissingHash => summary.missing_hash += 1,
             RenameRowStatus::HashMismatch => summary.hash_mismatch += 1,
             RenameRowStatus::InvalidName => summary.invalid_name += 1,
@@ -961,6 +1043,49 @@ mod tests {
             entry.hashes.insert(AlgorithmId::Blake3, digest());
         }
         entry
+    }
+
+    /// Build an entry whose blake3 digest starts with `prefix`.
+    fn entry_with_blake3_prefix(name: &str, prefix: &str) -> FileEntry {
+        let mut entry = FileEntry::new("root", RootKind::Fs, name, name, 0, None);
+        let digest: String = std::iter::repeat(prefix)
+            .flat_map(|value| value.chars())
+            .chain(std::iter::repeat('0'))
+            .take(64)
+            .collect();
+        entry.hashes.insert(AlgorithmId::Blake3, digest);
+        entry
+    }
+
+    #[test]
+    fn existing_suffix_that_matches_is_still_a_skip() {
+        // The label agrees with the current digest, so nothing is stale. It is
+        // reported as an ordinary skip: the file needs no correction.
+        let entry = entry_with_blake3_prefix("a[blake3:abcdef01].txt", "abcdef01");
+        let plan = plan_renames(&[entry], &RenamePlanOptions::default(), &NoRenameFs);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::SkippedAlreadySuffixed);
+        assert_eq!(plan.summary.skipped, 1);
+    }
+
+    #[test]
+    fn existing_suffix_that_disagrees_is_reported_as_a_mismatch() {
+        // The name claims blake3:ffffffff but the bytes hash to abcdef01...,
+        // which is exactly "the content changed after it was tagged".
+        let entry = entry_with_blake3_prefix("a[blake3:ffffffff].txt", "abcdef01");
+        let plan = plan_renames(&[entry], &RenamePlanOptions::default(), &NoRenameFs);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::ExistingSuffixMismatch);
+        assert_eq!(plan.summary.suffix_mismatch, 1);
+        assert_eq!(plan.summary.skipped, 0);
+    }
+
+    #[test]
+    fn existing_suffix_naming_an_uncomputed_algorithm_is_unverified() {
+        // sha256 is not among the entry's hashes, so the label cannot be
+        // checked at all; claiming a match or a mismatch would both be guesses.
+        let entry = entry_with_blake3_prefix("a[sha256:abcdef01].txt", "abcdef01");
+        let plan = plan_renames(&[entry], &RenamePlanOptions::default(), &NoRenameFs);
+        assert_eq!(plan.rows[0].status, RenameRowStatus::ExistingSuffixUnverified);
+        assert_eq!(plan.summary.suffix_unverified, 1);
     }
 
     struct NoRenameFs;

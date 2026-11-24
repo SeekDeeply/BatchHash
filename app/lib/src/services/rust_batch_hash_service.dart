@@ -1466,6 +1466,8 @@ class RustBatchHashService implements BatchHashService {
       'invalid_name' => RenameRowStatus.invalidName,
       'no_permission' => RenameRowStatus.noPermission,
       'hash_mismatch' => RenameRowStatus.hashMismatch,
+      'suffix_mismatch' => RenameRowStatus.suffixMismatch,
+      'suffix_unverified' => RenameRowStatus.suffixUnverified,
       // "error" has no dedicated enum value; it is a row that cannot be
       // applied, which is exactly what "unsupported" reports.
       _ => RenameRowStatus.unsupported,

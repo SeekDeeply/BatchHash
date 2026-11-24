@@ -945,7 +945,19 @@ enum RenameRowStatus {
   ///
   /// Its own status rather than a skip: a skip means "nothing to do", while
   /// this means "something changed behind our back", which the user has to see.
-  hashMismatch;
+  hashMismatch,
+
+  /// The suffix already on the file disagrees with that algorithm's digest.
+  ///
+  /// The name claims a value the bytes no longer produce, so the label is stale.
+  suffixMismatch,
+
+  /// The existing suffix cannot be checked against the current digests.
+  ///
+  /// Either the token names no algorithm and its width fits several, or the
+  /// algorithm it names was not computed. Nothing can be concluded, so the row
+  /// is reported instead of being rewritten on a guess.
+  suffixUnverified;
 
   String get label => switch (this) {
     RenameRowStatus.ready => 'ready',
@@ -956,6 +968,8 @@ enum RenameRowStatus {
     RenameRowStatus.noPermission => 'no permission',
     RenameRowStatus.unsupported => 'unsupported',
     RenameRowStatus.hashMismatch => 'hash mismatch',
+    RenameRowStatus.suffixMismatch => 'suffix mismatch',
+    RenameRowStatus.suffixUnverified => 'suffix unverified',
   };
 }
 

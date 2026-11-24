@@ -179,6 +179,8 @@ class AppStrings {
     'rename.status.missingHash': '缺少哈希',
     'rename.status.invalidName': '文件名无效',
     'rename.status.noPermission': '无权限',
+    'rename.suffixMismatch': '旧后缀与当前哈希不符',
+    'rename.suffixUnverified': '旧后缀无法校验',
     'rename.androidUnsupported': '安卓暂不支持重命名：系统只授予目录的内容访问权，无法按路径改写文件名。哈希与校验功能可正常使用。',
     'rename.followsHashPage': '本页使用「哈希」页已选中的文件。先在哈希页选择并计算，再回到这里写名。',
     'rename.copyLog': '写名后把记录存到目标目录',
@@ -186,7 +188,7 @@ class AppStrings {
     'rename.logCopied': '记录已保存：{path}',
     'rename.logCopyFailed': '记录复制失败：{error}',
     'rename.noPermissionNotice': '{count} 个文件因权限不足被跳过：文件仍在，授予访问权限后重试即可。',
-    'rename.strictModeHint': '与本次扫描开始时算出的哈希不一致的文件将被拒绝改名（“历史”指本次扫描的结果，不是磁盘上的旧后缀）。',
+    'rename.strictModeHint': '按文件名已有后缀标注的算法重新校验：匹配说明文件自标记以来未变动，可增添或替换该值；不匹配则说明内容已变动，需先决定旧值是否保留。',
     'rename.status.unsupported': '不支持',
     'rename.noTarget': '没有可用的目标名称',
     'rename.collisionEstimate':
@@ -635,6 +637,8 @@ class AppStrings {
     'rename.status.missingHash': 'missing hash',
     'rename.status.invalidName': 'invalid name',
     'rename.status.noPermission': 'no permission',
+    'rename.suffixMismatch': 'old suffix disagrees with the current digest',
+    'rename.suffixUnverified': 'old suffix cannot be verified',
     'rename.androidUnsupported':
         'Renaming is not available on Android yet: the system grants content access to a folder, not the ability to rewrite file names by path. Hashing and verification work normally.',
     'rename.followsHashPage':
@@ -647,7 +651,7 @@ class AppStrings {
     'rename.noPermissionNotice':
         '{count} files were skipped for lack of permission. The files are still there; grant access and retry.',
     'rename.strictModeHint':
-        'Files whose digest differs from the one computed at the start of this scan are refused. "Record" means this scan, not an older suffix on disk.',
+        'Re-checks each file with the algorithm its existing suffix names: a match means the file is unchanged since it was tagged and the value can be extended or replaced; a mismatch means the content changed, so the old value must be decided first.',
     'rename.status.unsupported': 'unsupported',
     'rename.noTarget': 'No target name available',
     'rename.collisionEstimate':

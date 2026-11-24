@@ -19,6 +19,8 @@ String _rowStatusKey(RenameRowStatus status) => switch (status) {
   RenameRowStatus.noPermission => 'rename.status.noPermission',
   RenameRowStatus.unsupported => 'rename.status.unsupported',
   RenameRowStatus.hashMismatch => 'rename.strictMismatch',
+  RenameRowStatus.suffixMismatch => 'rename.suffixMismatch',
+  RenameRowStatus.suffixUnverified => 'rename.suffixUnverified',
 };
 
 /// Suffix based rename workflow with a pure dry run before execution.

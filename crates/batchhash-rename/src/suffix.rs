@@ -943,7 +943,7 @@ pub fn compare_existing_suffix<M: DigestLookup>(
     let candidates = AlgorithmId::infer_suffix_by_hex_len(hex.chars().count());
     if candidates.len() == 1 {
         let algorithm = candidates[0];
-        let agrees = hashes.get(&algorithm).is_some_and(|current| {
+        let agrees = hashes.digest(algorithm).is_some_and(|current| {
             current
                 .chars()
                 .take(hex.chars().count())

@@ -878,16 +878,37 @@ pub enum ExistingSuffixVerdict {
     Unparseable,
 }
 
+/// Read the current digest of one algorithm out of a digest collection.
+///
+/// Implemented for the two map types that appear in this crate so a caller can
+/// pass whatever it already holds: the planner works with the `IndexMap` on a
+/// file entry, while tests build plain `HashMap`s.
+pub trait DigestLookup {
+    /// Digest hex for [algorithm], or `None` when it was not computed.
+    fn digest(&self, algorithm: AlgorithmId) -> Option<&str>;
+}
+
+impl DigestLookup for std::collections::HashMap<AlgorithmId, String> {
+    fn digest(&self, algorithm: AlgorithmId) -> Option<&str> {
+        self.get(&algorithm).map(String::as_str)
+    }
+}
+
+impl DigestLookup for indexmap::IndexMap<AlgorithmId, String> {
+    fn digest(&self, algorithm: AlgorithmId) -> Option<&str> {
+        self.get(&algorithm).map(String::as_str)
+    }
+}
+
 /// Compare the suffix already on [name] with the digests in [hashes].
 ///
-/// [hashes] holds the current digest per algorithm, so a caller that hashed the
-/// file can answer without touching the disk again. The comparison is prefix
-/// based because a suffix is a truncation, and it never guesses: a bare token
-/// whose width fits several algorithms is reported as ambiguous rather than
-/// being assigned to whichever one happens to match first.
-pub fn compare_existing_suffix(
+/// [hashes] is any digest source: a `HashMap` from an ad-hoc computation, or the
+/// `IndexMap` a [`FileEntry`] carries. The lookup is abstracted rather than
+/// taking one concrete map type so neither caller has to copy its digests into
+/// the other shape just to ask this question.
+pub fn compare_existing_suffix<M: DigestLookup>(
     name: &str,
-    hashes: &std::collections::HashMap<AlgorithmId, String>,
+    hashes: &M,
 ) -> ExistingSuffixVerdict {
     let parsed = match parse_filename(name) {
         SuffixParseResult::NotSuffixed => return ExistingSuffixVerdict::Absent,
@@ -898,7 +919,7 @@ pub fn compare_existing_suffix(
     // An explicit prefix is authoritative: the suffix itself says which
     // algorithm produced it, so no inference is needed or wanted.
     if let Some(algorithm) = parsed.algorithm {
-        let Some(current) = hashes.get(&algorithm) else {
+        let Some(current) = hashes.digest(algorithm) else {
             // The caller did not compute this algorithm, so nothing can be
             // claimed about the suffix.
             return ExistingSuffixVerdict::Unparseable;
@@ -935,7 +956,7 @@ pub fn compare_existing_suffix(
     let matched: Vec<AlgorithmId> = candidates
         .into_iter()
         .filter(|algorithm| {
-            hashes.get(algorithm).is_some_and(|current| {
+            hashes.digest(*algorithm).is_some_and(|current| {
                 current
                     .chars()
                     .take(hex.chars().count())

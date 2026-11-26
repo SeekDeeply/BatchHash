@@ -505,7 +505,9 @@ pub fn validate_rename_operation_paths(
     // outside it, and refusing to undo it would strand real history. Import is
     // where the check earns its keep, because there the root comes from the
     // same untrusted document as the paths.
-    if !batch_root.trim().is_empty() && !Path::new(original_path).starts_with(Path::new(batch_root)) {
+    if !batch_root.trim().is_empty()
+        && !Path::new(original_path).starts_with(Path::new(batch_root))
+    {
         return Err(LogError::InvalidStoredValue(format!(
             "original path is outside the batch root {batch_root}: {original_path}"
         )));
@@ -523,7 +525,6 @@ pub fn validate_rename_path_safety(
     new_path: &str,
 ) -> Result<(), LogError> {
     for (label, value) in [
-        ("batch root", batch_root),
         ("original path", original_path),
         ("new path", new_path),
     ] {

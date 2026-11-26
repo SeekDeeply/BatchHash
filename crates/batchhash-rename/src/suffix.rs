@@ -950,7 +950,10 @@ impl DigestLookup for indexmap::IndexMap<AlgorithmId, String> {
 /// stale, because the name as a whole claims a set of values that is no longer
 /// true. A part whose algorithm was not computed makes the group unverifiable
 /// rather than matching: silence is not agreement.
-fn compare_multi_suffix<M: DigestLookup>(parsed: &ParsedSuffix, hashes: &M) -> ExistingSuffixVerdict {
+fn compare_multi_suffix<M: DigestLookup>(
+    parsed: &ParsedSuffix,
+    hashes: &M,
+) -> ExistingSuffixVerdict {
     let mut checked = 0usize;
     for part in &parsed.parts {
         let Some(algorithm) = part.algorithm else {

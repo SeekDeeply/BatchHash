@@ -983,8 +983,7 @@ fn build_row(entry_index: usize, entry: &FileEntry, options: &RenamePlanOptions)
                             RenameRowStatus::ExistingSuffixMismatch
                         }
                     }
-                    ExistingSuffixVerdict::Absent
-                    | ExistingSuffixVerdict::Matches { .. } => {
+                    ExistingSuffixVerdict::Absent | ExistingSuffixVerdict::Matches { .. } => {
                         RenameRowStatus::SkippedAlreadySuffixed
                     }
                 };

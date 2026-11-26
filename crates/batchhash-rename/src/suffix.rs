@@ -24,11 +24,35 @@ use serde::{Deserialize, Serialize};
 /// long-name precheck.
 pub const DEFAULT_MAX_UTF16_LEN: usize = 255;
 
+/// Largest filename length, in bytes, that Linux and macOS filesystems accept.
+///
+/// Windows limits names by UTF-16 code units, but Linux and macOS limit them by
+/// bytes (typically 255). A stem of CJK characters is three bytes each, so a
+/// name that fits the UTF-16 limit can still exceed the byte limit and fail at
+/// rename time. Both limits are enforced.
+pub const MAX_NAME_BYTES: usize = 255;
+
 /// Separator placed between the tokens of a multi-algorithm suffix group.
 ///
 /// It is deliberately a character that can never appear in a hex token or in an
 /// algorithm prefix, so a combined group stays unambiguous when parsed back.
 pub const MULTI_SUFFIX_SEPARATOR: char = '+';
+
+/// Separator written between an algorithm name and its digest.
+///
+/// `-` rather than `:`: a colon is illegal in a filename on Windows NTFS, and
+/// also on exFAT, FAT32 and most SMB/NAS shares, which is exactly the media a
+/// cross-machine verification tool is used on. macOS additionally renders a
+/// colon in Finder as a slash, making the name look like a path.
+pub const SUFFIX_PREFIX_SEPARATOR: char = '-';
+
+/// Separator accepted when reading a suffix, in addition to
+/// [`SUFFIX_PREFIX_SEPARATOR`].
+///
+/// Older releases wrote `[blake3:ABCDEF]`. Those names exist on disk and must
+/// keep parsing, or every file tagged by an earlier version would look
+/// untagged and be renamed again.
+pub const LEGACY_SUFFIX_PREFIX_SEPARATOR: char = ':';
 
 /// Maximum number of algorithms that may be combined into one filename suffix.
 ///
@@ -64,7 +88,7 @@ pub struct SuffixFormat {
     pub case: HexCase,
     /// Algorithm whose digest supplies the token.
     pub algorithm: AlgorithmId,
-    /// When true, emit `prefix:hex` (for example `blake3:ABCDE`) instead of a
+    /// When true, emit `prefix-hex` (for example `blake3-ABCDE`) instead of a
     /// bare hex token. Off by default.
     pub prefix_enabled: bool,
 }
@@ -112,7 +136,7 @@ impl SuffixFormat {
 /// A one-part format reproduces the historical behaviour byte for byte
 /// (`movie[ABCDEF].mkv`), and a multi-part format joins the tokens with
 /// [`MULTI_SUFFIX_SEPARATOR`] inside one bracket group
-/// (`movie[blake3:ABCDEF+md5:123456].mkv`). Keeping the tokens in one group is
+/// (`movie[blake3-ABCDEF+md5-123456].mkv`). Keeping the tokens in one group is
 /// what makes reverse extraction safe: the suffix is still the last bracket group
 /// before the extension, and an unparseable group is still reported as such
 /// instead of being half-consumed.
@@ -360,7 +384,7 @@ pub enum SuffixError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParsedSuffix {
     /// Raw bracket content exactly as found in the filename, case preserved
-    /// (for example `ABCDE` or `blake3:ABCDE`).
+    /// (for example `ABCDE` or `blake3-ABCDE`).
     pub token: String,
     /// Lowercase hex portion of the token (the digest prefix).
     pub hex: String,
@@ -462,35 +486,22 @@ pub fn format_filename(
         HexCase::Lower => hex.to_ascii_lowercase(),
     };
     let token = if format.prefix_enabled {
-        format!("{}:{}", format.algorithm.spec().suffix_prefix, token)
+        format!(
+            "{}{SUFFIX_PREFIX_SEPARATOR}{token}",
+            format.algorithm.spec().suffix_prefix
+        )
     } else {
         token
     };
     let suffix = format!("[{token}]");
     let candidate = format!("{stem}{suffix}{extension}");
     let candidate_len = utf16_len(&candidate);
-    if candidate_len <= max_utf16_len {
+    if candidate_len <= max_utf16_len && candidate.len() <= MAX_NAME_BYTES {
         return Ok(candidate);
     }
 
-    let fixed_len = utf16_len(&suffix) + utf16_len(extension);
-    let keep_units = max_utf16_len.saturating_sub(fixed_len);
-    if keep_units == 0 {
-        return Err(SuffixError::NameTooLong {
-            utf16_len: candidate_len,
-            max_utf16_len,
-        });
-    }
-    let mut truncated_stem = String::new();
-    let mut used_units = 0usize;
-    for character in stem.chars() {
-        let width = character.len_utf16();
-        if used_units + width > keep_units {
-            break;
-        }
-        truncated_stem.push(character);
-        used_units += width;
-    }
+    let fixed = format!("{suffix}{extension}");
+    let truncated_stem = truncate_stem_for_limits(&stem, &fixed, max_utf16_len);
     if truncated_stem.is_empty() {
         return Err(SuffixError::NameTooLong {
             utf16_len: candidate_len,
@@ -515,7 +526,7 @@ pub fn format_filename(
 /// bracket group, joined by [`MULTI_SUFFIX_SEPARATOR`]:
 ///
 /// ```text
-/// movie.mkv -> movie[blake3:ABCDEF+md5:123456].mkv
+/// movie.mkv -> movie[blake3-ABCDEF+md5-123456].mkv
 /// ```
 ///
 /// Multi-algorithm groups are **always** prefixed with the algorithm name,
@@ -622,7 +633,10 @@ fn render_prefixed_token(digest_hex: &str, part: &SuffixFormat) -> Result<String
         HexCase::Upper => hex.to_ascii_uppercase(),
         HexCase::Lower => hex.to_ascii_lowercase(),
     };
-    Ok(format!("{}:{token}", part.algorithm.spec().suffix_prefix))
+    Ok(format!(
+        "{}{SUFFIX_PREFIX_SEPARATOR}{token}",
+        part.algorithm.spec().suffix_prefix
+    ))
 }
 
 /// Wrap a rendered token list into `stem[token1+token2]extension`.
@@ -630,6 +644,33 @@ fn render_prefixed_token(digest_hex: &str, part: &SuffixFormat) -> Result<String
 /// The name checks and the UTF-16 truncation mirror [`format_filename`] so a
 /// multi-algorithm suffix never behaves differently from a single one at the
 /// platform limit.
+/// Build the longest stem that keeps the whole name within both limits.
+///
+/// The suffix and extension are fixed cost and are never truncated: a truncated
+/// digest token would not parse back, and a truncated extension changes the
+/// file type. Only the stem gives way, and it is cut on character boundaries so
+/// no multi-byte character is split.
+fn truncate_stem_for_limits(stem: &str, fixed: &str, max_utf16_len: usize) -> String {
+    let fixed_utf16 = utf16_len(fixed);
+    let fixed_bytes = fixed.len();
+    let keep_units = max_utf16_len.saturating_sub(fixed_utf16);
+    let keep_bytes = MAX_NAME_BYTES.saturating_sub(fixed_bytes);
+    let mut truncated = String::new();
+    let mut used_units = 0usize;
+    let mut used_bytes = 0usize;
+    for character in stem.chars() {
+        let width = character.len_utf16();
+        let bytes = character.len_utf8();
+        if used_units + width > keep_units || used_bytes + bytes > keep_bytes {
+            break;
+        }
+        truncated.push(character);
+        used_units += width;
+        used_bytes += bytes;
+    }
+    truncated
+}
+
 fn render_group(
     name: &str,
     tokens: &[String],
@@ -644,21 +685,11 @@ fn render_group(
     let suffix = format!("[{}]", tokens.join(&MULTI_SUFFIX_SEPARATOR.to_string()));
     let candidate = format!("{stem}{suffix}{extension}");
     let candidate_len = utf16_len(&candidate);
-    if candidate_len <= max_utf16_len {
+    if candidate_len <= max_utf16_len && candidate.len() <= MAX_NAME_BYTES {
         return Ok(candidate);
     }
-    let fixed_len = utf16_len(&suffix) + utf16_len(extension);
-    let keep_units = max_utf16_len.saturating_sub(fixed_len);
-    let mut truncated_stem = String::new();
-    let mut used_units = 0usize;
-    for character in stem.chars() {
-        let width = character.len_utf16();
-        if used_units + width > keep_units {
-            break;
-        }
-        truncated_stem.push(character);
-        used_units += width;
-    }
+    let fixed = format!("{suffix}{extension}");
+    let truncated_stem = truncate_stem_for_limits(&stem, &fixed, max_utf16_len);
     if truncated_stem.is_empty() {
         return Err(SuffixError::NameTooLong {
             utf16_len: candidate_len,
@@ -794,7 +825,13 @@ fn parse_suffix_token(content: &str) -> Option<ParsedSuffix> {
     if content.contains(MULTI_SUFFIX_SEPARATOR) {
         return parse_multi_suffix_token(content);
     }
-    if let Some((prefix, hex)) = content.split_once(':') {
+    // Both separators are accepted: the current one is what this release
+    // writes, the legacy one is what earlier releases wrote and what already
+    // exists in users' directories.
+    let split = content
+        .split_once(SUFFIX_PREFIX_SEPARATOR)
+        .or_else(|| content.split_once(LEGACY_SUFFIX_PREFIX_SEPARATOR));
+    if let Some((prefix, hex)) = split {
         let spec = spec_by_suffix_prefix(prefix)?;
         if !is_hex_token(hex) {
             return None;
@@ -906,12 +943,61 @@ impl DigestLookup for indexmap::IndexMap<AlgorithmId, String> {
 /// `IndexMap` a [`FileEntry`] carries. The lookup is abstracted rather than
 /// taking one concrete map type so neither caller has to copy its digests into
 /// the other shape just to ask this question.
+/// Judge a combined `a-xx+b-yy` suffix part by part.
+///
+/// Every part names its algorithm, so each is decidable on its own. The group
+/// matches only when all parts agree; if any part disagrees the whole label is
+/// stale, because the name as a whole claims a set of values that is no longer
+/// true. A part whose algorithm was not computed makes the group unverifiable
+/// rather than matching: silence is not agreement.
+fn compare_multi_suffix<M: DigestLookup>(parsed: &ParsedSuffix, hashes: &M) -> ExistingSuffixVerdict {
+    let mut checked = 0usize;
+    for part in &parsed.parts {
+        let Some(algorithm) = part.algorithm else {
+            return ExistingSuffixVerdict::Unparseable;
+        };
+        let Some(current) = hashes.digest(algorithm) else {
+            return ExistingSuffixVerdict::Unparseable;
+        };
+        let hex = part.hex.to_ascii_lowercase();
+        let current_prefix: String = current
+            .chars()
+            .take(hex.chars().count())
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if current_prefix != hex {
+            return ExistingSuffixVerdict::Mismatch {
+                algorithm,
+                found: hex,
+                current: current_prefix,
+            };
+        }
+        checked += 1;
+    }
+    if checked == 0 {
+        return ExistingSuffixVerdict::Unparseable;
+    }
+    // Report the first part as the representative algorithm: the verdict type
+    // names one, and for a fully matching group any of them is accurate.
+    let algorithm = parsed.parts[0].algorithm.unwrap_or_default();
+    ExistingSuffixVerdict::Matches {
+        algorithm,
+        hex: parsed.parts[0].hex.to_ascii_lowercase(),
+    }
+}
+
 pub fn compare_existing_suffix<M: DigestLookup>(name: &str, hashes: &M) -> ExistingSuffixVerdict {
     let parsed = match parse_filename(name) {
         SuffixParseResult::NotSuffixed => return ExistingSuffixVerdict::Absent,
         SuffixParseResult::Unparseable => return ExistingSuffixVerdict::Unparseable,
         SuffixParseResult::Parsed(parsed) => parsed,
     };
+    // A combined group carries one token per algorithm, so comparing the
+    // concatenated hex would always fail. Each part is judged on its own and
+    // the group is only "matching" when every part that can be checked agrees.
+    if parsed.is_multi() {
+        return compare_multi_suffix(&parsed, hashes);
+    }
     let hex = parsed.hex.to_ascii_lowercase();
     // An explicit prefix is authoritative: the suffix itself says which
     // algorithm produced it, so no inference is needed or wanted.
@@ -937,7 +1023,19 @@ pub fn compare_existing_suffix<M: DigestLookup>(name: &str, hashes: &M) -> Exist
     }
     // No prefix. Widths that map to one algorithm stay decidable; wider ones
     // are reported with every algorithm that agrees.
-    let candidates = AlgorithmId::infer_suffix_by_hex_len(hex.chars().count());
+    let width = hex.chars().count();
+    let mut candidates = AlgorithmId::infer_suffix_by_hex_len(width);
+    if candidates.is_empty() {
+        // A truncated token usually matches no full digest width — the default
+        // suffix is six characters, and no algorithm hashes to six. Treating
+        // that as "no candidates" made every default-length bare suffix
+        // unverifiable. Any algorithm whose digest is at least this wide could
+        // have produced it, so those are the candidates.
+        candidates = AlgorithmId::suffix_capable()
+            .filter(|spec| spec.hex_len >= width)
+            .map(|spec| spec.id)
+            .collect();
+    }
     if candidates.len() == 1 {
         let algorithm = candidates[0];
         let agrees = hashes.digest(algorithm).is_some_and(|current| {
@@ -974,6 +1072,118 @@ mod tests {
             .iter()
             .map(|(algorithm, digest)| (*algorithm, (*digest).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn a_legacy_colon_suffix_still_parses() {
+        // Names written by earlier releases use `:`. They exist on disk, so a
+        // parse failure here would make every one of them look untagged and be
+        // renamed a second time.
+        match parse_filename("movie[blake3:ABCDEF].mkv") {
+            SuffixParseResult::Parsed(parsed) => {
+                assert_eq!(parsed.algorithm, Some(AlgorithmId::Blake3));
+                assert_eq!(parsed.hex, "abcdef");
+            }
+            other => panic!("legacy suffix must parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_current_separator_is_a_dash() {
+        // `:` is illegal on NTFS, exFAT, FAT32 and most SMB shares, and macOS
+        // renders it as `/` in Finder.
+        let format = SuffixFormat {
+            length: 6,
+            case: HexCase::Upper,
+            algorithm: AlgorithmId::Blake3,
+            prefix_enabled: true,
+        };
+        let formatted = format_filename("movie.mkv", &digest(), &format, DEFAULT_MAX_UTF16_LEN)
+            .expect("format");
+        assert_eq!(formatted, "movie[blake3-ABCDEF].mkv");
+        assert!(!formatted.contains(':'), "no colon may reach a filename");
+    }
+
+    #[test]
+    fn a_multi_algorithm_suffix_is_compared_part_by_part() {
+        // Comparing the concatenated hex of `[blake3-ab+md5-cd]` never matches,
+        // which made every combined suffix look unverifiable.
+        let blake3 = "abcdef0123456789".repeat(4);
+        let md5 = "0123456789abcdef0123456789abcdef".to_string();
+        let hashes = hash_map(&[
+            (AlgorithmId::Blake3, blake3.as_str()),
+            (AlgorithmId::Md5, md5.as_str()),
+        ]);
+        assert_eq!(
+            compare_existing_suffix("movie[blake3-abcdef+md5-012345].mkv", &hashes),
+            ExistingSuffixVerdict::Matches {
+                algorithm: AlgorithmId::Blake3,
+                hex: "abcdef".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn a_multi_algorithm_suffix_with_one_bad_part_is_a_mismatch() {
+        let blake3 = "abcdef0123456789".repeat(4);
+        let md5 = "0123456789abcdef0123456789abcdef".to_string();
+        let hashes = hash_map(&[
+            (AlgorithmId::Blake3, blake3.as_str()),
+            (AlgorithmId::Md5, md5.as_str()),
+        ]);
+        // blake3 agrees, md5 does not: the group as a whole is stale.
+        match compare_existing_suffix("movie[blake3-abcdef+md5-ffffff].mkv", &hashes) {
+            ExistingSuffixVerdict::Mismatch { algorithm, .. } => {
+                assert_eq!(algorithm, AlgorithmId::Md5);
+            }
+            other => panic!("expected a mismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_six_character_bare_suffix_is_still_checkable() {
+        // Six is the default suffix length and matches no digest width, so the
+        // width-based candidate list was empty and every default-length suffix
+        // came back unverifiable.
+        let blake3 = "abcdef0123456789".repeat(4);
+        let hashes = hash_map(&[(AlgorithmId::Blake3, blake3.as_str())]);
+        match compare_existing_suffix("movie[ABCDEF].mkv", &hashes) {
+            ExistingSuffixVerdict::Ambiguous { matched, .. } => {
+                assert!(
+                    matched.contains(&AlgorithmId::Blake3),
+                    "blake3 agrees with the token and must be reported: {matched:?}"
+                );
+            }
+            other => panic!("expected ambiguity with a match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_stem_is_truncated_to_the_byte_limit_without_splitting_characters() {
+        // 100 CJK characters are 300 bytes: they fit the UTF-16 limit but not
+        // the 255-byte limit Linux and macOS enforce.
+        let stem = "中".repeat(100);
+        let format = SuffixFormat {
+            length: 6,
+            case: HexCase::Upper,
+            algorithm: AlgorithmId::Blake3,
+            prefix_enabled: false,
+        };
+        let formatted = format_filename(
+            &format!("{stem}.mkv"),
+            &digest(),
+            &format,
+            DEFAULT_MAX_UTF16_LEN,
+        )
+        .expect("format");
+        assert!(
+            formatted.len() <= MAX_NAME_BYTES,
+            "name is {} bytes, over the {MAX_NAME_BYTES} limit",
+            formatted.len()
+        );
+        // The suffix and extension survive intact; only the stem gave way.
+        assert!(formatted.ends_with("[ABCDEF].mkv"));
+        assert!(formatted.starts_with("中"), "no character was split");
     }
 
     #[test]
@@ -1122,7 +1332,7 @@ mod tests {
         };
         let formatted = format_filename("movie.mkv", &digest(), &format, DEFAULT_MAX_UTF16_LEN)
             .expect("formatting with prefix must succeed");
-        assert_eq!(formatted, "movie[blake3:ABCDE].mkv");
+        assert_eq!(formatted, "movie[blake3-ABCDE].mkv");
     }
 
     #[test]
@@ -1225,7 +1435,7 @@ mod tests {
                 .expect("multi formatting must succeed");
         // Multi-algorithm groups always carry the algorithm name, even though
         // neither part asked for a prefix.
-        assert_eq!(formatted, "movie[blake3:ABCDEF+md5:012345].mkv");
+        assert_eq!(formatted, "movie[blake3-ABCDEF+md5-012345].mkv");
     }
 
     #[test]
@@ -1254,7 +1464,7 @@ mod tests {
         let formatted =
             format_filename_multi("movie.mkv", &digests, &format, DEFAULT_MAX_UTF16_LEN)
                 .expect("multi formatting must succeed");
-        assert_eq!(formatted, "movie[blake3:abcd+sha256:ffff].mkv");
+        assert_eq!(formatted, "movie[blake3-abcd+sha256-ffff].mkv");
         match parse_filename(&formatted) {
             SuffixParseResult::Parsed(parsed) => {
                 assert!(parsed.is_multi());

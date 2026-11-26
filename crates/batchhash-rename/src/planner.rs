@@ -973,9 +973,18 @@ fn build_row(entry_index: usize, entry: &FileEntry, options: &RenamePlanOptions)
                     | ExistingSuffixVerdict::Unparseable => {
                         RenameRowStatus::ExistingSuffixUnverified
                     }
+                    // A suffix whose width names exactly one algorithm is
+                    // decidable, so disagreement is a real mismatch and must not
+                    // be filed under "already suffixed" as if all were well.
+                    ExistingSuffixVerdict::Inferred { agrees, .. } => {
+                        if *agrees {
+                            RenameRowStatus::SkippedAlreadySuffixed
+                        } else {
+                            RenameRowStatus::ExistingSuffixMismatch
+                        }
+                    }
                     ExistingSuffixVerdict::Absent
-                    | ExistingSuffixVerdict::Matches { .. }
-                    | ExistingSuffixVerdict::Inferred { .. } => {
+                    | ExistingSuffixVerdict::Matches { .. } => {
                         RenameRowStatus::SkippedAlreadySuffixed
                     }
                 };
@@ -1651,7 +1660,7 @@ mod tests {
         assert_eq!(plan.rows[0].status, RenameRowStatus::Ready);
         assert_eq!(
             plan.rows[0].proposed_name,
-            "movie[blake3:ABCDEF+md5:012345].mkv"
+            "movie[blake3-ABCDEF+md5-012345].mkv"
         );
         assert!(source.exists(), "planning must not rename");
     }

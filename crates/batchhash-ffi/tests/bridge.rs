@@ -615,7 +615,7 @@ fn plan_renames_prefers_the_algorithm_list_and_falls_back_to_the_single_field() 
     assert_eq!(plan.summary.ready, 1);
     assert_eq!(
         plan.rows[0].proposed_name,
-        "movie[md5:012345+sha256:FFFFFF].mkv"
+        "movie[md5-012345+sha256-FFFFFF].mkv"
     );
 
     // The legacy shape still works: only `algorithm` is sent.

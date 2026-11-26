@@ -692,7 +692,7 @@ impl RenameBackend for StdFsBackend {
 #[cfg(target_os = "windows")]
 fn windows_rename_noreplace(from: &Path, to: &Path) -> Result<(), RenameError> {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_COPY_ALLOWED};
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
 
     /// `ERROR_FILE_EXISTS` from winerror.h.
     const ERROR_FILE_EXISTS: i32 = 80;
@@ -709,9 +709,11 @@ fn windows_rename_noreplace(from: &Path, to: &Path) -> Result<(), RenameError> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    // MOVEFILE_COPY_ALLOWED lets the call cross volumes; REPLACE_EXISTING is
-    // deliberately absent, which is the entire point of this function.
-    let flags = MOVEFILE_COPY_ALLOWED;
+    // Flags 0: neither REPLACE_EXISTING (which would destroy the target) nor
+    // COPY_ALLOWED (which turns a cross-volume rename into a copy that is no
+    // longer atomic). A cross-volume rename then fails loudly, which is the
+    // honest outcome for an operation the caller believes is a rename.
+    let flags = 0;
     // SAFETY: both buffers are NUL-terminated UTF-16 and outlive the call;
     // MoveFileExW only reads them.
     let ok = unsafe { MoveFileExW(from_wide.as_ptr(), to_wide.as_ptr(), flags) };

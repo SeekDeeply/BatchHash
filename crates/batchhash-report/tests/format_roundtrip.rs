@@ -28,8 +28,8 @@ fn record(path: impl Into<String>, size: u64, hashes: Vec<(AlgorithmId, String)>
         map.insert(algorithm, value);
     }
     ReportEntry {
-        path: path.into(),
-        size,
+        path: path.into(),        size,
+        size_known: true,
         mtime: None,
         hashes: map,
         status: EntryStatus::Ok,
@@ -793,4 +793,33 @@ fn human_reports_carry_environment_and_trace_metadata() {
     );
     assert!(en.contains("Environment"));
     assert!(zh.contains("运行环境"));
+}
+
+/// A filename that looks like a spreadsheet formula must not survive as one.
+///
+/// Excel evaluates a cell beginning with =, +, - or @, so a file named
+/// `=HYPERLINK(...)` would run as a formula when the exported report is opened.
+#[test]
+fn csv_neutralizes_a_formula_like_filename() {
+    let mut hostile = record("=HYPERLINK(\"http://evil\",\"click\")", 1, vec![(AlgorithmId::Md5, "abc123".to_string())]);
+    hostile.path = "=HYPERLINK(\"http://evil\",\"click\")".to_string();
+    let mut report = Report::new(
+        "/data/media",
+        RootKind::Fs,
+        true,
+        vec![AlgorithmId::Md5],
+        HardwareReport::default(),
+    );
+    report.entries = vec![hostile];
+    report.recompute_summary();
+
+    let csv = export_report(&report, ReportFormat::Csv).expect("export");
+    assert!(
+        !csv.contains(",=HYPERLINK"),
+        "a formula must not start a cell: {csv}"
+    );
+    assert!(
+        csv.contains("'=HYPERLINK"),
+        "the cell is neutralized with an apostrophe: {csv}"
+    );
 }

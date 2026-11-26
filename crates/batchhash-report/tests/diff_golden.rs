@@ -29,8 +29,8 @@ fn entry(path: &str, size: u64, hashes: Vec<(AlgorithmId, String)>) -> ReportEnt
         map.insert(algorithm, value);
     }
     ReportEntry {
-        path: path.to_string(),
-        size,
+        path: path.to_string(),        size,
+        size_known: true,
         mtime: None,
         hashes: map,
         status: EntryStatus::Ok,

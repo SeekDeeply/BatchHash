@@ -149,6 +149,15 @@ pub struct ReportEntry {
     /// Path relative to the report root, always `/` separated.
     pub path: String,
     pub size: u64,
+    /// Whether [size] is a real measurement rather than a placeholder.
+    ///
+    /// Checksum formats (md5sum, BSD) record no size, so importing one leaves
+    /// `size` at zero. Without this flag a diff against a real directory
+    /// compares 0 to the true size and reports every non-empty unchanged file
+    /// as corrupt. Defaults to true so reports written before this field existed
+    /// keep meaning "the size is real".
+    #[serde(default = "default_size_known")]
+    pub size_known: bool,
     #[serde(default)]
     pub mtime: Option<String>,
     #[serde(default)]
@@ -173,6 +182,15 @@ impl ReportEntry {
     pub fn is_ok(&self) -> bool {
         self.status.is_ok()
     }
+}
+
+/// Default for [`ReportEntry::size_known`].
+///
+/// Absent means the field predates the flag, and every such report measured its
+/// sizes; assuming otherwise would silently disable size comparison for all
+/// existing data.
+fn default_size_known() -> bool {
+    true
 }
 
 /// A complete BatchHash report (schema v1).

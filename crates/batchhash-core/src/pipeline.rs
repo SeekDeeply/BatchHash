@@ -285,6 +285,8 @@ pub fn report_entry_from(entry: &FileEntry) -> ReportEntry {
     ReportEntry {
         path: entry.relative_path.clone(),
         size: entry.size,
+        // Measured by the scan that produced this entry.
+        size_known: true,
         mtime: entry.mtime.clone(),
         hashes: entry.hashes.clone(),
         status: entry.status,

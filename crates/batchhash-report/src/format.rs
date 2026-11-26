@@ -445,6 +445,30 @@ fn canonical_report(report: &Report) -> Result<Report, ExportError> {
     Ok(report)
 }
 
+/// Neutralize a CSV cell that a spreadsheet would treat as a formula.
+///
+/// Excel and LibreOffice evaluate a cell starting with `=`, `+`, `-`, `@`, a tab
+/// or a carriage return. A filename is user-controlled, so a file named
+/// `=HYPERLINK("http://x","click")` becomes a live formula the moment the report
+/// is opened (CWE-1236). Prefixing an apostrophe is the standard fix: the
+/// spreadsheet shows the literal text and evaluates nothing.
+///
+/// Only the leading character matters, so this changes nothing about paths that
+/// merely contain those characters later.
+fn csv_neutralize(value: &str) -> String {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    if matches!(first, '=' | '+' | '-' | '@' | '\t' | '\r') {
+        let mut out = String::with_capacity(value.len() + 1);
+        out.push('\'');
+        out.push_str(value);
+        return out;
+    }
+    value.to_string()
+}
+
 fn export_csv(report: &Report) -> Result<String, ExportError> {
     let mut writer = csv::WriterBuilder::new()
         .terminator(csv::Terminator::Any(b'\n'))
@@ -464,7 +488,7 @@ fn export_csv(report: &Report) -> Result<String, ExportError> {
     for entry in &report.entries {
         let mut record: Vec<String> =
             Vec::with_capacity(CSV_FIXED_HEADER.len() + report.algorithms.len());
-        record.push(entry.path.clone());
+        record.push(csv_neutralize(&entry.path));
         record.push(entry.size.to_string());
         record.push(entry.mtime.clone().unwrap_or_default());
         record.push(entry_status_str(entry.status).to_string());
@@ -474,14 +498,14 @@ fn export_csv(report: &Report) -> Result<String, ExportError> {
                 .map(|kind| kind.as_str().to_string())
                 .unwrap_or_default(),
         );
-        record.push(entry.suffix_applied.clone().unwrap_or_default());
+        record.push(csv_neutralize(&entry.suffix_applied.clone().unwrap_or_default()));
         record.push(
             entry
                 .suffix_algorithm
                 .map(|algorithm| algorithm.stable_id().to_string())
                 .unwrap_or_default(),
         );
-        record.push(entry.renamed_to.clone().unwrap_or_default());
+        record.push(csv_neutralize(&entry.renamed_to.clone().unwrap_or_default()));
         for algorithm in &report.algorithms {
             record.push(entry.hashes.get(algorithm).cloned().unwrap_or_default());
         }
@@ -1203,6 +1227,8 @@ fn import_csv(bytes: &[u8]) -> Result<Report, ImportError> {
         entries.push(ReportEntry {
             path,
             size,
+            // A CSV row carries a size column, so the value is real.
+            size_known: true,
             mtime: non_empty(record_field(&record, mtime_index)),
             hashes,
             status,
@@ -1277,6 +1303,10 @@ fn import_checksum(bytes: &[u8], format: ReportFormat) -> Result<Report, ImportE
         entries.push(ReportEntry {
             path: parsed.path,
             size: 0,
+            // md5sum and BSD checksum files record no size at all. Zero here
+            // means "unknown", not "empty": comparing it against a real file
+            // would report every non-empty unchanged file as corrupt.
+            size_known: false,
             mtime: None,
             hashes,
             status: EntryStatus::Ok,

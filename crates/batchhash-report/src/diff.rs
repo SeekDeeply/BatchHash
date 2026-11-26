@@ -437,6 +437,12 @@ fn key_for_entry(
     normalizer: &PathNormalizer,
     root: &str,
 ) -> Result<String, NormalizeError> {
+    // Every mode validates the full path first. `normalize_basename` reduces a
+    // path to its last component, which would silently absorb a `..` escape:
+    // `../../secret.txt` becomes `secret.txt` and the out-of-root check never
+    // sees the traversal. Running the full-path normalization first keeps the
+    // escape detectable in all three modes.
+    normalizer.normalize(&entry.path)?;
     match mode {
         DiffMode::RootRelative => normalizer.normalize(&entry.path),
         DiffMode::Absolute => normalizer.normalize(&join_display_path(root, &entry.path)),
@@ -708,8 +714,11 @@ fn compare_pair(
     }
     if compared.is_empty() {
         // Degraded policy: no shared algorithm, so presence plus size is all we
-        // can honestly claim.
-        let status = if left.size == right.size {
+        // can honestly claim. When either size is a placeholder there is no
+        // evidence left at all, and claiming "unchanged" would be a guess.
+        let status = if !left.size_known || !right.size_known {
+            DiffStatus::Unknown
+        } else if left.size == right.size {
             DiffStatus::Unchanged
         } else {
             DiffStatus::Changed
@@ -762,7 +771,11 @@ fn compare_pair(
             changed_algorithms,
         );
     }
-    if left.size != right.size {
+    // A checksum file records no size, so comparing it against a real directory
+    // would flag every non-empty unchanged file as corrupt. Only compare sizes
+    // when both sides actually measured one; matching digests already prove the
+    // contents agree, and "Corrupt" would contradict that evidence.
+    if left.size_known && right.size_known && left.size != right.size {
         return (
             DiffStatus::Corrupt,
             format!(
@@ -850,6 +863,7 @@ fn report_entry_from_file_entry(entry: &FileEntry) -> ReportEntry {
     ReportEntry {
         path: entry.relative_path.clone(),
         size: entry.size,
+        size_known: true,
         mtime: entry.mtime.clone(),
         hashes: entry.hashes.clone(),
         status: entry.status,

@@ -2112,11 +2112,7 @@ mod tests {
     fn import_accepts_a_well_formed_record() {
         // The guard must not reject the normal case, or it would break undo.
         let mut store = LogStore::open_in_memory().expect("in-memory store");
-        let archive = archive_with_paths(
-            "/tmp/root",
-            "/tmp/root/a.txt",
-            "/tmp/root/a[ABCDEF].txt",
-        );
+        let archive = archive_with_paths("/tmp/root", "/tmp/root/a.txt", "/tmp/root/a[ABCDEF].txt");
         let summary = store.import_archive(&archive).expect("valid archive");
         assert_eq!(summary.batches, 1);
         assert_eq!(summary.operations, 1);
@@ -2138,16 +2134,15 @@ mod tests {
     #[test]
     fn import_rejects_an_archive_with_too_many_operations() {
         let mut store = LogStore::open_in_memory().expect("in-memory store");
-        let mut archive = archive_with_paths(
-            "/tmp/root",
-            "/tmp/root/a.txt",
-            "/tmp/root/a[ABCDEF].txt",
-        );
+        let mut archive =
+            archive_with_paths("/tmp/root", "/tmp/root/a.txt", "/tmp/root/a[ABCDEF].txt");
         // One template operation, cloned past the cap: the count is the limit,
         // not the byte size.
         let template = archive.batches[0].operations[0].clone();
         archive.batches[0].operations = vec![template; MAX_ARCHIVE_OPERATIONS + 1];
-        let error = store.import_archive(&archive).expect_err("too many operations");
+        let error = store
+            .import_archive(&archive)
+            .expect_err("too many operations");
         assert!(
             matches!(error, LogError::InvalidStoredValue(_)),
             "got {error:?}"
@@ -2156,8 +2151,9 @@ mod tests {
 
     #[test]
     fn validate_rejects_nul_bytes_and_empty_paths() {
-        assert!(validate_rename_operation_paths("/tmp/root", "/tmp/root/a\0b", "/tmp/root/c")
-            .is_err());
+        assert!(
+            validate_rename_operation_paths("/tmp/root", "/tmp/root/a\0b", "/tmp/root/c").is_err()
+        );
         assert!(validate_rename_operation_paths("/tmp/root", "", "/tmp/root/c").is_err());
         // An empty root means "unknown", not "the whole filesystem": the safety
         // checks still apply, but there is nothing to contain the path in.

@@ -313,8 +313,7 @@ fn apply_dependency_order(rows: &mut [RenamePlanRow], case_insensitive: bool) {
             if row.status == RenameRowStatus::Ready && !settled.contains(&index) {
                 row.status = RenameRowStatus::ConflictTargetExists;
                 row.reason = Some(
-                    "rename cycle detected: these names would overwrite each other"
-                        .to_string(),
+                    "rename cycle detected: these names would overwrite each other".to_string(),
                 );
             }
         }
@@ -557,7 +556,10 @@ pub fn plan_renames_with_probe(
         }
         if !options.overwrite {
             let target = target_path(&row.original_path, &row.proposed_name);
-            let target_key = normalize_key(&target.to_string_lossy(), options.case_insensitive_conflicts);
+            let target_key = normalize_key(
+                &target.to_string_lossy(),
+                options.case_insensitive_conflicts,
+            );
             if fs.exists(&target) && !vacated.contains(&target_key) {
                 row.status = RenameRowStatus::ConflictTargetExists;
                 row.reason = Some("target name already exists".to_string());
@@ -1373,9 +1375,7 @@ mod tests {
         let mut entries = vec![entry_named("a.txt"), entry_named("b.txt")];
         entries[0].hashes.insert(AlgorithmId::Blake3, digest());
         entries[1].hashes.insert(AlgorithmId::Blake3, digest());
-        let fs = ExistingFs(
-            ["/root/b.txt".to_string()].into_iter().collect(),
-        );
+        let fs = ExistingFs(["/root/b.txt".to_string()].into_iter().collect());
         let mut rows = vec![
             RenamePlanRow {
                 entry_index: 0,

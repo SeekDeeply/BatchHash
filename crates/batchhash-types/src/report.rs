@@ -467,8 +467,8 @@ mod tests {
             );
         }
         ReportEntry {
-            path: path.to_string(),
-            size,
+            path: path.to_string(),            size,
+            size_known: true,
             mtime: None,
             hashes,
             status,

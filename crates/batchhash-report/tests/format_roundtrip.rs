@@ -28,7 +28,8 @@ fn record(path: impl Into<String>, size: u64, hashes: Vec<(AlgorithmId, String)>
         map.insert(algorithm, value);
     }
     ReportEntry {
-        path: path.into(),        size,
+        path: path.into(),
+        size,
         size_known: true,
         mtime: None,
         hashes: map,

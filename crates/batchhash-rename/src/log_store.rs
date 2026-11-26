@@ -530,10 +530,7 @@ pub fn validate_rename_path_safety(original_path: &str, new_path: &str) -> Resul
             return Err(LogError::InvalidStoredValue(format!("{label} is empty")));
         }
     }
-    for (label, value) in [
-        ("original path", original_path),
-        ("new path", new_path),
-    ] {
+    for (label, value) in [("original path", original_path), ("new path", new_path)] {
         if value.split(['/', '\\']).any(|segment| segment == "..") {
             return Err(LogError::InvalidStoredValue(format!(
                 "{label} escapes its directory: {value}"
@@ -1947,8 +1944,18 @@ mod tests {
         let mut store = LogStore::open_in_memory().expect("in-memory store");
         let batch = test_batch();
         store.create_batch(&batch).expect("create batch");
-        let first = insert_applied(&mut store, &batch.id, "/tmp/root/a.txt", "/tmp/root/a[ABCDEF].txt");
-        let second = insert_pending(&mut store, &batch.id, "/tmp/root/b.txt", "/tmp/root/b[ABCDEF].txt");
+        let first = insert_applied(
+            &mut store,
+            &batch.id,
+            "/tmp/root/a.txt",
+            "/tmp/root/a[ABCDEF].txt",
+        );
+        let second = insert_pending(
+            &mut store,
+            &batch.id,
+            "/tmp/root/b.txt",
+            "/tmp/root/b[ABCDEF].txt",
+        );
         store.mark_undone(first).expect("mark undone");
 
         let archive = store.export_archive(None).expect("export");
@@ -1995,7 +2002,12 @@ mod tests {
         let mut store = LogStore::open_in_memory().expect("in-memory store");
         let batch = test_batch();
         store.create_batch(&batch).expect("create batch");
-        insert_applied(&mut store, &batch.id, "/tmp/root/a.txt", "/tmp/root/a[ABCDEF].txt");
+        insert_applied(
+            &mut store,
+            &batch.id,
+            "/tmp/root/a.txt",
+            "/tmp/root/a[ABCDEF].txt",
+        );
         let json = store.export_archive_json(None).expect("export json");
 
         let mut target = LogStore::open_in_memory().expect("second store");
@@ -2198,7 +2210,12 @@ mod tests {
         second.id = "other-batch".to_string();
         store.create_batch(&first).expect("first batch");
         store.create_batch(&second).expect("second batch");
-        insert_applied(&mut store, &first.id, "/tmp/root/a.txt", "/tmp/root/a[ABCDEF].txt");
+        insert_applied(
+            &mut store,
+            &first.id,
+            "/tmp/root/a.txt",
+            "/tmp/root/a[ABCDEF].txt",
+        );
 
         let archive = store.export_archive(Some(&first.id)).expect("export");
         assert_eq!(archive.batches.len(), 1);

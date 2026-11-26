@@ -498,6 +498,30 @@ pub fn validate_rename_operation_paths(
     original_path: &str,
     new_path: &str,
 ) -> Result<(), LogError> {
+    validate_rename_path_safety(original_path, new_path)?;
+    // Root containment is only meaningful for a batch whose root is known to
+    // describe these paths. Callers that already hold local records pass the
+    // root they stored; a record that predates this check may legitimately sit
+    // outside it, and refusing to undo it would strand real history. Import is
+    // where the check earns its keep, because there the root comes from the
+    // same untrusted document as the paths.
+    if !batch_root.trim().is_empty() && !Path::new(original_path).starts_with(Path::new(batch_root)) {
+        return Err(LogError::InvalidStoredValue(format!(
+            "original path is outside the batch root {batch_root}: {original_path}"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject paths that are unsafe regardless of which batch they belong to.
+///
+/// These are the checks that hold for every record: a rename must not climb
+/// out of its directory, cross into another one, or carry a NUL byte. They are
+/// separate from root containment so a caller can apply the part it can prove.
+pub fn validate_rename_path_safety(
+    original_path: &str,
+    new_path: &str,
+) -> Result<(), LogError> {
     for (label, value) in [
         ("batch root", batch_root),
         ("original path", original_path),
@@ -530,20 +554,6 @@ pub fn validate_rename_operation_paths(
         return Err(LogError::InvalidStoredValue(format!(
             "rename would move between directories: {original_path} -> {new_path}"
         )));
-    }
-    // The paths must stay inside the recorded root. A plain prefix test is not
-    // enough: "/data/root" is a prefix of "/data/root_evil", and `starts_with`
-    // compares whole components, which is exactly the boundary needed here.
-    let root = Path::new(batch_root);
-    for (label, value) in [
-        ("original path", original_path),
-        ("new path", new_path),
-    ] {
-        if !Path::new(value).starts_with(root) {
-            return Err(LogError::InvalidStoredValue(format!(
-                "{label} is outside the batch root {batch_root}: {value}"
-            )));
-        }
     }
     Ok(())
 }
@@ -797,15 +807,13 @@ impl LogStore {
         // The paths come out of the log, but the log can be fed by an imported
         // archive, so they are validated here rather than trusted. A rejected
         // batch fails whole: an undo plan that silently drops rows would leave
-        // the caller believing the batch was reversed.
-        let root = self.load_batch(batch_id)?.root;
+        // the caller believing the batch was reversed. Only the root-free
+        // checks apply: a record written before this guard existed may sit
+        // outside the stored root, and stranding real history would be worse
+        // than the risk this closes.
         let mut operations = self.load_operations(Some(batch_id))?;
         for operation in &operations {
-            validate_rename_operation_paths(
-                &root,
-                &operation.original_path,
-                &operation.new_path,
-            )?;
+            validate_rename_path_safety(&operation.original_path, &operation.new_path)?;
         }
         operations.reverse();
         let mut rows = Vec::new();
@@ -1146,12 +1154,10 @@ pub fn apply_undo_with_cancel(
     fs: &dyn RenameFs,
     should_stop: &(dyn Fn() -> bool + Sync),
 ) -> Result<Vec<UndoResult>, LogError> {
-    // Re-check against the batch root the store recorded, not the root the
-    // plan carries: the plan may have travelled through a caller that built it
-    // by hand, while the store is the authority on where this batch lives.
-    let root = store.load_batch(&plan.batch_id)?.root;
+    // Re-checked here as well as in `plan_undo`: a plan can be built by hand,
+    // and this is the last point before a destructive rename.
     for row in &plan.rows {
-        validate_rename_operation_paths(&root, &row.from, &row.to)?;
+        validate_rename_path_safety(&row.from, &row.to)?;
     }
     let mut results = Vec::with_capacity(plan.rows.len());
     let mut undone = Vec::new();
@@ -2132,7 +2138,19 @@ mod tests {
         assert!(validate_rename_operation_paths("/tmp/root", "/tmp/root/a\0b", "/tmp/root/c")
             .is_err());
         assert!(validate_rename_operation_paths("/tmp/root", "", "/tmp/root/c").is_err());
-        assert!(validate_rename_operation_paths("", "/tmp/root/a", "/tmp/root/c").is_err());
+        // An empty root means "unknown", not "the whole filesystem": the safety
+        // checks still apply, but there is nothing to contain the path in.
+        assert!(validate_rename_operation_paths("", "/tmp/root/a", "/tmp/root/c").is_ok());
+        assert!(validate_rename_operation_paths("", "/tmp/root/../a", "/tmp/root/c").is_err());
+    }
+
+    #[test]
+    fn undo_safety_checks_do_not_require_a_matching_root() {
+        // Records written before root containment existed must still be
+        // reversible: refusing them would strand real history.
+        assert!(validate_rename_path_safety("/tmp/a.txt", "/tmp/a[ABCDEF].txt").is_ok());
+        assert!(validate_rename_path_safety("/tmp/../etc/hosts", "/tmp/x").is_err());
+        assert!(validate_rename_path_safety("/tmp/a.txt", "/var/b.txt").is_err());
     }
 
     #[test]

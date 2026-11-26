@@ -30,8 +30,8 @@ use batchhash_rename::log_store::{
     ReconcileReport, RenameOperation,
 };
 use batchhash_rename::planner::{
-    execute_plan_with_policy_and_cancel, plan_renames, RenamePlan, RenamePlanOptions, RenameResult,
-    RenameResultStatus, RenameRowStatus, StdFsBackend, StdRenameFs,
+    execute_plan_with_policy_and_cancel, plan_renames, ExpectedHash, RenamePlan, RenamePlanOptions,
+    RenameResult, RenameResultStatus, RenameRowStatus, StdFsBackend, StdRenameFs,
 };
 use batchhash_rename::suffix::{
     parse_filename, MultiSuffixFormat, SuffixError, SuffixFormat, SuffixParseResult,
@@ -132,6 +132,20 @@ pub struct BatchRequest {
     pub log_db: Option<PathBuf>,
     /// Allow overwriting existing targets (destructive, off by default).
     pub overwrite: bool,
+    /// Replace an existing suffix group instead of skipping the file.
+    ///
+    /// Mirrors [`RenamePlanOptions::clear_existing_suffix`]: without it a name
+    /// that already carries a parseable suffix is reported as skipped, so a
+    /// user who previewed a plan with the option on would otherwise get a
+    /// different result from the run that applies it.
+    pub clear_existing_suffix: bool,
+    /// Re-verify each file against the digest this run computed before renaming.
+    ///
+    /// The gap between hashing and renaming is real: another process can rewrite
+    /// a file in that window, and renaming it would then label bytes that were
+    /// never hashed. With this on, a changed file is reported as a hash mismatch
+    /// and left alone.
+    pub verify_before_rename: bool,
     /// Injected hardware block; the probe result when None.
     pub hardware: Option<HardwareReport>,
     /// Injected report timestamp; the current time when None.
@@ -153,6 +167,10 @@ impl BatchRequest {
             apply_renames: false,
             log_db: None,
             overwrite: false,
+            // Both default off, matching the planner: a caller that does not
+            // know about these options gets exactly the behaviour it had.
+            clear_existing_suffix: false,
+            verify_before_rename: false,
             hardware: None,
             generated_at: None,
         }
@@ -311,7 +329,11 @@ pub fn run_batch(
     let entries = restrict_entries(entries, restricted.as_ref());
 
     let hashing_total = entries.len() as u64;
-    let bytes_total: u64 = entries.iter().map(|entry| entry.size).sum();
+    // Saturating for the same reason as in the scheduler: a wrapped total
+    // reports a plausible-looking number that is simply wrong.
+    let bytes_total: u64 = entries
+        .iter()
+        .fold(0u64, |total, entry| total.saturating_add(entry.size));
     let elapsed = elapsed_millis(started);
     events(PipelineEvent::Progress(BatchProgress {
         phase: BatchPhase::Scanning,
@@ -382,9 +404,19 @@ pub fn run_batch(
     if let Some(format) = &request.suffix {
         if !run.cancelled {
             events(PipelineEvent::Phase(BatchPhase::PlanningSuffix));
+            // Verification compares each file against the digest this run just
+            // computed, so the expectation set is built from `hashed` rather
+            // than from any external record.
+            let verify_hashes = if request.verify_before_rename {
+                expected_hashes_from(&hashed, &request.algorithms)
+            } else {
+                Vec::new()
+            };
             let plan_options = RenamePlanOptions {
                 format: format.clone(),
                 overwrite: request.overwrite,
+                clear_existing_suffix: request.clear_existing_suffix,
+                verify_hashes,
                 ..RenamePlanOptions::default()
             };
             let plan = plan_renames(&hashed, &plan_options, &StdRenameFs);
@@ -585,6 +617,28 @@ fn mark_all_cancelled(report: &mut Report, entries: &[FileEntry]) {
         }
     }
     report.recompute_summary();
+}
+
+/// Build the expectation set a strict run verifies against.
+///
+/// The digests come from the run that just finished hashing, so this checks for
+/// a file that changed *after* it was hashed — not for a disagreement with some
+/// older record. Entries without a digest for an algorithm are skipped: there is
+/// nothing to compare, and inventing an expectation would fail a healthy file.
+fn expected_hashes_from(entries: &[FileEntry], algorithms: &[AlgorithmId]) -> Vec<ExpectedHash> {
+    let mut expected = Vec::new();
+    for entry in entries {
+        for algorithm in algorithms {
+            if let Some(hex) = entry.hashes.get(algorithm) {
+                expected.push(ExpectedHash::new(
+                    entry.display_path.clone(),
+                    *algorithm,
+                    hex.clone(),
+                ));
+            }
+        }
+    }
+    expected
 }
 
 fn annotate_suffix(

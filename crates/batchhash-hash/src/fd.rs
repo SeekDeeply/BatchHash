@@ -51,10 +51,15 @@ pub(crate) fn compute_hashes_from_fd_streaming(
     sink: Option<&mut dyn HashSink>,
     cancel: Option<&AtomicBool>,
 ) -> Result<IndexMap<AlgorithmId, String>, HashError> {
-    // SAFETY: the caller contract guarantees fd is valid for this call. dup(2)
-    // never takes ownership of the original descriptor and returns a new one
-    // (or -1, handled below).
-    let duplicated = unsafe { libc::dup(fd) };
+    // SAFETY: the caller contract guarantees fd is valid for this call. The
+    // fcntl never takes ownership of the original descriptor and returns a new
+    // one (or -1, handled below).
+    //
+    // F_DUPFD_CLOEXEC rather than dup(2): a plain dup leaves the descriptor
+    // without close-on-exec, so any child process spawned while the hash is
+    // running inherits a handle to the file. On Android the same handle also
+    // keeps a SAF document open past its intended lifetime.
+    let duplicated = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
     if duplicated < 0 {
         return Err(HashError::Io(std::io::Error::last_os_error()));
     }

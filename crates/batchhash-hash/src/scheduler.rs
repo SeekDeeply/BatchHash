@@ -195,7 +195,12 @@ pub fn hash_entries_resolved(
 ) -> BatchOutcome {
     let started = Instant::now();
     let total = entries.len() as u64;
-    let bytes_total: u64 = entries.iter().map(|entry| entry.size).sum();
+    // Saturating, not wrapping: a batch whose sizes sum past u64::MAX is
+    // nonsense, but wrapping would report a tiny total and make every progress
+    // percentage wrong instead of merely saturated.
+    let bytes_total: u64 = entries
+        .iter()
+        .fold(0u64, |total, entry| total.saturating_add(entry.size));
     let reporter = ProgressReporter::new(total, bytes_total, events);
     let mut results = entries.to_vec();
     let first_path = results
@@ -250,6 +255,14 @@ fn process_entry(
     cancel: &CancelToken,
     reporter: &ProgressReporter<'_>,
 ) {
+    // A scan that already failed an entry recorded why. Hashing it again would
+    // do pointless I/O and, worse, overwrite that reason: a permission failure
+    // from the scan would come back as a generic read error, losing the original
+    // cause the user needs to act on.
+    if !entry.status.is_ok() {
+        reporter.entry_done(entry);
+        return;
+    }
     if cancel.is_cancelled() {
         entry.hashes.clear();
         entry.skip(ErrorKind::Cancelled, "batch cancelled");
@@ -324,6 +337,7 @@ fn classify_hash_error(error: &HashError) -> (ErrorKind, String) {
         HashError::PermissionDenied(message) => (ErrorKind::PermissionDenied, message.clone()),
         HashError::Unsupported(message) => (ErrorKind::Unsupported, message.clone()),
         HashError::NoAlgorithms => (ErrorKind::Other, error.to_string()),
+        HashError::Unstable => (ErrorKind::Unstable, error.to_string()),
         HashError::Io(source) => match source.kind() {
             io::ErrorKind::PermissionDenied => (ErrorKind::PermissionDenied, source.to_string()),
             io::ErrorKind::NotFound => (ErrorKind::NotFound, source.to_string()),

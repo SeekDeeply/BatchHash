@@ -996,6 +996,8 @@ class RenamePlanModel {
     required this.uppercase,
     required this.rows,
     this.algorithms = const <String>[],
+    this.clearSuffix = false,
+    this.strict = false,
   });
 
   /// Primary algorithm, kept for callers that only care about one.
@@ -1011,6 +1013,16 @@ class RenamePlanModel {
   final int length;
   final bool uppercase;
   final List<RenamePlanRowModel> rows;
+
+  /// Whether this plan replaces an existing suffix group instead of skipping.
+  ///
+  /// Carried on the plan so the run that applies it uses the same policy the
+  /// preview did; a plan and its execution disagreeing renames files the user
+  /// never saw in the list.
+  final bool clearSuffix;
+
+  /// Whether the plan verified each file against its digest before renaming.
+  final bool strict;
 
   int get readyCount => rows
       .where((RenamePlanRowModel row) => row.status == RenameRowStatus.ready)

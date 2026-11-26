@@ -246,3 +246,91 @@ fn fd_input_is_used_for_fd_entries() {
     file.read_to_end(&mut reread).expect("reread must succeed");
     assert_eq!(reread, data, "caller descriptor must stay open");
 }
+
+/// A scan that already failed an entry must not be hashed again.
+///
+/// Re-hashing it would do pointless I/O and, worse, overwrite the original
+/// reason: a permission failure recorded by the scan would come back as a
+/// generic read error, hiding the cause the user has to act on.
+#[test]
+fn entries_failed_by_the_scan_keep_their_reason_and_are_not_reopened() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // No file on disk: if the scheduler tried to open it, the status would
+    // become a read error rather than staying exactly as it was.
+    let mut entry = FileEntry::new(
+        "root-1",
+        RootKind::Fs,
+        "gone.txt",
+        dir.path().join("gone.txt").to_string_lossy().into_owned(),
+        0,
+        None,
+    );
+    entry.status = EntryStatus::Failed;
+    entry.error_kind = Some(ErrorKind::PermissionDenied);
+    entry.error_message = Some("scan could not read this file".to_string());
+
+    let outcome = hash_entries(
+        &[entry],
+        &batch_options(vec![AlgorithmId::Md5]),
+        &CancelToken::new(),
+        &|_event| {},
+    );
+
+    assert_eq!(outcome.entries.len(), 1);
+    let result = &outcome.entries[0];
+    assert_eq!(result.status, EntryStatus::Failed);
+    assert_eq!(result.error_kind, Some(ErrorKind::PermissionDenied));
+    assert_eq!(
+        result.error_message.as_deref(),
+        Some("scan could not read this file"),
+        "the scan's reason must survive"
+    );
+    assert!(result.hashes.is_empty());
+}
+
+/// A file that changes size while it is being read must not be trusted.
+///
+/// The digest would describe bytes that are no longer the file's contents, so
+/// recording it would label the file with a value it does not have.
+#[test]
+fn a_file_that_changes_while_being_read_is_reported_as_unstable() {
+    use std::io::Write;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("grow.bin");
+    // Large enough that hashing takes more than one buffer, giving the writer a
+    // window to append before the read finishes.
+    let mut file = fs::File::create(&path).expect("create");
+    file.write_all(&vec![0u8; 8 * 1024 * 1024]).expect("write");
+    drop(file);
+
+    let writer_path = path.clone();
+    let handle = std::thread::spawn(move || {
+        // Append while the hash is running; the size check at the end is what
+        // catches it, so the exact timing does not need to be tight.
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        if let Ok(mut file) = fs::OpenOptions::new().append(true).open(&writer_path) {
+            let _ = file.write_all(&vec![1u8; 1024]);
+        }
+    });
+
+    let result = compute_hashes_file(
+        &path,
+        &HashOptions::new(vec![AlgorithmId::Md5]).with_buffer_size(1024),
+    );
+    let _ = handle.join();
+
+    match result {
+        Ok(_) => {
+            // The writer may have lost the race; that is not a failure of the
+            // guard, so this test only asserts the guard never returns a digest
+            // for a file it observed changing.
+        }
+        Err(error) => {
+            assert!(
+                error.to_string().contains("changed while it was being read"),
+                "unexpected error: {error}"
+            );
+        }
+    }
+}

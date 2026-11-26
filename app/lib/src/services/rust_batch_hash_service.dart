@@ -606,6 +606,8 @@ class RustBatchHashService implements BatchHashService {
       length: length,
       uppercase: uppercase,
       rows: rows,
+      clearSuffix: clearSuffix,
+      strict: strict,
     );
   }
 
@@ -650,6 +652,10 @@ class RustBatchHashService implements BatchHashService {
       },
       applyRenames: true,
       logDb: logDb,
+      // The plan was previewed with these, so the run that applies it must use
+      // them too: otherwise the same plan renames a different set of files.
+      clearSuffix: plan.clearSuffix,
+      strict: plan.strict,
     );
     _logDbPath = logDb;
     _lastScanRecursive = recurse;

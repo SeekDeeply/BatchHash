@@ -151,6 +151,14 @@ pub enum HashError {
     /// The operation was cancelled at a chunk boundary.
     #[error("hashing was cancelled")]
     Cancelled,
+    /// The file changed while it was being read.
+    ///
+    /// A digest describes the bytes that were read. If the file grew, shrank or
+    /// was rewritten during the read, those bytes are not a snapshot of any real
+    /// state, and recording the digest would label a file with a value it does
+    /// not currently have. This is reported rather than silently accepted.
+    #[error("file changed while it was being read")]
+    Unstable,
 }
 
 // The digest states vary in size (BLAKE3 is the largest), so every variant is
@@ -581,7 +589,35 @@ pub(crate) fn compute_hashes_path(
     cancel: Option<&AtomicBool>,
 ) -> Result<IndexMap<AlgorithmId, String>, HashError> {
     let mut file = File::open(path)?;
-    compute_hashes_streaming(&mut file, options, sink, cancel)
+    // Recorded from the same handle the bytes come from, so a file replaced
+    // between `open` and the metadata calls is still caught: the metadata
+    // describes the open file, not the name.
+    let before = file.metadata()?;
+    let digests = compute_hashes_streaming(&mut file, options, sink, cancel)?;
+    let after = file.metadata()?;
+    if file_changed(&before, &after) {
+        return Err(HashError::Unstable);
+    }
+    Ok(digests)
+}
+
+/// Whether [after] shows the file was modified while it was being read.
+///
+/// Size and modification time are compared, not the bytes: re-reading the file
+/// to compare would double the I/O for a check that only needs to catch the
+/// common cases (truncation, append, rewrite by another process). A same-size
+/// rewrite within the filesystem's timestamp granularity can still slip
+/// through, which is why this is a guard and not a proof.
+fn file_changed(before: &std::fs::Metadata, after: &std::fs::Metadata) -> bool {
+    if before.len() != after.len() {
+        return true;
+    }
+    match (before.modified(), after.modified()) {
+        (Ok(left), Ok(right)) => left != right,
+        // A platform that cannot report mtime leaves nothing to compare; size
+        // equality is the only evidence available, and it agreed.
+        _ => false,
+    }
 }
 
 #[cfg(test)]

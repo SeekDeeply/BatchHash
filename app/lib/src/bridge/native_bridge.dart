@@ -161,6 +161,8 @@ class BatchHashNative {
     bool applyRenames = false,
     String? logDb,
     bool overwrite = false,
+    bool clearSuffix = false,
+    bool strict = false,
   }) {
     return _callMap('bh_run_batch', <String, Object?>{
       'root': root,
@@ -175,6 +177,8 @@ class BatchHashNative {
       'apply_renames': applyRenames,
       if (logDb != null) 'log_db': logDb,
       'overwrite': overwrite,
+      'clear_suffix': clearSuffix,
+      'strict': strict,
     });
   }
 

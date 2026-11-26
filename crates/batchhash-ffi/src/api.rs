@@ -566,6 +566,15 @@ pub struct BatchRequestDto {
     /// Allow overwriting existing targets (destructive).
     #[serde(default)]
     pub overwrite: bool,
+    /// Replace an existing suffix group instead of skipping the file.
+    ///
+    /// Must match what the preview used: a plan built with this on and applied
+    /// with it off renames a different set of files than the user was shown.
+    #[serde(default)]
+    pub clear_suffix: bool,
+    /// Re-verify each file against this run's digest before renaming it.
+    #[serde(default)]
+    pub strict: bool,
 }
 
 /// One row of the rename plan.
@@ -838,6 +847,11 @@ pub fn run_batch_request_with_progress(
     pipeline_request.apply_renames = request.apply_renames && has_suffix;
     pipeline_request.log_db = request.log_db.as_ref().map(std::path::PathBuf::from);
     pipeline_request.overwrite = request.overwrite;
+    // Carried through so the applied run matches the previewed plan: the preview
+    // honoured both flags, and dropping them here made the same plan rename a
+    // different set of files.
+    pipeline_request.clear_existing_suffix = request.clear_suffix;
+    pipeline_request.verify_before_rename = request.strict;
 
     let forward = |event: batchhash_core::pipeline::PipelineEvent| {
         if let batchhash_core::pipeline::PipelineEvent::Progress(sample) = event {

@@ -498,14 +498,18 @@ fn export_csv(report: &Report) -> Result<String, ExportError> {
                 .map(|kind| kind.as_str().to_string())
                 .unwrap_or_default(),
         );
-        record.push(csv_neutralize(&entry.suffix_applied.clone().unwrap_or_default()));
+        record.push(csv_neutralize(
+            &entry.suffix_applied.clone().unwrap_or_default(),
+        ));
         record.push(
             entry
                 .suffix_algorithm
                 .map(|algorithm| algorithm.stable_id().to_string())
                 .unwrap_or_default(),
         );
-        record.push(csv_neutralize(&entry.renamed_to.clone().unwrap_or_default()));
+        record.push(csv_neutralize(
+            &entry.renamed_to.clone().unwrap_or_default(),
+        ));
         for algorithm in &report.algorithms {
             record.push(entry.hashes.get(algorithm).cloned().unwrap_or_default());
         }

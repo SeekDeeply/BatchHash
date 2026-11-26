@@ -802,7 +802,11 @@ fn human_reports_carry_environment_and_trace_metadata() {
 /// `=HYPERLINK(...)` would run as a formula when the exported report is opened.
 #[test]
 fn csv_neutralizes_a_formula_like_filename() {
-    let mut hostile = record("=HYPERLINK(\"http://evil\",\"click\")", 1, vec![(AlgorithmId::Md5, "abc123".to_string())]);
+    let mut hostile = record(
+        "=HYPERLINK(\"http://evil\",\"click\")",
+        1,
+        vec![(AlgorithmId::Md5, "0123456789abcdef0123456789abcdef".to_string())],
+    );
     hostile.path = "=HYPERLINK(\"http://evil\",\"click\")".to_string();
     let mut report = Report::new(
         "/data/media",

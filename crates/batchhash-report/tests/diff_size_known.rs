@@ -44,10 +44,10 @@ fn report(entries: Vec<ReportEntry>) -> Report {
 
 #[test]
 fn an_unknown_size_does_not_make_matching_hashes_look_corrupt() {
-    let mut imported = entry("a.txt", 0, "abc123");
+    let mut imported = entry("a.txt", 0, "0123456789abcdef0123456789abcdef");
     // What a checksum import produces: the digest is known, the size is not.
     imported.size_known = false;
-    let real = entry("a.txt", 4096, "abc123");
+    let real = entry("a.txt", 4096, "0123456789abcdef0123456789abcdef");
 
     let diff = diff_reports(
         &report(vec![imported]),
@@ -67,8 +67,8 @@ fn an_unknown_size_does_not_make_matching_hashes_look_corrupt() {
 #[test]
 fn a_known_size_mismatch_is_still_reported_as_corrupt() {
     let diff = diff_reports(
-        &report(vec![entry("a.txt", 10, "abc123")]),
-        &report(vec![entry("a.txt", 20, "abc123")]),
+        &report(vec![entry("a.txt", 10, "0123456789abcdef0123456789abcdef")]),
+        &report(vec![entry("a.txt", 20, "0123456789abcdef0123456789abcdef")]),
         &DiffOptions::default(),
     )
     .expect("diff");
@@ -79,10 +79,10 @@ fn a_known_size_mismatch_is_still_reported_as_corrupt() {
 fn two_unknown_sizes_are_not_claimed_as_unchanged() {
     // With no shared algorithm and no size, there is no evidence at all;
     // "unchanged" would be a guess dressed up as a verdict.
-    let mut left = entry("a.txt", 0, "abc123");
+    let mut left = entry("a.txt", 0, "0123456789abcdef0123456789abcdef");
     left.size_known = false;
     left.hashes.clear();
-    let mut right = entry("a.txt", 0, "abc123");
+    let mut right = entry("a.txt", 0, "0123456789abcdef0123456789abcdef");
     right.size_known = false;
     right.hashes.clear();
 

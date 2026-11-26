@@ -49,7 +49,17 @@ class _HistoryPageState extends State<HistoryPage> {
         ? trimmed.substring(0, trimmed.length - 1)
         : trimmed;
     final String last = withoutTrailing.split(RegExp(r'[/\\]')).last;
-    final String decoded = Uri.decodeComponent(last);
+    // A local directory name is not a URI component. `100% done` or `a%zz`
+    // would throw ArgumentError here and take the whole history page down, so
+    // decoding is attempted and simply skipped when the name is not encoded.
+    String decoded = last;
+    try {
+      decoded = Uri.decodeComponent(last);
+    } on ArgumentError {
+      decoded = last;
+    } on FormatException {
+      decoded = last;
+    }
     final int colon = decoded.lastIndexOf(':');
     final String name = colon >= 0 ? decoded.substring(colon + 1) : decoded;
     return name.isEmpty ? root : name;

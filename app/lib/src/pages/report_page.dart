@@ -120,8 +120,10 @@ class _ReportPageState extends State<ReportPage> {
             format: format,
             locale: locale,
           );
-          final String name =
-              'batchhash-report.${format.fileExtension}';
+          // The format name is part of the file name because two formats share
+          // an extension: `txt` and `tree` both write `.txt`, so an extension-only
+          // name would silently overwrite the first file with the second.
+          final String name = 'batchhash-report-${format.name}.${format.fileExtension}';
           final String? saved = await PlatformPickers.saveBytes(
             suggestedName: name,
             bytes: utf8.encode(text),
@@ -183,12 +185,21 @@ class _ReportPageState extends State<ReportPage> {
   Future<void> _openContainingFolder(String path) async {
     final String directory = _parentDirectory(path);
     try {
+      final ProcessResult result;
       if (Platform.isMacOS) {
-        await Process.run('open', <String>[directory]);
+        result = await Process.run('open', <String>[directory]);
       } else if (Platform.isWindows) {
-        await Process.run('explorer', <String>[directory]);
+        result = await Process.run('explorer', <String>[directory]);
       } else {
-        await Process.run('xdg-open', <String>[directory]);
+        result = await Process.run('xdg-open', <String>[directory]);
+      }
+      // A non-zero exit means the opener refused (no file manager, a path that
+      // vanished). Reporting success there leaves the user clicking a button
+      // that does nothing.
+      if (result.exitCode != 0) {
+        throw StateError(
+          'opener exited with ${result.exitCode}: ${result.stderr}',
+        );
       }
     } catch (error) {
       if (!mounted) {
@@ -206,8 +217,13 @@ class _ReportPageState extends State<ReportPage> {
 
   String _parentDirectory(String path) {
     final int separator = path.lastIndexOf(RegExp(r'[/\\]'));
-    if (separator <= 0) {
+    if (separator < 0) {
       return path;
+    }
+    if (separator == 0) {
+      // `/report.json` lives in the filesystem root; its parent is `/`, not the
+      // empty string, which would make the opener fail on a relative path.
+      return path.substring(0, 1);
     }
     return path.substring(0, separator);
   }

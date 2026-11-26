@@ -469,6 +469,23 @@ fn csv_neutralize(value: &str) -> String {
     value.to_string()
 }
 
+/// Undo [`csv_neutralize`] for a cell read back from a report CSV.
+///
+/// The neutralizer prefixes an apostrophe to dangerous cells, so the importer
+/// has to remove it again or every `-notes.txt` would round-trip as a name with
+/// a leading apostrophe. The apostrophe is stripped only when what follows
+/// would have been neutralized: a file genuinely named with a leading
+/// apostrophe keeps it, because that name was never altered on export.
+fn csv_denetralize(value: &str) -> &str {
+    let Some(rest) = value.strip_prefix('\'') else {
+        return value;
+    };
+    match rest.chars().next() {
+        Some('=') | Some('+') | Some('-') | Some('@') | Some('\t') | Some('\r') => rest,
+        _ => value,
+    }
+}
+
 fn export_csv(report: &Report) -> Result<String, ExportError> {
     let mut writer = csv::WriterBuilder::new()
         .terminator(csv::Terminator::Any(b'\n'))
@@ -1178,7 +1195,7 @@ fn import_csv(bytes: &[u8]) -> Result<Report, ImportError> {
         let record = record.map_err(|error| ImportError::Csv(error.to_string()))?;
         check_entry_cap(entries.len() + 1)?;
 
-        let path = record.get(path_index).unwrap_or("").to_string();
+        let path = csv_denetralize(record.get(path_index).unwrap_or("")).to_string();
         validate_relative_path(&path).map_err(|source| ImportError::Path {
             path: path.clone(),
             source,

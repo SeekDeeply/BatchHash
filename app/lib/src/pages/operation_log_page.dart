@@ -273,7 +273,7 @@ class _OperationLogPageState extends State<OperationLogPage> {
           report: _asReport(chosen),
           format: reportFormat,
         );
-        extension = reportFormat.fileExtension;
+        extension = '.${reportFormat.fileExtension}';
       } else if (options.format == ExportFormat.json) {
         body = encodeLogAsJson(chosen);
         extension = '.json';
@@ -437,7 +437,13 @@ class _OperationLogPageState extends State<OperationLogPage> {
               const SizedBox(height: 12),
               TextField(
                 key: const ValueKey<String>('operation-log-search'),
-                onChanged: (String value) => setState(() => _query = value),
+                // Clearing the selection keeps export honest: the ticks refer to
+                // rows of the previous filter, and exporting them after the list
+                // changed would send files the user can no longer see.
+                onChanged: (String value) => setState(() {
+                  _query = value;
+                  _selected.clear();
+                }),
                 decoration: InputDecoration(
                   hintText: context.strings('log.searchHint'),
                   prefixIcon: const Icon(Icons.search),
@@ -456,7 +462,10 @@ class _OperationLogPageState extends State<OperationLogPage> {
                   OutlinedButton.icon(
                     key: const ValueKey<String>('operation-log-sort'),
                     onPressed: () =>
-                        setState(() => _newestFirst = !_newestFirst),
+                        setState(() {
+                          _newestFirst = !_newestFirst;
+                          _selected.clear();
+                        }),
                     icon: const Icon(Icons.swap_vert),
                     label: Text(
                       context.strings(
@@ -517,7 +526,10 @@ class _OperationLogPageState extends State<OperationLogPage> {
           ],
           onChanged: (String? value) {
             if (value != null) {
-              setState(() => _typeFilter = value);
+              setState(() {
+                _typeFilter = value;
+                _selected.clear();
+              });
             }
           },
         ),
@@ -550,7 +562,10 @@ class _OperationLogPageState extends State<OperationLogPage> {
           ],
           onChanged: (String? value) {
             if (value != null) {
-              setState(() => _statusFilter = value);
+              setState(() {
+                _statusFilter = value;
+                _selected.clear();
+              });
             }
           },
         ),

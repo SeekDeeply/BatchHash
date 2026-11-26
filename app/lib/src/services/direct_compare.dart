@@ -47,6 +47,12 @@ class DirectComparator {
     }
     final FileSystemEntityType leftType = await _typeOf(leftPath);
     final FileSystemEntityType rightType = await _typeOf(rightPath);
+    if (leftType == FileSystemEntityType.notFound &&
+        rightType == FileSystemEntityType.notFound) {
+      // Both sides missing is not a comparison, it is a typo. Reporting every
+      // row as "unknown" would look like a successful diff of two empty inputs.
+      throw StateError('neither path exists: $leftPath, $rightPath');
+    }
     if (leftType != rightType) {
       // FileSystemEntityType has no `name`; spell the two cases out so the
       // message is readable instead of printing an enum toString.
@@ -100,7 +106,10 @@ class DirectComparator {
       algorithms: algorithms,
     )) {
       for (final BatchEntry entry in progress.entries) {
-        if (entry.hashes.isNotEmpty) {
+        // A failed entry carries no hashes but still has to reach the report:
+        // dropping it made an unreadable file vanish from the comparison
+        // instead of showing up as an error the user can act on.
+        if (entry.hashes.isNotEmpty || entry.status != EntryStatus.ok) {
           latest[entry.path] = entry;
         }
       }

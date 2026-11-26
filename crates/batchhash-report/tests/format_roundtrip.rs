@@ -18,6 +18,9 @@ use batchhash_types::{
 };
 use indexmap::IndexMap;
 
+/// A syntactically valid MD5 digest: the report rejects anything else.
+const DIGEST: &str = "0123456789abcdef0123456789abcdef";
+
 fn digest(algorithm: AlgorithmId, fill: char) -> String {
     fill.to_string().repeat(algorithm.hex_len())
 }
@@ -807,7 +810,7 @@ fn csv_neutralizes_a_formula_like_filename() {
         1,
         vec![(
             AlgorithmId::Md5,
-            "0123456789abcdef0123456789abcdef".to_string(),
+            DIGEST.to_string(),
         )],
     );
     hostile.path = "=HYPERLINK(\"http://evil\",\"click\")".to_string();
@@ -830,4 +833,56 @@ fn csv_neutralizes_a_formula_like_filename() {
         csv.contains("'=HYPERLINK"),
         "the cell is neutralized with an apostrophe: {csv}"
     );
+}
+
+/// A neutralized cell must come back unchanged on import.
+///
+/// Neutralizing is an export-side defence; if the importer kept the apostrophe,
+/// a file named `-notes.txt` would come back as `'-notes.txt` and every CSV
+/// round trip would corrupt the paths it was supposed to preserve.
+#[test]
+fn a_dash_prefixed_path_survives_a_csv_round_trip() {
+    let mut report = Report::new(
+        "/data/media",
+        RootKind::Fs,
+        true,
+        vec![AlgorithmId::Md5],
+        HardwareReport::default(),
+    );
+    report.entries = vec![
+        record("-notes.txt", 3, vec![(AlgorithmId::Md5, DIGEST)]),
+        record("plain.txt", 3, vec![(AlgorithmId::Md5, DIGEST)]),
+    ];
+    report.recompute_summary();
+
+    let csv = export_report(&report, ReportFormat::Csv).expect("export");
+    assert!(csv.contains("'-notes.txt"), "the cell is neutralized: {csv}");
+
+    let imported = import_report(csv.as_bytes(), ReportFormat::Csv).expect("import");
+    let paths: Vec<&str> = imported
+        .entries
+        .iter()
+        .map(|entry| entry.path.as_str())
+        .collect();
+    assert_eq!(paths, vec!["-notes.txt", "plain.txt"]);
+}
+
+/// A path that genuinely starts with an apostrophe keeps it.
+#[test]
+fn a_real_leading_apostrophe_is_not_stripped() {
+    let mut report = Report::new(
+        "/data/media",
+        RootKind::Fs,
+        true,
+        vec![AlgorithmId::Md5],
+        HardwareReport::default(),
+    );
+    // Not a dangerous cell, so the exporter leaves it alone; the importer must
+    // therefore leave it alone too.
+    report.entries = vec![record("'quoted.txt", 3, vec![(AlgorithmId::Md5, DIGEST)])];
+    report.recompute_summary();
+
+    let csv = export_report(&report, ReportFormat::Csv).expect("export");
+    let imported = import_report(csv.as_bytes(), ReportFormat::Csv).expect("import");
+    assert_eq!(imported.entries[0].path, "'quoted.txt");
 }

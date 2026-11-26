@@ -181,10 +181,14 @@ String _relativePath(String path, String root) {
   if (normalized == base) {
     return '';
   }
-  if (!normalized.startsWith(base)) {
+  // The boundary must be a separator. A bare prefix test makes `/tmp/foo`
+  // swallow `/tmp/foobar/x.txt`, producing `bar/x.txt` and misplacing the file
+  // in the tree. A root that already ends in `/` needs no extra one.
+  final String prefix = base.endsWith('/') ? base : '$base/';
+  if (!normalized.startsWith(prefix)) {
     return normalized;
   }
-  final String rest = normalized.substring(base.length);
+  final String rest = normalized.substring(prefix.length);
   return rest.replaceFirst(RegExp(r'^/+'), '');
 }
 

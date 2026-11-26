@@ -808,10 +808,7 @@ fn csv_neutralizes_a_formula_like_filename() {
     let mut hostile = record(
         "=HYPERLINK(\"http://evil\",\"click\")",
         1,
-        vec![(
-            AlgorithmId::Md5,
-            DIGEST.to_string(),
-        )],
+        vec![(AlgorithmId::Md5, DIGEST.to_string())],
     );
     hostile.path = "=HYPERLINK(\"http://evil\",\"click\")".to_string();
     let mut report = Report::new(
@@ -850,13 +847,16 @@ fn a_dash_prefixed_path_survives_a_csv_round_trip() {
         HardwareReport::default(),
     );
     report.entries = vec![
-        record("-notes.txt", 3, vec![(AlgorithmId::Md5, DIGEST)]),
-        record("plain.txt", 3, vec![(AlgorithmId::Md5, DIGEST)]),
+        record("-notes.txt", 3, vec![(AlgorithmId::Md5, DIGEST.to_string())]),
+        record("plain.txt", 3, vec![(AlgorithmId::Md5, DIGEST.to_string())]),
     ];
     report.recompute_summary();
 
     let csv = export_report(&report, ReportFormat::Csv).expect("export");
-    assert!(csv.contains("'-notes.txt"), "the cell is neutralized: {csv}");
+    assert!(
+        csv.contains("'-notes.txt"),
+        "the cell is neutralized: {csv}"
+    );
 
     let imported = import_report(csv.as_bytes(), ReportFormat::Csv).expect("import");
     let paths: Vec<&str> = imported
@@ -879,7 +879,7 @@ fn a_real_leading_apostrophe_is_not_stripped() {
     );
     // Not a dangerous cell, so the exporter leaves it alone; the importer must
     // therefore leave it alone too.
-    report.entries = vec![record("'quoted.txt", 3, vec![(AlgorithmId::Md5, DIGEST)])];
+    report.entries = vec![record("'quoted.txt", 3, vec![(AlgorithmId::Md5, DIGEST.to_string())])];
     report.recompute_summary();
 
     let csv = export_report(&report, ReportFormat::Csv).expect("export");

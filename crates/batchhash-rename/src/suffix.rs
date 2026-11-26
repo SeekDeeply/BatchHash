@@ -501,7 +501,7 @@ pub fn format_filename(
     }
 
     let fixed = format!("{suffix}{extension}");
-    let truncated_stem = truncate_stem_for_limits(&stem, &fixed, max_utf16_len);
+    let truncated_stem = truncate_stem_for_limits(stem, &fixed, max_utf16_len);
     if truncated_stem.is_empty() {
         return Err(SuffixError::NameTooLong {
             utf16_len: candidate_len,
@@ -689,7 +689,7 @@ fn render_group(
         return Ok(candidate);
     }
     let fixed = format!("{suffix}{extension}");
-    let truncated_stem = truncate_stem_for_limits(&stem, &fixed, max_utf16_len);
+    let truncated_stem = truncate_stem_for_limits(stem, &fixed, max_utf16_len);
     if truncated_stem.is_empty() {
         return Err(SuffixError::NameTooLong {
             utf16_len: candidate_len,
@@ -993,6 +993,16 @@ fn compare_multi_suffix<M: DigestLookup>(parsed: &ParsedSuffix, hashes: &M) -> E
     }
 }
 
+/// Compare the suffix already on [name] with the digests in [hashes].
+///
+/// [hashes] is any digest source: a `HashMap` from an ad-hoc computation, or the
+/// `IndexMap` a [`FileEntry`] carries. The lookup is abstracted rather than
+/// taking one concrete map type so neither caller has to copy its digests into
+/// the other shape just to ask this question.
+///
+/// The comparison is prefix based because a suffix is a truncation, and it never
+/// guesses: a bare token whose width fits several algorithms is reported as
+/// ambiguous rather than being assigned to whichever one happens to match first.
 pub fn compare_existing_suffix<M: DigestLookup>(name: &str, hashes: &M) -> ExistingSuffixVerdict {
     let parsed = match parse_filename(name) {
         SuffixParseResult::NotSuffixed => return ExistingSuffixVerdict::Absent,

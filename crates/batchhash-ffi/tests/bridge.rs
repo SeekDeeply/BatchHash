@@ -33,6 +33,8 @@ fn batch_request(root: &std::path::Path, algorithms: Vec<&str>) -> BatchRequestD
         apply_renames: false,
         log_db: None,
         overwrite: false,
+        clear_suffix: false,
+        strict: false,
     }
 }
 

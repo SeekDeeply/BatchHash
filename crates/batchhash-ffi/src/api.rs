@@ -2240,6 +2240,8 @@ mod tests {
             apply_renames: false,
             log_db: None,
             overwrite: false,
+            clear_suffix: false,
+            strict: false,
         }
     }
 

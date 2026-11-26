@@ -132,6 +132,8 @@ fn an_invalid_batch_request_fails_at_start() {
         apply_renames: false,
         log_db: None,
         overwrite: false,
+        clear_suffix: false,
+        strict: false,
     };
     let error = jobs::start_batch(request).expect_err("an unknown algorithm must fail fast");
     assert_eq!(error.kind, "invalid_request");

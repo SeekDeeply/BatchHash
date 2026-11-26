@@ -328,7 +328,9 @@ fn a_file_that_changes_while_being_read_is_reported_as_unstable() {
         }
         Err(error) => {
             assert!(
-                error.to_string().contains("changed while it was being read"),
+                error
+                    .to_string()
+                    .contains("changed while it was being read"),
                 "unexpected error: {error}"
             );
         }

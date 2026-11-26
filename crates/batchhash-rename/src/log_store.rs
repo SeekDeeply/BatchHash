@@ -472,6 +472,82 @@ pub struct LogStore {
     conn: Connection,
 }
 
+/// Largest archive document accepted by [`LogStore::import_archive_json`].
+///
+/// An imported archive is untrusted input: it arrives as a file the user was
+/// given, so a hostile or corrupted document must not be able to make the
+/// process allocate without bound before any validation runs.
+pub const MAX_ARCHIVE_IMPORT_BYTES: usize = 64 * 1024 * 1024;
+
+/// Largest number of operations a single archive may carry.
+///
+/// The byte limit alone is not enough: a compact archive can still describe
+/// millions of operations, each of which becomes a row and a potential rename.
+pub const MAX_ARCHIVE_OPERATIONS: usize = 500_000;
+
+/// Reject a rename operation whose paths cannot be trusted.
+///
+/// The log stores paths that were once produced by this tool, but an archive is
+/// a document a user can be handed by someone else, so its contents are input,
+/// not fact. A record that escapes the batch root, crosses into another
+/// directory, or carries a NUL byte would turn "undo" into "rename any file on
+/// the machine". Everything here is a rejection rather than a repair: a
+/// suspicious record is reported, never silently corrected.
+pub fn validate_rename_operation_paths(
+    batch_root: &str,
+    original_path: &str,
+    new_path: &str,
+) -> Result<(), LogError> {
+    for (label, value) in [
+        ("batch root", batch_root),
+        ("original path", original_path),
+        ("new path", new_path),
+    ] {
+        if value.contains('\0') {
+            return Err(LogError::InvalidStoredValue(format!(
+                "{label} contains a NUL byte"
+            )));
+        }
+        if value.trim().is_empty() {
+            return Err(LogError::InvalidStoredValue(format!("{label} is empty")));
+        }
+    }
+    for (label, value) in [
+        ("original path", original_path),
+        ("new path", new_path),
+    ] {
+        if value.split(['/', '\\']).any(|segment| segment == "..") {
+            return Err(LogError::InvalidStoredValue(format!(
+                "{label} escapes its directory: {value}"
+            )));
+        }
+    }
+    // A rename moves a name inside one directory. Anything else is a move, and
+    // undoing a move is not what this log promises to do.
+    let original_parent = Path::new(original_path).parent();
+    let new_parent = Path::new(new_path).parent();
+    if original_parent != new_parent {
+        return Err(LogError::InvalidStoredValue(format!(
+            "rename would move between directories: {original_path} -> {new_path}"
+        )));
+    }
+    // The paths must stay inside the recorded root. A plain prefix test is not
+    // enough: "/data/root" is a prefix of "/data/root_evil", and `starts_with`
+    // compares whole components, which is exactly the boundary needed here.
+    let root = Path::new(batch_root);
+    for (label, value) in [
+        ("original path", original_path),
+        ("new path", new_path),
+    ] {
+        if !Path::new(value).starts_with(root) {
+            return Err(LogError::InvalidStoredValue(format!(
+                "{label} is outside the batch root {batch_root}: {value}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl LogStore {
     /// Open (or create) a database file and apply pending schema migrations.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, LogError> {
@@ -718,7 +794,19 @@ impl LogStore {
         if !self.batch_exists(batch_id)? {
             return Err(LogError::BatchNotFound(batch_id.to_string()));
         }
+        // The paths come out of the log, but the log can be fed by an imported
+        // archive, so they are validated here rather than trusted. A rejected
+        // batch fails whole: an undo plan that silently drops rows would leave
+        // the caller believing the batch was reversed.
+        let root = self.load_batch(batch_id)?.root;
         let mut operations = self.load_operations(Some(batch_id))?;
+        for operation in &operations {
+            validate_rename_operation_paths(
+                &root,
+                &operation.original_path,
+                &operation.new_path,
+            )?;
+        }
         operations.reverse();
         let mut rows = Vec::new();
         for operation in operations {
@@ -879,6 +967,25 @@ impl LogStore {
                 archive.version
             )));
         }
+        // Refuse an archive that is too large to be a rename log before any of
+        // it becomes rows: the count is what turns bytes into work.
+        let total_operations: usize = archive.batches.iter().map(|e| e.operations.len()).sum();
+        if total_operations > MAX_ARCHIVE_OPERATIONS {
+            return Err(LogError::InvalidStoredValue(format!(
+                "archive carries {total_operations} operations, more than the {MAX_ARCHIVE_OPERATIONS} allowed"
+            )));
+        }
+        // Validate every path before writing anything. A partial import would
+        // leave the log holding records that can never be undone safely.
+        for entry in &archive.batches {
+            for operation in &entry.operations {
+                validate_rename_operation_paths(
+                    &entry.batch.root,
+                    &operation.original_path,
+                    &operation.new_path,
+                )?;
+            }
+        }
         let mut summary = ImportSummary::default();
         for entry in &archive.batches {
             if self.batch_exists(&entry.batch.id)? {
@@ -913,6 +1020,14 @@ impl LogStore {
     /// malformed document (a truncated download, a hand edit) is distinguishable
     /// from a valid archive that conflicts with local state.
     pub fn import_archive_json(&mut self, text: &str) -> Result<ImportSummary, LogError> {
+        // Checked before parsing: serde would happily build a huge tree from a
+        // hostile document, and the limit is meaningless once that has happened.
+        if text.len() > MAX_ARCHIVE_IMPORT_BYTES {
+            return Err(LogError::InvalidStoredValue(format!(
+                "archive is {} bytes, more than the {MAX_ARCHIVE_IMPORT_BYTES} allowed",
+                text.len()
+            )));
+        }
         let archive: RenameLogArchive = serde_json::from_str(text).map_err(|error| {
             LogError::InvalidStoredValue(format!("cannot parse archive: {error}"))
         })?;
@@ -1031,6 +1146,13 @@ pub fn apply_undo_with_cancel(
     fs: &dyn RenameFs,
     should_stop: &(dyn Fn() -> bool + Sync),
 ) -> Result<Vec<UndoResult>, LogError> {
+    // Re-check against the batch root the store recorded, not the root the
+    // plan carries: the plan may have travelled through a caller that built it
+    // by hand, while the store is the authority on where this batch lives.
+    let root = store.load_batch(&plan.batch_id)?.root;
+    for row in &plan.rows {
+        validate_rename_operation_paths(&root, &row.from, &row.to)?;
+    }
     let mut results = Vec::with_capacity(plan.rows.len());
     let mut undone = Vec::new();
     for row in &plan.rows {
@@ -1894,6 +2016,123 @@ mod tests {
             1,
             "an idempotent import must not duplicate operations"
         );
+    }
+
+    /// Build a one-batch archive whose single operation uses the given paths.
+    fn archive_with_paths(root: &str, original: &str, new: &str) -> RenameLogArchive {
+        let mut batch = test_batch();
+        batch.root = root.to_string();
+        RenameLogArchive {
+            version: ARCHIVE_VERSION,
+            tool: None,
+            tool_version: None,
+            exported_at: now_rfc3339(),
+            batches: vec![ArchivedBatch {
+                operations: vec![ArchivedOperation {
+                    batch_id: batch.id.clone(),
+                    original_path: original.to_string(),
+                    new_path: new.to_string(),
+                    algorithm: AlgorithmId::Blake3,
+                    full_hash: digest(),
+                    suffix: "ABCDEF".to_string(),
+                    op_type: RenameOperation::TYPE_RENAME.to_string(),
+                    result: None,
+                    error_kind: None,
+                    created_at: now_rfc3339(),
+                    undone_at: None,
+                    state: "applied".to_string(),
+                }],
+                batch,
+            }],
+        }
+    }
+
+    #[test]
+    fn import_rejects_paths_that_escape_the_batch_root() {
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        // A record that climbs out of the root would let an undo rename files
+        // the batch never owned.
+        let archive = archive_with_paths(
+            "/tmp/root",
+            "/tmp/root/../../etc/hosts",
+            "/tmp/root/../../etc/hosts[ABCDEF]",
+        );
+        let error = store.import_archive(&archive).expect_err("traversal");
+        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+    }
+
+    #[test]
+    fn import_rejects_a_rename_that_crosses_directories() {
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let archive = archive_with_paths(
+            "/tmp/root",
+            "/tmp/root/a.txt",
+            "/tmp/root/sub/a[ABCDEF].txt",
+        );
+        let error = store.import_archive(&archive).expect_err("cross-directory");
+        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+    }
+
+    #[test]
+    fn import_rejects_a_root_prefix_that_only_looks_like_the_root() {
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        // "/tmp/root_evil" starts with "/tmp/root" as a string but is a
+        // different directory; the component-wise check must catch that.
+        let archive = archive_with_paths(
+            "/tmp/root",
+            "/tmp/root_evil/a.txt",
+            "/tmp/root_evil/a[ABCDEF].txt",
+        );
+        let error = store.import_archive(&archive).expect_err("prefix forgery");
+        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+    }
+
+    #[test]
+    fn import_accepts_a_well_formed_record() {
+        // The guard must not reject the normal case, or it would break undo.
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let archive = archive_with_paths(
+            "/tmp/root",
+            "/tmp/root/a.txt",
+            "/tmp/root/a[ABCDEF].txt",
+        );
+        let summary = store.import_archive(&archive).expect("valid archive");
+        assert_eq!(summary.batches, 1);
+        assert_eq!(summary.operations, 1);
+    }
+
+    #[test]
+    fn import_rejects_an_oversized_document_before_parsing() {
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let oversized = "x".repeat(MAX_ARCHIVE_IMPORT_BYTES + 1);
+        let error = store
+            .import_archive_json(&oversized)
+            .expect_err("oversized document");
+        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+    }
+
+    #[test]
+    fn import_rejects_an_archive_with_too_many_operations() {
+        let mut store = LogStore::open_in_memory().expect("in-memory store");
+        let mut archive = archive_with_paths(
+            "/tmp/root",
+            "/tmp/root/a.txt",
+            "/tmp/root/a[ABCDEF].txt",
+        );
+        // One template operation, cloned past the cap: the count is the limit,
+        // not the byte size.
+        let template = archive.batches[0].operations[0].clone();
+        archive.batches[0].operations = vec![template; MAX_ARCHIVE_OPERATIONS + 1];
+        let error = store.import_archive(&archive).expect_err("too many operations");
+        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+    }
+
+    #[test]
+    fn validate_rejects_nul_bytes_and_empty_paths() {
+        assert!(validate_rename_operation_paths("/tmp/root", "/tmp/root/a\0b", "/tmp/root/c")
+            .is_err());
+        assert!(validate_rename_operation_paths("/tmp/root", "", "/tmp/root/c").is_err());
+        assert!(validate_rename_operation_paths("", "/tmp/root/a", "/tmp/root/c").is_err());
     }
 
     #[test]

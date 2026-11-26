@@ -57,6 +57,7 @@ dependencies = [
  "batchhash-report",
  "batchhash-types",
  "chrono",
+ "libc",
  "tempfile",
  "thiserror",
 ]

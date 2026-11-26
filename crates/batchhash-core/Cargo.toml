@@ -17,3 +17,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Only the Unix-only scan test needs it, to create a FIFO and a socket.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2.159"

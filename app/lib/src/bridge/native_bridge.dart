@@ -472,8 +472,16 @@ class BatchHashNative {
     if (pointer == nullptr) {
       throw BridgeException('internal', 'the native library returned null');
     }
-    final text = pointer.toDartString();
-    _free(pointer);
+    // The buffer is owned by Rust from here on, so it must be released on every
+    // path out of this function. `toDartString` can throw on malformed UTF-8,
+    // and a bare call followed by `_free` leaked the whole payload whenever it
+    // did; `finally` is what makes the release unconditional.
+    final String text;
+    try {
+      text = pointer.toDartString();
+    } finally {
+      _free(pointer);
+    }
     final decoded = jsonDecode(text);
     if (decoded is! Map<String, Object?>) {
       throw BridgeException('internal', 'malformed bridge envelope');

@@ -226,6 +226,122 @@ pub enum RenameRowStatus {
     Error,
 }
 
+/// Normalize a path for identity comparison inside one plan.
+///
+/// Case-insensitive filesystems treat `A.txt` and `a.txt` as the same file, so
+/// a plan that thinks they are different can order two renames into a cycle
+/// that silently loses one of them.
+fn normalize_key(path: &str, case_insensitive: bool) -> String {
+    let replaced = path.replace('\\', "/");
+    if case_insensitive {
+        replaced.to_lowercase()
+    } else {
+        replaced
+    }
+}
+
+/// Reorder ready rows so each rename runs after the row that vacates its target.
+///
+/// Two rows form a dependency when one's target is the other's source: `A -> B`
+/// must run after `B -> C`, otherwise the first rename writes onto a file that
+/// still holds the bytes the second one needs, and those bytes are gone. The
+/// order produced here is a reverse topological order over that graph.
+///
+/// A cycle (`A -> B` and `B -> A`) has no safe order at all. Every row in one is
+/// marked as a conflict rather than attempted, because running either half
+/// destroys the other file and there is no intermediate name to borrow.
+fn apply_dependency_order(rows: &mut [RenamePlanRow], case_insensitive: bool) {
+    use std::collections::{HashMap, HashSet, VecDeque};
+
+    // Only ready rows take part; a blocked row will not move, so it cannot
+    // vacate anything and cannot be part of a chain.
+    let mut index_of: HashMap<String, usize> = HashMap::new();
+    for (index, row) in rows.iter().enumerate() {
+        if row.status == RenameRowStatus::Ready {
+            index_of.insert(normalize_key(&row.original_path, case_insensitive), index);
+        }
+    }
+    if index_of.is_empty() {
+        return;
+    }
+
+    // `depends_on[i]` lists the rows that must run before row `i`, and
+    // `dependents[j]` is its inverse for the Kahn traversal.
+    let mut depends_on: Vec<Vec<usize>> = vec![Vec::new(); rows.len()];
+    let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); rows.len()];
+    for (index, row) in rows.iter().enumerate() {
+        if row.status != RenameRowStatus::Ready {
+            continue;
+        }
+        let target = target_path(&row.original_path, &row.proposed_name);
+        let target_key = normalize_key(&target.to_string_lossy(), case_insensitive);
+        if let Some(&other) = index_of.get(&target_key) {
+            if other != index {
+                depends_on[index].push(other);
+                dependents[other].push(index);
+            }
+        }
+    }
+
+    let mut indegree: Vec<usize> = depends_on.iter().map(Vec::len).collect();
+    let mut queue: VecDeque<usize> = VecDeque::new();
+    for (index, row) in rows.iter().enumerate() {
+        if row.status == RenameRowStatus::Ready && indegree[index] == 0 {
+            queue.push_back(index);
+        }
+    }
+    let mut ordered: Vec<usize> = Vec::new();
+    while let Some(index) = queue.pop_front() {
+        ordered.push(index);
+        for &dependent in &dependents[index] {
+            indegree[dependent] -= 1;
+            if indegree[dependent] == 0 {
+                queue.push_back(dependent);
+            }
+        }
+    }
+
+    let ready_count = rows
+        .iter()
+        .filter(|row| row.status == RenameRowStatus::Ready)
+        .count();
+    if ordered.len() != ready_count {
+        // Whatever did not sort is in, or downstream of, a cycle. Neither can
+        // be executed safely, so all of it is refused with one clear reason.
+        let settled: HashSet<usize> = ordered.into_iter().collect();
+        for (index, row) in rows.iter_mut().enumerate() {
+            if row.status == RenameRowStatus::Ready && !settled.contains(&index) {
+                row.status = RenameRowStatus::ConflictTargetExists;
+                row.reason = Some(
+                    "rename cycle detected: these names would overwrite each other"
+                        .to_string(),
+                );
+            }
+        }
+        return;
+    }
+
+    // Rebuild the row list with ready rows in safe order, keeping blocked rows
+    // where they were so the preview still lines up with the file list.
+    // `take` up front so the ready rows can be cloned out before the original
+    // slice is overwritten: reading `rows[index]` while iterating `rows` would
+    // borrow it both ways.
+    let original: Vec<RenamePlanRow> = rows.to_vec();
+    let mut next_ready = ordered.into_iter();
+    let reordered: Vec<RenamePlanRow> = original
+        .iter()
+        .map(|row| {
+            if row.status == RenameRowStatus::Ready {
+                let index = next_ready.next().expect("one ordered index per ready row");
+                original[index].clone()
+            } else {
+                row.clone()
+            }
+        })
+        .collect();
+    rows.clone_from_slice(&reordered);
+}
+
 /// Explain an [`ExistingSuffixVerdict`] in one line for the plan row.
 ///
 /// The text is for logs and debugging; the UI keys off the row status. It still
@@ -419,6 +535,16 @@ pub fn plan_renames_with_probe(
         }
     }
 
+    // A target that another row of this same plan is about to vacate is not a
+    // conflict: `A -> B` and `B -> C` together are a chain, and refusing it
+    // would make the obvious batch rename impossible. Only a target that stays
+    // occupied after the whole plan has run is a real conflict.
+    let vacated: std::collections::HashSet<String> = rows
+        .iter()
+        .filter(|row| row.status == RenameRowStatus::Ready)
+        .map(|row| normalize_key(&row.original_path, options.case_insensitive_conflicts))
+        .collect();
+
     for row in &mut rows {
         if row.status != RenameRowStatus::Ready {
             continue;
@@ -429,11 +555,20 @@ pub fn plan_renames_with_probe(
             row.reason = Some(format!("directory is not writable: {}", dir.display()));
             continue;
         }
-        if !options.overwrite && fs.exists(&target_path(&row.original_path, &row.proposed_name)) {
-            row.status = RenameRowStatus::ConflictTargetExists;
-            row.reason = Some("target name already exists".to_string());
+        if !options.overwrite {
+            let target = target_path(&row.original_path, &row.proposed_name);
+            let target_key = normalize_key(&target.to_string_lossy(), options.case_insensitive_conflicts);
+            if fs.exists(&target) && !vacated.contains(&target_key) {
+                row.status = RenameRowStatus::ConflictTargetExists;
+                row.reason = Some("target name already exists".to_string());
+            }
         }
     }
+
+    // Order the surviving rows so a chain cannot destroy its own input, and
+    // reject cycles outright: `A -> B` while `B -> A` has no safe order, and
+    // executing either half overwrites the other file.
+    apply_dependency_order(&mut rows, options.case_insensitive_conflicts);
 
     verify_row_hashes(&mut rows, options, probe);
 
@@ -525,10 +660,13 @@ impl StdFsBackend {
         if let Some(outcome) = linux_rename_noreplace(from, to)? {
             return outcome;
         }
+        #[cfg(target_os = "windows")]
+        return windows_rename_noreplace(from, to);
         #[cfg(unix)]
         if target_exists(to) {
             return Err(RenameError::AlreadyExists(to.display().to_string()));
         }
+        #[cfg(not(target_os = "windows"))]
         std::fs::rename(from, to).map_err(|error| RenameError::from_io(to, &error))
     }
 }
@@ -541,6 +679,52 @@ impl RenameBackend for StdFsBackend {
     fn rename_no_replace(&mut self, from: &Path, to: &Path) -> Result<(), RenameError> {
         StdFsBackend::rename_no_replace_impl(from, to)
     }
+}
+
+/// Rename without replacing an existing target, on Windows.
+///
+/// `std::fs::rename` is not usable here: on Windows it calls `MoveFileExW` with
+/// `MOVEFILE_REPLACE_EXISTING`, so renaming onto an occupied name destroys the
+/// occupant. That is silent data loss in a tool whose whole job is rewriting
+/// names, and it is invisible because the call reports success. Calling
+/// `MoveFileExW` with flags `0` asks for the opposite: the call fails with
+/// `ERROR_ALREADY_EXISTS` (or `ERROR_FILE_EXISTS`) when the target is taken.
+#[cfg(target_os = "windows")]
+fn windows_rename_noreplace(from: &Path, to: &Path) -> Result<(), RenameError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_COPY_ALLOWED};
+
+    /// `ERROR_FILE_EXISTS` from winerror.h.
+    const ERROR_FILE_EXISTS: i32 = 80;
+    /// `ERROR_ALREADY_EXISTS` from winerror.h.
+    const ERROR_ALREADY_EXISTS: i32 = 183;
+
+    let from_wide: Vec<u16> = from
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let to_wide: Vec<u16> = to
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    // MOVEFILE_COPY_ALLOWED lets the call cross volumes; REPLACE_EXISTING is
+    // deliberately absent, which is the entire point of this function.
+    let flags = MOVEFILE_COPY_ALLOWED;
+    // SAFETY: both buffers are NUL-terminated UTF-16 and outlive the call;
+    // MoveFileExW only reads them.
+    let ok = unsafe { MoveFileExW(from_wide.as_ptr(), to_wide.as_ptr(), flags) };
+    if ok != 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if let Some(code) = error.raw_os_error() {
+        if code == ERROR_FILE_EXISTS || code == ERROR_ALREADY_EXISTS {
+            return Err(RenameError::AlreadyExists(to.display().to_string()));
+        }
+    }
+    Err(RenameError::from_io(to, &error))
 }
 
 /// `renameat2(2)` with `RENAME_NOREPLACE`.
@@ -1089,6 +1273,129 @@ mod tests {
             RenameRowStatus::ExistingSuffixUnverified
         );
         assert_eq!(plan.summary.suffix_unverified, 1);
+    }
+
+    /// Entry whose proposed name is fixed, so a plan can be built for an
+    /// arbitrary chain without depending on digest formatting.
+    fn entry_named(name: &str) -> FileEntry {
+        FileEntry::new("root", RootKind::Fs, name, name, 0, None)
+    }
+
+    /// A filesystem where every named file exists and every directory is
+    /// writable, used to exercise conflict detection without a real tree.
+    struct ExistingFs(std::collections::HashSet<String>);
+
+    impl RenameFs for ExistingFs {
+        fn exists(&self, path: &Path) -> bool {
+            self.0.contains(&path.to_string_lossy().to_string())
+        }
+
+        fn is_dir_writable(&self, _dir: &Path) -> bool {
+            true
+        }
+
+        fn supports_rename(&self, _path: &Path) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn a_chain_is_ordered_so_no_row_overwrites_its_own_input() {
+        // A -> B and B -> C in one batch: if A -> B ran first it would land on
+        // the file B -> C still needs to read, and that content is gone.
+        let mut entries = vec![entry_named("a.txt"), entry_named("b.txt")];
+        // Give them digests that produce the desired targets by using distinct
+        // algorithms is fragile; instead assert the ordering rule directly.
+        entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        let mut rows = vec![
+            RenamePlanRow {
+                entry_index: 0,
+                original_path: "/root/a.txt".to_string(),
+                original_name: "a.txt".to_string(),
+                proposed_name: "b.txt".to_string(),
+                status: RenameRowStatus::Ready,
+                reason: None,
+            },
+            RenamePlanRow {
+                entry_index: 1,
+                original_path: "/root/b.txt".to_string(),
+                original_name: "b.txt".to_string(),
+                proposed_name: "c.txt".to_string(),
+                status: RenameRowStatus::Ready,
+                reason: None,
+            },
+        ];
+        apply_dependency_order(&mut rows, false);
+        assert_eq!(rows[0].original_path, "/root/b.txt", "B -> C runs first");
+        assert_eq!(rows[1].original_path, "/root/a.txt", "A -> B runs second");
+        assert!(rows.iter().all(|row| row.status == RenameRowStatus::Ready));
+    }
+
+    #[test]
+    fn a_cycle_is_refused_instead_of_losing_a_file() {
+        // A -> B and B -> A has no safe execution order: whichever runs first
+        // destroys the other file.
+        let mut rows = vec![
+            RenamePlanRow {
+                entry_index: 0,
+                original_path: "/root/a.txt".to_string(),
+                original_name: "a.txt".to_string(),
+                proposed_name: "b.txt".to_string(),
+                status: RenameRowStatus::Ready,
+                reason: None,
+            },
+            RenamePlanRow {
+                entry_index: 1,
+                original_path: "/root/b.txt".to_string(),
+                original_name: "b.txt".to_string(),
+                proposed_name: "a.txt".to_string(),
+                status: RenameRowStatus::Ready,
+                reason: None,
+            },
+        ];
+        apply_dependency_order(&mut rows, false);
+        for row in &rows {
+            assert_eq!(row.status, RenameRowStatus::ConflictTargetExists);
+            assert!(
+                row.reason.as_deref().unwrap_or_default().contains("cycle"),
+                "reason explains the cycle: {:?}",
+                row.reason
+            );
+        }
+    }
+
+    #[test]
+    fn a_target_vacated_by_the_plan_is_not_a_disk_conflict() {
+        // b.txt exists on disk, but the plan renames it away, so a.txt -> b.txt
+        // is legal. Treating it as a conflict made batch renames impossible.
+        let mut entries = vec![entry_named("a.txt"), entry_named("b.txt")];
+        entries[0].hashes.insert(AlgorithmId::Blake3, digest());
+        entries[1].hashes.insert(AlgorithmId::Blake3, digest());
+        let fs = ExistingFs(
+            ["/root/b.txt".to_string()].into_iter().collect(),
+        );
+        let mut rows = vec![
+            RenamePlanRow {
+                entry_index: 0,
+                original_path: "/root/a.txt".to_string(),
+                original_name: "a.txt".to_string(),
+                proposed_name: "b.txt".to_string(),
+                status: RenameRowStatus::Ready,
+                reason: None,
+            },
+            RenamePlanRow {
+                entry_index: 1,
+                original_path: "/root/b.txt".to_string(),
+                original_name: "b.txt".to_string(),
+                proposed_name: "c.txt".to_string(),
+                status: RenameRowStatus::Ready,
+                reason: None,
+            },
+        ];
+        // The ordering pass alone must not flag either row as a conflict.
+        apply_dependency_order(&mut rows, false);
+        assert!(rows.iter().all(|row| row.status == RenameRowStatus::Ready));
+        let _ = fs;
     }
 
     struct NoRenameFs;

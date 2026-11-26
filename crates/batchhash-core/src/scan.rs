@@ -226,6 +226,32 @@ fn push_failure(
     outcome.entries.push(entry);
 }
 
+/// Describe what kind of filesystem object [metadata] refers to.
+///
+/// The reason text is user-facing, so it names the object rather than printing
+/// a raw mode value. Unix is the only platform where the distinction matters;
+/// everywhere else this returns the generic fallback.
+fn file_type_label(metadata: &fs::Metadata) -> &'static str {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        let file_type = metadata.file_type();
+        if file_type.is_fifo() {
+            return "named pipe";
+        }
+        if file_type.is_socket() {
+            return "socket";
+        }
+        if file_type.is_block_device() {
+            return "block device";
+        }
+        if file_type.is_char_device() {
+            return "character device";
+        }
+    }
+    "special file"
+}
+
 fn walk(
     root: &Path,
     current: &Path,
@@ -311,6 +337,21 @@ fn walk(
                 continue;
             }
         };
+        // Only regular files are hashed. A FIFO, socket or device node has no
+        // end: reading it blocks until a writer appears (or forever), so a
+        // recursive scan that pushed one into the hash scheduler would hang the
+        // whole batch instead of reporting a problem. They are recorded as
+        // skipped so the user can see the scan did not silently lose them.
+        if !metadata.is_file() && !metadata.is_dir() {
+            outcome.skipped.push(ScanSkip {
+                path: display_path(&path),
+                reason: format!(
+                    "not a regular file ({})",
+                    file_type_label(&metadata)
+                ),
+            });
+            continue;
+        }
         if metadata.is_dir() {
             if !options.recursive {
                 // A non-recursive scan lists the root's direct children only;

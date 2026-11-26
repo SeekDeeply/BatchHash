@@ -20,5 +20,14 @@ rusqlite = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.159"
 
+# Windows has no renameat2 equivalent in std: `std::fs::rename` maps to
+# MoveFileExW *with* MOVEFILE_REPLACE_EXISTING, so it silently overwrites. The
+# raw call is the only way to ask for the non-replacing behaviour.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }
+
 [dev-dependencies]
 tempfile = { workspace = true }

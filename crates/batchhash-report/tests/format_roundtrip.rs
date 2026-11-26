@@ -847,7 +847,11 @@ fn a_dash_prefixed_path_survives_a_csv_round_trip() {
         HardwareReport::default(),
     );
     report.entries = vec![
-        record("-notes.txt", 3, vec![(AlgorithmId::Md5, DIGEST.to_string())]),
+        record(
+            "-notes.txt",
+            3,
+            vec![(AlgorithmId::Md5, DIGEST.to_string())],
+        ),
         record("plain.txt", 3, vec![(AlgorithmId::Md5, DIGEST.to_string())]),
     ];
     report.recompute_summary();
@@ -879,7 +883,11 @@ fn a_real_leading_apostrophe_is_not_stripped() {
     );
     // Not a dangerous cell, so the exporter leaves it alone; the importer must
     // therefore leave it alone too.
-    report.entries = vec![record("'quoted.txt", 3, vec![(AlgorithmId::Md5, DIGEST.to_string())])];
+    report.entries = vec![record(
+        "'quoted.txt",
+        3,
+        vec![(AlgorithmId::Md5, DIGEST.to_string())],
+    )];
     report.recompute_summary();
 
     let csv = export_report(&report, ReportFormat::Csv).expect("export");

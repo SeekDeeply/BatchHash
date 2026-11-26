@@ -190,4 +190,37 @@ void main() {
       expect(data.isEmpty, isFalse);
     });
   });
+
+
+  group('encodeTextCompareAsTxt', () {
+    TextCompareExportData sample() => const TextCompareExportData(
+      leftText: 'alpha',
+      rightText: 'bravo',
+      leftHashes: <({String algorithm, String digest})>[
+        (algorithm: 'md5', digest: 'aaa'),
+      ],
+      rightHashes: <({String algorithm, String digest})>[
+        (algorithm: 'md5', digest: 'bbb'),
+      ],
+      identical: false,
+      differingLines: 1,
+      totalLines: 1,
+    );
+
+    test('writes the side label as a header, not the record itself', () {
+      final String out = encodeTextCompareAsTxt(sample());
+      // Without braces, Dart interpolates the whole record via toString() and
+      // appends '.label' literally, so the header becomes
+      // '--- (hashes: ..., label: LEFT, text: alpha).label ---'.
+      expect(out, contains('--- LEFT ---'));
+      expect(out, contains('--- RIGHT ---'));
+      expect(out, isNot(contains('.label')));
+    });
+
+    test('writes each digest as algorithm: digest', () {
+      final String out = encodeTextCompareAsTxt(sample());
+      expect(out, contains('md5: aaa'));
+      expect(out, contains('md5: bbb'));
+    });
+  });
 }

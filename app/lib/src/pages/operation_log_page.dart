@@ -103,6 +103,9 @@ class _OperationLogPageState extends State<OperationLogPage> {
       setState(() {
         _entries = entries;
         _error = null;
+        // Row indices refer to the list that was just replaced, so any tick
+        // from the previous load would select a different operation.
+        _selected.clear();
       });
     } catch (error) {
       if (!mounted) {

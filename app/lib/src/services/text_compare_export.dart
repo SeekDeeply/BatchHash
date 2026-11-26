@@ -150,7 +150,10 @@ String encodeTextCompareAsTxt(TextCompareExportData data) {
     (label: 'LEFT', text: data.leftText, hashes: data.leftHashes),
     (label: 'RIGHT', text: data.rightText, hashes: data.rightHashes),
   ]) {
-    out.writeln('--- $side.label ---');
+    // Braces are required: without them `$side` interpolates the whole record
+    // via toString() and `.label` is appended as literal text, so the header
+    // reads `--- (hashes: [...], label: LEFT, ...).label ---`.
+    out.writeln('--- ${side.label} ---');
     if (side.hashes.isEmpty) {
       out.writeln('(no digests)');
     } else {

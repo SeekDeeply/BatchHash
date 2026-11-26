@@ -978,11 +978,18 @@ fn compare_multi_suffix<M: DigestLookup>(parsed: &ParsedSuffix, hashes: &M) -> E
         return ExistingSuffixVerdict::Unparseable;
     }
     // Report the first part as the representative algorithm: the verdict type
-    // names one, and for a fully matching group any of them is accurate.
-    let algorithm = parsed.parts[0].algorithm.unwrap_or_default();
+    // names one, and for a fully matching group any of them is accurate. Every
+    // part was already proven to carry an algorithm above, so the lookup cannot
+    // fail here.
+    let Some(first) = parsed.parts.first() else {
+        return ExistingSuffixVerdict::Unparseable;
+    };
+    let Some(algorithm) = first.algorithm else {
+        return ExistingSuffixVerdict::Unparseable;
+    };
     ExistingSuffixVerdict::Matches {
         algorithm,
-        hex: parsed.parts[0].hex.to_ascii_lowercase(),
+        hex: first.hex.to_ascii_lowercase(),
     }
 }
 

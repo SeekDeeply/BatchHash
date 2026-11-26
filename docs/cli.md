@@ -103,7 +103,7 @@ batchhash suffix undo --db rename.db --batch <batch-id>
 - 执行阶段只调用 `rename(2)`，失败时**不会**退化为复制+删除。
 - 日志状态机：`pending → applied → undone | conflict`；撤销时若目标名被占用或
   原文件已消失，该行标记为 `conflict` 而不是覆盖。
-- `--prefix` 写入 `blake3:ABCDE` 形式（自描述 token）。
+- `--prefix` 写入 `blake3-ABCDE` 形式（自描述 token）。旧版本的 `blake3:ABCDE` 仍可解析。
 
 ### extract
 

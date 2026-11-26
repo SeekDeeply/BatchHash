@@ -117,7 +117,7 @@ pub use log_store::{LogStore, BatchRecord, RenameOperation, OperationState, Undo
 * Filename format `original[ABCDE].ext`, 4..=16 hex chars, upper default, extension preserved,
   no-extension files get `filename[ABCDE]`, long-name precheck counts UTF-16 units and truncates
   the stem (never the hash), already-suffixed names are skipped (`SuffixParseResult::Parsed`).
-  Optional `prefix:` form (`original[blake3:ABCDE].ext`) is off by default.
+  Optional prefixed form (`original[blake3-ABCDE].ext`) is off by default. The legacy `[blake3:ABCDE]` still parses.
 * `recommended_length(count)` table: ≤100 → 5, ≤1,000 → 8, ≤100,000 → 10, else 12.
   `collision_probability(count, len)` is the birthday estimate over `4^len` (hex alphabet, 16^len).
 * Planner is pure: `plan_renames(entries, options, fs: &dyn RenameFs)` produces dry-run rows with

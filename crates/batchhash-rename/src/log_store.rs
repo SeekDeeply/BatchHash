@@ -505,7 +505,8 @@ pub fn validate_rename_operation_paths(
     // outside it, and refusing to undo it would strand real history. Import is
     // where the check earns its keep, because there the root comes from the
     // same untrusted document as the paths.
-    if !batch_root.trim().is_empty() && !Path::new(original_path).starts_with(Path::new(batch_root)) {
+    if !batch_root.trim().is_empty() && !Path::new(original_path).starts_with(Path::new(batch_root))
+    {
         return Err(LogError::InvalidStoredValue(format!(
             "original path is outside the batch root {batch_root}: {original_path}"
         )));
@@ -519,10 +520,7 @@ pub fn validate_rename_operation_paths(
 /// out of its directory, cross into another one, or carry a NUL byte. They are
 /// separate from root containment so a caller can apply the part it can prove.
 pub fn validate_rename_path_safety(original_path: &str, new_path: &str) -> Result<(), LogError> {
-    for (label, value) in [
-        ("original path", original_path),
-        ("new path", new_path),
-    ] {
+    for (label, value) in [("original path", original_path), ("new path", new_path)] {
         if value.contains('\0') {
             return Err(LogError::InvalidStoredValue(format!(
                 "{label} contains a NUL byte"
@@ -1950,7 +1948,7 @@ mod tests {
         let batch = test_batch();
         store.create_batch(&batch).expect("create batch");
         let first = insert_applied(&mut store, &batch.id, "/tmp/root/a.txt", "/tmp/root/a[ABCDEF].txt");
-        let second = insert_pending(&mut store, &batch.id, "/tmp/b.txt", "/tmp/b[ABCDEF].txt");
+        let second = insert_pending(&mut store, &batch.id, "/tmp/root/b.txt", "/tmp/root/b[ABCDEF].txt");
         store.mark_undone(first).expect("mark undone");
 
         let archive = store.export_archive(None).expect("export");

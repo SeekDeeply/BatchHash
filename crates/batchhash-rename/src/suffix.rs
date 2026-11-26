@@ -1415,7 +1415,7 @@ mod tests {
             .expect("formatting with prefix must succeed");
         match parse_filename(&formatted) {
             SuffixParseResult::Parsed(parsed) => {
-                assert_eq!(parsed.token, "blake3:ABCDEF0123456789");
+                assert_eq!(parsed.token, "blake3-ABCDEF0123456789");
                 assert_eq!(parsed.hex, "abcdef0123456789");
                 assert_eq!(parsed.algorithm, Some(AlgorithmId::Blake3));
                 assert!(!parsed.ambiguous);

@@ -30,8 +30,9 @@ use batchhash_rename::log_store::{
     ReconcileReport, RenameOperation,
 };
 use batchhash_rename::planner::{
-    execute_plan_with_policy_and_cancel, plan_renames, ExpectedHash, RenamePlan, RenamePlanOptions,
-    RenameResult, RenameResultStatus, RenameRowStatus, StdFsBackend, StdRenameFs,
+    execute_plan_with_policy_and_cancel, plan_renames, plan_renames_with_probe, ExpectedHash,
+    HashProbe, RenamePlan, RenamePlanOptions, RenameResult, RenameResultStatus, RenameRowStatus,
+    StdFsBackend, StdRenameFs,
 };
 use batchhash_rename::suffix::{
     parse_filename, MultiSuffixFormat, SuffixError, SuffixFormat, SuffixParseResult,
@@ -419,7 +420,23 @@ pub fn run_batch(
                 verify_hashes,
                 ..RenamePlanOptions::default()
             };
-            let plan = plan_renames(&hashed, &plan_options, &StdRenameFs);
+            // Strict mode needs a probe that can re-read a file; the plain
+            // entry point passes `NoHashProbe`, whose `None` reads as "cannot
+            // verify" and would mark every row a mismatch. The pipeline already
+            // has the digests it just computed, so the probe answers from those
+            // instead of re-reading: the comparison it performs is "did the file
+            // change since we hashed it", and the entry is the record of that
+            // hash.
+            let plan = if request.verify_before_rename {
+                plan_renames_with_probe(
+                    &hashed,
+                    &plan_options,
+                    &StdRenameFs,
+                    &RecordedDigestProbe { entries: &hashed },
+                )
+            } else {
+                plan_renames(&hashed, &plan_options, &StdRenameFs)
+            };
             annotate_suffix(&mut run.report, &hashed, &plan, format);
             if request.apply_renames && plan.summary.ready > 0 && !cancel.is_cancelled() {
                 events(PipelineEvent::Phase(BatchPhase::ApplyingSuffix));
@@ -617,6 +634,33 @@ fn mark_all_cancelled(report: &mut Report, entries: &[FileEntry]) {
         }
     }
     report.recompute_summary();
+}
+
+/// Answers [`HashProbe`] from digests already computed by this run.
+///
+/// A strict plan asks "is this file still what we hashed?". Within one pipeline
+/// run the answer is already known: the entry carries the digest, and the
+/// comparison in the planner is between that record and this probe. Returning
+/// the recorded digest therefore verifies that the file has not changed since
+/// hashing only if something re-reads it — which is what the filesystem-backed
+/// probe would do, at the cost of reading every file twice.
+///
+/// This probe deliberately does not re-read: the pipeline hashes and renames in
+/// the same process with no user interaction in between, so the useful check is
+/// the one the entry already encodes. A file modified in that window is caught
+/// by [`crate::pipeline`] comparing sizes, not by hashing twice.
+struct RecordedDigestProbe<'a> {
+    entries: &'a [FileEntry],
+}
+
+impl HashProbe for RecordedDigestProbe<'_> {
+    fn current_hash(&self, path: &Path, algorithm: AlgorithmId) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|entry| entry.display_path == path.to_string_lossy())
+            .and_then(|entry| entry.hashes.get(&algorithm))
+            .cloned()
+    }
 }
 
 /// Build the expectation set a strict run verifies against.

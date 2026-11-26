@@ -1992,7 +1992,7 @@ mod tests {
         assert_eq!(operations.len(), 2);
         assert_eq!(operations[0].state, OperationState::Undone);
         assert_eq!(operations[1].state, OperationState::Pending);
-        assert_eq!(operations[1].original_path, "/tmp/b.txt");
+        assert_eq!(operations[1].original_path, "/tmp/root/b.txt");
         let _ = second;
         let _ = temp;
     }
@@ -2070,7 +2070,10 @@ mod tests {
             "/tmp/root/../../etc/hosts[ABCDEF]",
         );
         let error = store.import_archive(&archive).expect_err("traversal");
-        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+        assert!(
+            matches!(error, LogError::InvalidStoredValue(_)),
+            "got {error:?}"
+        );
     }
 
     #[test]
@@ -2082,7 +2085,10 @@ mod tests {
             "/tmp/root/sub/a[ABCDEF].txt",
         );
         let error = store.import_archive(&archive).expect_err("cross-directory");
-        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+        assert!(
+            matches!(error, LogError::InvalidStoredValue(_)),
+            "got {error:?}"
+        );
     }
 
     #[test]
@@ -2096,7 +2102,10 @@ mod tests {
             "/tmp/root_evil/a[ABCDEF].txt",
         );
         let error = store.import_archive(&archive).expect_err("prefix forgery");
-        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+        assert!(
+            matches!(error, LogError::InvalidStoredValue(_)),
+            "got {error:?}"
+        );
     }
 
     #[test]
@@ -2120,7 +2129,10 @@ mod tests {
         let error = store
             .import_archive_json(&oversized)
             .expect_err("oversized document");
-        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+        assert!(
+            matches!(error, LogError::InvalidStoredValue(_)),
+            "got {error:?}"
+        );
     }
 
     #[test]
@@ -2136,7 +2148,10 @@ mod tests {
         let template = archive.batches[0].operations[0].clone();
         archive.batches[0].operations = vec![template; MAX_ARCHIVE_OPERATIONS + 1];
         let error = store.import_archive(&archive).expect_err("too many operations");
-        assert!(matches!(error, LogError::InvalidStoredValue(_)), "got {error:?}");
+        assert!(
+            matches!(error, LogError::InvalidStoredValue(_)),
+            "got {error:?}"
+        );
     }
 
     #[test]

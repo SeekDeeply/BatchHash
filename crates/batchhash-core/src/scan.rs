@@ -345,10 +345,7 @@ fn walk(
         if !metadata.is_file() && !metadata.is_dir() {
             outcome.skipped.push(ScanSkip {
                 path: display_path(&path),
-                reason: format!(
-                    "not a regular file ({})",
-                    file_type_label(&metadata)
-                ),
+                reason: format!("not a regular file ({})", file_type_label(&metadata)),
             });
             continue;
         }

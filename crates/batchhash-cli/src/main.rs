@@ -611,6 +611,7 @@ fn cmd_scan_diff(args: &[String]) -> CliResult<()> {
             "quiet",
         ],
     )?;
+    reject_conflicting(&parsed, "case-sensitive", "case-insensitive")?;
     if parsed.positional.len() != 2 {
         return Err("scan-diff requires a report file and a directory".to_string());
     }

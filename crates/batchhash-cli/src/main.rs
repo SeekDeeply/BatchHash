@@ -327,8 +327,18 @@ fn execute_pipeline(request: &BatchRequest, progress: bool) -> CliResult<BatchRu
                 return;
             }
             let rounded = sample.percent as u64;
-            let previous = last_percent.swap(rounded, Ordering::Relaxed);
-            if rounded >= previous + 10 || sample.percent >= 100.0 {
+            // Emit on the first sample and then every ten points. The old test
+            // `rounded >= previous + 10` compared against a counter that starts at
+            // 0, so nothing printed until 10% and a short run showed no meter at
+            // all; the compare-exchange also keeps only one thread printing when
+            // samples race.
+            let previous = last_percent.load(Ordering::Relaxed);
+            let due = previous == 0 || rounded >= previous + 10 || sample.percent >= 100.0;
+            if due
+                && last_percent
+                    .compare_exchange(previous, rounded, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+            {
                 eprint!(
                     "\r  {:>3}%  {}/{}  {}   ",
                     rounded, sample.completed, sample.total, sample.current_path
@@ -381,6 +391,14 @@ fn cmd_hash(args: &[String]) -> CliResult<()> {
     };
     if let Some(root) = parsed.value("root") {
         request.root = root.to_string();
+    }
+    // Options that only make sense with `--write-suffix` were silently ignored
+    // without it, so a user who passed `--length 8` and forgot the switch got a
+    // report with no suffixes and no explanation.
+    for flag in ["suffix-algo", "length", "case", "prefix"] {
+        if parsed.value(flag).is_some() || parsed.switch(flag) {
+            require_flag(&parsed, flag, "write-suffix")?;
+        }
     }
     if parsed.switch("write-suffix") {
         let suffix =
@@ -452,9 +470,49 @@ fn cmd_hash(args: &[String]) -> CliResult<()> {
 // report / diff / scan-diff
 // ---------------------------------------------------------------------------
 
+/// Reject two flags that contradict each other.
+///
+/// Passing both used to silently honour whichever the code checked first, which
+/// is indistinguishable from the other being ignored. Saying so is the only way
+/// the user learns their command did not mean what they wrote.
+fn reject_conflicting(parsed: &Parsed, left: &str, right: &str) -> CliResult<()> {
+    if parsed.switch(left) && parsed.switch(right) {
+        return Err(format!("--{left} and --{right} cannot be used together"));
+    }
+    Ok(())
+}
+
+/// Reject a flag that only makes sense together with another.
+fn require_flag(parsed: &Parsed, flag: &str, requires: &str) -> CliResult<()> {
+    if parsed.switch(flag) && !parsed.switch(requires) {
+        return Err(format!("--{flag} requires --{requires}"));
+    }
+    Ok(())
+}
+
 fn read_report(path: &Path, forced: Option<ReportFormat>) -> CliResult<Report> {
-    let bytes =
-        fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    // Read at most one byte past the import limit. `fs::read` pulls the whole
+    // file into memory first, so pointing `--report` at a multi-gigabyte file (or
+    // a device node) exhausted memory before any size check could run. The extra
+    // byte is what makes "too large" distinguishable from "exactly at the limit".
+    let limit = batchhash_types::MAX_IMPORT_BYTES;
+    let limit_usize = usize::try_from(limit).unwrap_or(usize::MAX);
+    let bytes = {
+        use std::io::Read;
+        let file = fs::File::open(path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let mut buffer = Vec::new();
+        file.take(limit.saturating_add(1))
+            .read_to_end(&mut buffer)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        if buffer.len() > limit_usize {
+            return Err(format!(
+                "{} is larger than the {limit} byte import limit",
+                path.display()
+            ));
+        }
+        buffer
+    };
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -569,6 +627,12 @@ fn cmd_scan_diff(args: &[String]) -> CliResult<()> {
         ..ScanOptions::default()
     };
     let run = execute_pipeline(&request, terminal_progress(&parsed))?;
+    if run.cancelled {
+        // A cancelled scan has only part of the directory, so the diff would
+        // report every unvisited file as missing from the right side. That reads
+        // as "these files were deleted", which is the opposite of what happened.
+        return Err("the scan was cancelled; the diff would be incomplete".to_string());
+    }
     let options = DiffOptions::new()
         .with_case_sensitive(parse_case_sensitivity(&parsed))
         .with_generated_at(now_rfc3339())
@@ -963,13 +1027,16 @@ fn print_help() {
 }
 
 fn print_algorithms() {
+    // 18 columns for the display name: the longest registered one is
+    // "GOST R 34.11-94" at 15 characters, and a narrower column silently pushed
+    // every later column right on that one row.
     println!(
-        "{:<10} {:<14} {:>4} {:>5}  SUFFIX",
+        "{:<10} {:<18} {:>4} {:>5}  SUFFIX",
         "ID", "DISPLAY", "HEX", "CRYPTO"
     );
     for spec in batchhash_types::REGISTRY.iter() {
         println!(
-            "{:<10} {:<14} {:>4} {:>5}  {}",
+            "{:<10} {:<18} {:>4} {:>5}  {}",
             spec.stable_id,
             spec.display_name,
             spec.hex_len,

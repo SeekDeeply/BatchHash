@@ -627,8 +627,13 @@ fn emit_hashing_progress(
 ) {
     let percent = snapshot.percent;
     let rounded = percent as u64;
-    let previous = last_percent.swap(rounded, Ordering::Relaxed);
-    if rounded != previous || percent >= 100.0 || snapshot.completed == snapshot.total {
+    // Monotonic: the counter only ever moves forward. A plain `swap` let two
+    // racing samples write an older percentage last, so the bar visibly jumped
+    // backwards; `fetch_max` keeps the highest value seen and reports what this
+    // call actually raised it to.
+    let previous = last_percent.fetch_max(rounded, Ordering::Relaxed);
+    let advanced = rounded > previous;
+    if advanced || percent >= 100.0 || snapshot.completed == snapshot.total {
         events(PipelineEvent::Progress(BatchProgress {
             phase: BatchPhase::Hashing,
             completed: snapshot.completed,

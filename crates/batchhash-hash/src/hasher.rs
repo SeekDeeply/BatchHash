@@ -555,8 +555,34 @@ pub(crate) fn compute_hashes_streaming(
     mut sink: Option<&mut dyn HashSink>,
     cancel: Option<&AtomicBool>,
 ) -> Result<IndexMap<AlgorithmId, String>, HashError> {
+    compute_hashes_streaming_sized(reader, options, sink, cancel, None)
+}
+
+/// [`compute_hashes_streaming`] with a hint about how large the input is.
+///
+/// [expected_len] lets the buffer be sized to the file instead of the configured
+/// maximum. It is only a hint: the reader may produce more or fewer bytes, and
+/// the loop is unchanged, so a wrong hint costs nothing but a suboptimal buffer.
+pub(crate) fn compute_hashes_streaming_sized(
+    reader: &mut dyn Read,
+    options: &HashOptions,
+    mut sink: Option<&mut dyn HashSink>,
+    cancel: Option<&AtomicBool>,
+    expected_len: Option<u64>,
+) -> Result<IndexMap<AlgorithmId, String>, HashError> {
     let mut hashers = create_hashers(options)?;
-    let mut buffer = vec![0u8; options.effective_buffer_size()];
+    // Allocate what the stream can actually fill. A 4 MiB buffer for a 1 KiB file
+    // is 4 MiB of zeroing per file, and a folder of small files spends more time
+    // in the allocator than in the hashers. The upper bound is still the
+    // configured size, so large files keep their throughput.
+    let configured = options.effective_buffer_size();
+    let buffer_len = match expected_len {
+        // Clamp to the file size, but never below the minimum: a tiny buffer
+        // multiplies syscalls on a file that is merely small, not trivial.
+        Some(len) => configured.min(usize::try_from(len).unwrap_or(usize::MAX).max(MIN_BUFFER_SIZE)),
+        None => configured,
+    };
+    let mut buffer = vec![0u8; buffer_len];
     loop {
         if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
             return Err(HashError::Cancelled);
@@ -593,7 +619,10 @@ pub(crate) fn compute_hashes_path(
     // between `open` and the metadata calls is still caught: the metadata
     // describes the open file, not the name.
     let before = file.metadata()?;
-    let digests = compute_hashes_streaming(&mut file, options, sink, cancel)?;
+    // The metadata already carries the length, so the buffer can be sized to the
+    // file rather than to the configured maximum.
+    let digests =
+        compute_hashes_streaming_sized(&mut file, options, sink, cancel, Some(before.len()))?;
     let after = file.metadata()?;
     if file_changed(&before, &after) {
         return Err(HashError::Unstable);

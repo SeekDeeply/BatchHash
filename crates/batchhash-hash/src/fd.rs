@@ -23,7 +23,9 @@ use std::sync::atomic::AtomicBool;
 use batchhash_types::AlgorithmId;
 use indexmap::IndexMap;
 
-use crate::hasher::{compute_hashes_streaming, HashError, HashOptions, HashSink};
+use crate::hasher::{
+    compute_hashes_streaming, compute_hashes_streaming_sized, HashError, HashOptions, HashSink,
+};
 
 /// Compute hashes for a region of an already-open Unix file descriptor.
 ///
@@ -71,7 +73,7 @@ pub(crate) fn compute_hashes_from_fd_streaming(
     match length {
         Some(limit) => {
             let mut limited = file.take(limit);
-            compute_hashes_streaming(&mut limited, options, sink, cancel)
+            compute_hashes_streaming_sized(&mut limited, options, sink, cancel, Some(limit))
         }
         None => compute_hashes_streaming(&mut file, options, sink, cancel),
     }

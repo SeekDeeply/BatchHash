@@ -100,8 +100,29 @@ const releaseReplacement = isKotlin
   ? 'signingConfig = signingConfigs.getByName("release")'
   : 'signingConfig signingConfigs.release';
 
-if (!debugPattern.test(patched)) {
-  fail('could not find the debug signingConfig reference to replace in ' + target);
+// The replacement must hit exactly one line, inside the release build type.
+// A bare `replace` matches the first occurrence anywhere: if the debug build
+// type came first the release artifact stayed debug-signed while the script
+// reported success, which is the worst possible outcome for a signing patch.
+const matches = patched.match(new RegExp(debugPattern.source, 'g')) ?? [];
+if (matches.length !== 1) {
+  fail(
+    'expected exactly one debug signingConfig reference in ' + target +
+      ', found ' + matches.length +
+      '. Review the generated template and update scripts/patch-android-signing.mjs.',
+  );
+}
+// Locate the `release { ... }` block and confirm the reference sits inside it.
+const releaseBlock = isKotlin
+  ? /release\s*\{[\s\S]*?\n\s{4}\}/
+  : /release\s*\{[\s\S]*?\n\s{4}\}/;
+const block = patched.match(releaseBlock);
+if (block === null || !debugPattern.test(block[0])) {
+  fail(
+    'the debug signingConfig reference is not inside the release build type in ' +
+      target +
+      '; refusing to patch blind.',
+  );
 }
 patched = patched.replace(debugPattern, releaseReplacement);
 

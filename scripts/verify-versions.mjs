@@ -163,6 +163,32 @@ if (!cargo || !pubspec || !log) {
 }
 
 console.log('cargo workspace version: ' + cargo);
+// The Flutter UI shows this string in About; nothing else ties it to the
+// pubspec, so a bump that updated one and not the other shipped a build that
+// claims the wrong version in its own window title.
+const appInfoPath = 'app/lib/src/app_info.dart';
+try {
+  const appInfo = read(appInfoPath);
+  const declared = appInfo.match(/kAppVersion\s*=\s*'([^']+)'/);
+  if (declared === null) {
+    fail(appInfoPath + ' has no kAppVersion literal');
+  }
+  const uiVersion = declared[1].split('+')[0];
+  if (uiVersion !== pubspec) {
+    fail(
+      appInfoPath + ' kAppVersion is ' + uiVersion +
+        ' but app/pubspec.yaml is ' + pubspec +
+        ' — update both in the same commit',
+    );
+  }
+  console.log('kAppVersion: ' + uiVersion);
+} catch (error) {
+  if (String(error).includes('kAppVersion')) {
+    throw error;
+  }
+  fail('cannot read ' + appInfoPath + ': ' + error);
+}
+
 console.log('pubspec version: ' + pubspec);
 console.log('changelog top heading: ' + log.top);
 
@@ -183,7 +209,11 @@ if (!log.unreleased && log.top !== cargo) {
 const lockfileVersions = [];
 try {
   const lock = read('Cargo.lock');
-  const re = /\[\[package\]\]\nname = "(batchhash-[a-z]+)"\nversion = "([^"]+)"/g;
+  // `\r?\n` because a Windows checkout can normalise line endings, and the
+  // crate-name class has to allow digits and hyphens: `batchhash-` is followed by
+  // names such as `xxh3-64`, which `[a-z]+` never matched, so those crates were
+  // silently skipped and a stale lockfile passed.
+  const re = /\[\[package\]\]\r?\nname = "(batchhash-[a-z0-9-]+)"\r?\nversion = "([^"]+)"/g;
   let match;
   while ((match = re.exec(lock)) !== null) {
     lockfileVersions.push({ name: match[1], version: match[2] });
@@ -199,6 +229,11 @@ if (staleLock.length > 0) {
       ' but the workspace version is ' + cargo +
       ' — update Cargo.lock before pushing (CI builds with --locked)',
   );
+}
+// A regex that matches nothing would let every later check pass vacuously, so
+// the count itself is asserted.
+if (lockfileVersions.length === 0) {
+  fail('Cargo.lock records no batchhash workspace crates; the version check matched nothing');
 }
 console.log('Cargo.lock workspace crates: ' + lockfileVersions.length + ' at ' + cargo);
 

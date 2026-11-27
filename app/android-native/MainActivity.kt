@@ -1,5 +1,6 @@
 package io.github.seekdeeply.batchhash
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
@@ -80,7 +81,20 @@ class MainActivity : FlutterActivity() {
                                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
                             )
                         }
-                        startActivityForResult(intent, pickTreeRequest)
+                        try {
+                            startActivityForResult(intent, pickTreeRequest)
+                        } catch (error: ActivityNotFoundException) {
+                            // A stripped ROM, a work profile or an Android TV build
+                            // can ship without DocumentsUI. The activity is never
+                            // started, so onActivityResult never runs and the result
+                            // would stay pending forever, blocking every later pick.
+                            pendingResult = null
+                            result.error(
+                                "NO_PICKER",
+                                "this device has no folder picker",
+                                null,
+                            )
+                        }
                     }
 
                     // Walks the granted tree and returns every node as a map of
@@ -160,9 +174,17 @@ class MainActivity : FlutterActivity() {
                     "closeFiles" -> {
                         val handles = call.argument<List<String>>("handles")
                         if (handles != null) {
-                            closeFiles(handles)
+                            // Queued on the same single-thread executor as
+                            // openFiles: closing on the main thread could run
+                            // before an open that is still queued, and then the
+                            // descriptor would be opened after it was closed.
+                            ioExecutor.execute {
+                                closeFiles(handles)
+                                mainHandler.post { result.success(null) }
+                            }
+                        } else {
+                            result.success(null)
                         }
-                        result.success(null)
                     }
 
                     else -> result.notImplemented()

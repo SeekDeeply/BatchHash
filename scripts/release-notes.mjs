@@ -55,15 +55,26 @@ if (body.length === 0) {
 // Demote the section's own headings so they sit under the release title.
 const demoted = body.replace(/^###\s+/gm, '#### ');
 
+// The names here must match what release.yml actually uploads, which is
+// `batchhash-<tag>-<platform>...`. The previous list named the intermediate
+// Gradle outputs (`app-release.aab`, `app-arm64-v8a-release.apk`), so every
+// download line pointed at a file that does not exist in the release.
+// `tag` is the argument this script already requires; GITHUB_REF_NAME is only a
+// fallback for the workflow, which passes the tag explicitly.
+const releaseTag = tag.startsWith('v') ? tag : 'v' + version;
+const prefix = 'batchhash-' + releaseTag;
 const assets = [
   '## 下载',
   '',
   '| 平台 | 文件 |',
   '|---|---|',
-  '| Android | app-release.aab（上架用）、app-arm64-v8a-release.apk、app-armeabi-v7a-release.apk、app-x86_64-release.apk |',
-  '| Windows | BatchHash-windows.zip（解压后运行 batchhash.exe） |',
-  '| macOS | BatchHash-macos.zip |',
-  '| Linux | BatchHash-linux.tar.gz |',
+  '| Android | ' + prefix + '-android.aab（上架用）、' +
+    prefix + '-android-arm64-v8a.apk、' +
+    prefix + '-android-armeabi-v7a.apk、' +
+    prefix + '-android-x86_64.apk |',
+  '| Windows | ' + prefix + '-windows.zip（解压后运行 batchhash.exe） |',
+  '| macOS | ' + prefix + '-macos.zip |',
+  '| Linux | ' + prefix + '-linux.tar.gz |',
   '',
   '应用标识：io.github.seekdeeply.batchhash。',
   '',

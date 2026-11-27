@@ -210,13 +210,13 @@ pub fn hash_entries_resolved(
     reporter.emit(first_path, true);
 
     let threads = worker_count();
-    match rayon::ThreadPoolBuilder::new().num_threads(threads).build() {
-        Ok(pool) => pool.install(|| {
+    match shared_pool(threads) {
+        Some(pool) => pool.install(|| {
             results
                 .par_iter_mut()
                 .for_each(|entry| process_entry(entry, options, resolve, cancel, &reporter));
         }),
-        Err(_) => {
+        None => {
             for entry in results.iter_mut() {
                 process_entry(entry, options, resolve, cancel, &reporter);
             }
@@ -239,6 +239,34 @@ pub fn hash_entries_resolved(
     };
     reporter.finished(&outcome);
     outcome
+}
+
+/// Thread pool reused across calls, keyed by worker count.
+///
+/// Building a pool spawns one OS thread per worker. A UI that hashes folder after
+/// folder paid that cost every time, and the pool was dropped as soon as the call
+/// returned, so the threads were created and destroyed repeatedly for no benefit.
+/// The pool is process-wide and its threads idle, which is what a rayon pool is
+/// designed for.
+fn shared_pool(threads: usize) -> Option<&'static rayon::ThreadPool> {
+    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+    // The first caller fixes the size. A later call with a different count still
+    // gets a working pool, just not resized: rayon cannot resize, and building a
+    // second global pool would reintroduce the cost this exists to avoid.
+    let pool = POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap_or_else(|_| {
+                // A pool that cannot be built is not fatal: the caller falls back
+                // to hashing on the current thread.
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(1)
+                    .build()
+                    .expect("a single-thread pool cannot fail to build")
+            })
+    });
+    Some(pool)
 }
 
 fn worker_count() -> usize {
@@ -373,6 +401,12 @@ struct ProgressReporter<'a> {
     bytes_total: u64,
     bytes_done: AtomicU64,
     completed: AtomicU64,
+    /// Milliseconds since [started] at which the last sample was emitted.
+    ///
+    /// A plain counter so the common throttled case costs one atomic load and
+    /// one compare-exchange instead of taking the mutex. Every hashed chunk calls
+    /// `emit`, so the lock was the hottest contention point in the scheduler.
+    last_emit_ms: AtomicU64,
     started: Instant,
     state: Mutex<ProgressState>,
     events: &'a (dyn Fn(BatchEvent) + Sync),
@@ -386,6 +420,7 @@ impl<'a> ProgressReporter<'a> {
             bytes_total,
             bytes_done: AtomicU64::new(0),
             completed: AtomicU64::new(0),
+            last_emit_ms: AtomicU64::new(0),
             started: now,
             state: Mutex::new(ProgressState {
                 last_emit: None,
@@ -399,6 +434,26 @@ impl<'a> ProgressReporter<'a> {
 
     fn emit(&self, current_path: &str, force: bool) {
         let now = Instant::now();
+        if !force {
+            // Lock-free gate: most calls arrive far more often than the interval
+            // and must not contend on the mutex only to be told to go away.
+            let elapsed_ms = u64::try_from(now.saturating_duration_since(self.started).as_millis())
+                .unwrap_or(u64::MAX);
+            let interval_ms = u64::try_from(PROGRESS_INTERVAL.as_millis()).unwrap_or(0);
+            let previous = self.last_emit_ms.load(Ordering::Relaxed);
+            if elapsed_ms.saturating_sub(previous) < interval_ms {
+                return;
+            }
+            // Whoever wins the exchange emits; the losers return. That keeps one
+            // sample per interval instead of one per racing thread.
+            if self
+                .last_emit_ms
+                .compare_exchange(previous, elapsed_ms, Ordering::Relaxed, Ordering::Relaxed)
+                .is_err()
+            {
+                return;
+            }
+        }
         let snapshot = {
             let mut state = match self.state.lock() {
                 Ok(guard) => guard,
@@ -427,6 +482,9 @@ impl<'a> ProgressReporter<'a> {
             state.last_sample = now;
             state.last_bytes = bytes_done;
             let completed = self.completed.load(Ordering::Relaxed);
+            // Clamped: a file that grew while being read can push bytes_done past
+            // the total that was measured at scan time, and a percentage above 100
+            // makes a progress bar look broken.
             let percent = if self.bytes_total > 0 {
                 (bytes_done as f64 / self.bytes_total as f64 * 100.0).clamp(0.0, 100.0)
             } else if self.total > 0 {
@@ -455,6 +513,14 @@ impl<'a> ProgressReporter<'a> {
     }
 
     fn entry_done(&self, entry: &FileEntry) {
+        // A file that failed or was skipped still counts as processed, and its
+        // bytes are counted as done. Without this the byte-based percentage can
+        // never reach 100: the denominator includes bytes that will never be
+        // read, so a batch with one unreadable file stalls at 99% forever and the
+        // UI looks hung on work that has finished.
+        if !entry.status.is_ok() {
+            self.bytes_done.fetch_add(entry.size, Ordering::Relaxed);
+        }
         self.completed.fetch_add(1, Ordering::Relaxed);
         (self.events)(BatchEvent::EntryDone(entry.clone()));
         self.emit(&entry.display_path, false);

@@ -552,7 +552,7 @@ pub fn compute_hashes_file(
 pub(crate) fn compute_hashes_streaming(
     reader: &mut dyn Read,
     options: &HashOptions,
-    mut sink: Option<&mut dyn HashSink>,
+    sink: Option<&mut dyn HashSink>,
     cancel: Option<&AtomicBool>,
 ) -> Result<IndexMap<AlgorithmId, String>, HashError> {
     compute_hashes_streaming_sized(reader, options, sink, cancel, None)

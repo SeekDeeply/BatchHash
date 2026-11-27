@@ -116,8 +116,14 @@ function workflowToolchainPins() {
     } catch {
       continue;
     }
-    for (const match of text.matchAll(/dtolnay\/rust-toolchain@([\w.]+)/g)) {
-      const channel = match[1];
+    // Actions are pinned to a 40-hex commit SHA for supply-chain safety, with the
+    // channel kept in a trailing comment. Reading only the ref would compare the
+    // SHA against the toolchain channel and always fail, so the comment is the
+    // source of truth and the ref is validated separately.
+    for (const match of text.matchAll(
+      /dtolnay\/rust-toolchain@([0-9a-f]{40})\s*#\s*([\w.]+)/g,
+    )) {
+      const channel = match[2];
       const list = pins.get(channel) ?? [];
       if (!list.includes(name)) {
         list.push(name);

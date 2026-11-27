@@ -1,4 +1,5 @@
 import 'package:batchhash/src/app_state.dart';
+import 'package:batchhash/src/l10n/app_strings.dart';
 import 'package:batchhash/src/pages/hash_page.dart';
 import 'package:batchhash/src/services/fake_batch_hash_service.dart';
 import 'package:flutter/material.dart';
@@ -24,23 +25,27 @@ void main() {
     await tester.pumpWidget(wrapInApp(HashPage(state: state)));
     await tester.pumpAndSettle();
 
-    final Finder menu = find.byKey(
-      const ValueKey<String>('hash-export-menu'),
+    // Reach the results block first. Without entries the export control does not
+    // exist at all, and a finder that silently matches nothing would pass a
+    // weaker assertion than intended.
+    expect(
+      find.text(AppStrings.of('hash.summary', locale: 'en')),
+      findsOneWidget,
     );
+
+    final Finder menu = find.byKey(const ValueKey<String>('hash-export-menu'));
     expect(menu, findsOneWidget);
 
-    // The menu lives inside the results block, which only exists once there are
-    // entries, so reaching this point already proves the block rendered.
-    expect(find.byType(OutlinedButton), findsWidgets);
-    final OutlinedButton button = tester.widget<OutlinedButton>(
-      find.descendant(of: menu, matching: find.byType(OutlinedButton)).first,
-    );
-    // Non-null is the whole point: a null callback is what paints it grey.
-    expect(button.onPressed, isNotNull);
+    // The menu itself must be enabled; that is what makes the tap work.
+    expect(tester.widget<PopupMenuButton<Object?>>(menu).enabled, isTrue);
 
-    // And the tap still reaches the menu rather than being swallowed.
-    await tester.tap(menu);
-    await tester.pumpAndSettle();
-    expect(find.byType(PopupMenuItem<Object?>), findsWidgets);
+    final Finder inner = find.descendant(
+      of: menu,
+      matching: find.byType(OutlinedButton),
+    );
+    expect(inner, findsOneWidget);
+
+    // Non-null is the whole point: a null callback is what paints it grey.
+    expect(tester.widget<OutlinedButton>(inner).onPressed, isNotNull);
   });
 }

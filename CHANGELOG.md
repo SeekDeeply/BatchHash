@@ -2,6 +2,42 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.28.0] - 2026-11-27
+
+真机验收反馈的 5 项 UI/交互修复。
+
+### 界面
+
+- **算法栏挤占视口**：勾选十几个算法后，「开始计算」与结果区被推到视口之外，页面看起来
+  没有前进路径。超过 8 个芯片时折叠，已选中的优先显示（否则勾选状态看起来丢失），
+  末尾给出「展开全部 (+N)」；「管理算法」芯片始终可见。
+- **导出按钮显示为禁用但可点**：`PopupMenuButton` 的 `child` 是 `onPressed: null` 的
+  `OutlinedButton`，而 Material 3 用 null 回调表达「禁用」，于是可用的操作被画成灰色。
+  改为非空回调 + `IgnorePointer`，点击仍交给外层菜单。
+- **字体与中文字库**：`ThemeData` 未配置 `fontFamily` 与 `fontFamilyFallback`，Flutter 只
+  带 Roboto（无 CJK 字形），Windows 上回退到宋体，Linux 上取决于 fontconfig，同一构建
+  在两台机器上渲染不同。现在按平台配置现代黑体回退栈（Windows `Segoe UI Variable` +
+  `Microsoft YaHei UI`，macOS `PingFang SC`，Linux `Noto Sans CJK SC` 等），并提供统一的
+  等宽字体栈用于摘要与路径显示。未内嵌字体，包体不变。
+
+### 交互
+
+- **文件选择期间页面仍可操作**：桌面端系统文件框对 Flutter 不是模态的，窗口持续接收点击，
+  可以重复弹出对话框、开始计算或切换 Tab。`PlatformPickers` 新增计数式守卫（嵌套选择器
+  不会提前解除），顶层壳在守卫期间用 `AbsorbPointer` 阻断输入。
+
+### 修复
+
+- **切到写名页提示「缺少哈希」**：`_availableAlgorithms()` 只看首页当前勾选的算法，而
+  `_preview()` 直接发送持久化的 `_config.algorithms`。两者与实际已算出的摘要不一致时，
+  内核把每一行都标为 `missingHash`，读起来像数据损坏而不是设置过期。现在可用算法取自
+  `entries` 中实际存在的 `hashes.keys`，下拉框、附加算法复选框与预览请求共用同一份
+  经过滤的列表；完全没有可用哈希时禁用预览并给出引导提示。
+
+### 测试
+
+- 新增算法栏折叠/展开、短列表不折叠、选中项折叠时可见、写名页算法同步、
+  无哈希时预览禁用、导出按钮非禁用态、picker 守卫复位等 7 条 widget/单元测试。
 ## [1.27.1] - 2026-11-27
 
 热修 BH-005：多算法写名时预览正确、落盘只写第一个算法。

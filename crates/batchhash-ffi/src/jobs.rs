@@ -145,11 +145,9 @@ type JobBody = Box<
 /// threads that would keep writing to a map entry nobody can poll.
 fn prune_finished(jobs: &mut BTreeMap<String, Job>) {
     let now = std::time::Instant::now();
-    jobs.retain(|_, job| {
-        match job.finished_at {
-            Some(finished) => now.duration_since(finished) < FINISHED_JOB_TTL,
-            None => true,
-        }
+    jobs.retain(|_, job| match job.finished_at {
+        Some(finished) => now.duration_since(finished) < FINISHED_JOB_TTL,
+        None => true,
     });
     if jobs.len() < MAX_LIVE_JOBS {
         return;

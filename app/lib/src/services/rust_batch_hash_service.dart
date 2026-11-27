@@ -243,7 +243,6 @@ class RustBatchHashService implements BatchHashService {
           ),
     ];
   }
-  @override
   /// Run a native call that has no job API on a worker isolate.
   ///
   /// `bh_scan` and `bh_plan_renames` are synchronous C calls. Called on the UI

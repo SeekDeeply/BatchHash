@@ -2141,6 +2141,7 @@ mod tests {
         assert!(names.contains(&"A.txt".to_string()), "names: {names:?}");
     }
 
+    #[test]
     fn execute_plan_never_replaces_a_target_created_after_planning() {
         let temp = tempdir().expect("tempdir");
         let source = temp.path().join("a.txt");

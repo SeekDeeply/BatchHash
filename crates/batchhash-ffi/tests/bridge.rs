@@ -1009,3 +1009,90 @@ fn c_abi_plan_and_diff_functions() {
     let hashed = call_ok(unsafe { c_api::bh_hash_entries(hash_text.as_ptr()) });
     assert_eq!(hashed["ok"], 1);
 }
+#[test]
+fn a_multi_algorithm_suffix_writes_every_algorithm_into_the_name() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let file = temp.path().join("movie.mkv");
+    write(&file, b"movie");
+    let db = temp.path().join("log/rename.db");
+
+    // The bug this pins: the Dart caller sent the algorithm list at the top
+    // level but not inside `suffix`, so this struct arrived with an empty
+    // `algorithms` and the core fell back to `algorithm` alone. The preview
+    // looked right because it builds its format through a different path, so
+    // only an assertion on the on-disk name catches the regression.
+    let mut request = batch_request(temp.path(), vec!["sha256", "md5"]);
+    request.suffix = Some(SuffixDto {
+        algorithm: "sha256".to_string(),
+        algorithms: vec!["sha256".to_string(), "md5".to_string()],
+        length: 8,
+        case: Some("lower".to_string()),
+        prefix: false,
+    });
+    request.apply_renames = true;
+    request.log_db = Some(db.to_string_lossy().into_owned());
+    let run = run_batch_request(&request).expect("run");
+    assert_eq!(run.renamed, 1, "the file must be renamed");
+
+    let entries: Vec<String> = fs::read_dir(temp.path())
+        .expect("read dir")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name != "log")
+        .collect();
+    assert_eq!(entries.len(), 1, "exactly one file, got {entries:?}");
+    let name = &entries[0];
+
+    // Both algorithms must appear, each with its own prefix, because a group of
+    // bare hex tokens cannot be parsed back.
+    assert!(
+        name.contains("sha256-"),
+        "the sha256 token is missing from {name}"
+    );
+    assert!(name.contains("md5-"), "the md5 token is missing from {name}");
+    assert!(
+        name.contains('+'),
+        "the tokens must be joined into one group, got {name}"
+    );
+    assert!(name.ends_with(".mkv"), "the extension must survive: {name}");
+}
+
+#[test]
+fn a_multi_algorithm_suffix_without_the_list_falls_back_to_one_token() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let file = temp.path().join("movie.mkv");
+    write(&file, b"movie");
+    let db = temp.path().join("log/rename.db");
+
+    // The legacy shape: only the single field is set. This must keep working,
+    // and it is what the caller accidentally produced. Pinned so the fallback
+    // is a deliberate behaviour rather than an unexplained difference.
+    let mut request = batch_request(temp.path(), vec!["sha256", "md5"]);
+    request.suffix = Some(SuffixDto {
+        algorithm: "sha256".to_string(),
+        algorithms: Vec::new(),
+        length: 8,
+        case: Some("lower".to_string()),
+        prefix: false,
+    });
+    request.apply_renames = true;
+    request.log_db = Some(db.to_string_lossy().into_owned());
+    run_batch_request(&request).expect("run");
+
+    let entries: Vec<String> = fs::read_dir(temp.path())
+        .expect("read dir")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name != "log")
+        .collect();
+    assert_eq!(entries.len(), 1, "exactly one file, got {entries:?}");
+    let name = &entries[0];
+    assert!(
+        name.contains("sha256-"),
+        "the single algorithm is used: {name}"
+    );
+    assert!(
+        !name.contains("md5-"),
+        "no md5 token without the list: {name}"
+    );
+}

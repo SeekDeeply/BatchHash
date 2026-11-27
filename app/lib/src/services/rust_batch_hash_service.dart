@@ -59,6 +59,31 @@ String _stripLeadingDotSlash(String path) {
 /// Rust; this class only maps JSON DTOs onto the UI models. When the native
 /// library is missing the app falls back to FakeBatchHashService, so widget
 /// tests and unsupported platforms keep working.
+/// Build the `suffix` object for an apply run.
+///
+/// Extracted so a test can assert the exact payload. The bug this exists to
+/// prevent was invisible to every other kind of check: the preview passed, the
+/// run succeeded, and the only symptom was one missing token in the file name.
+/// `algorithms` must be present even though `algorithm` is also set — the native
+/// side reads the list first and only falls back to the single field when the
+/// list is empty, so omitting it silently downgrades a multi-algorithm plan.
+Map<String, Object?> buildSuffixPayload({
+  required List<String> algorithms,
+  required int length,
+  required bool uppercase,
+}) {
+  return <String, Object?>{
+    // Legacy fallback, kept because an older native library still reads it.
+    'algorithm': algorithms.first,
+    // The list that actually drives a multi-algorithm suffix.
+    'algorithms': algorithms,
+    'length': length,
+    'case': uppercase ? 'upper' : 'lower',
+    // Required for a combined group: bare hex tokens cannot be parsed back.
+    'prefix': algorithms.length > 1,
+  };
+}
+
 class RustBatchHashService implements BatchHashService {
   RustBatchHashService({
     required this.native,
@@ -768,15 +793,11 @@ class RustBatchHashService implements BatchHashService {
       algorithms: effective,
       recursive: recurse,
       restrictPaths: paths,
-      suffix: <String, Object?>{
-        // The single-algorithm field is kept for the core's legacy path; the
-        // list above is what actually drives a multi-algorithm suffix.
-        'algorithm': effective.first,
-        'length': plan.length,
-        'case': plan.uppercase ? 'upper' : 'lower',
-        // Required for a combined group: bare hex tokens cannot be parsed back.
-        'prefix': effective.length > 1,
-      },
+      suffix: buildSuffixPayload(
+        algorithms: effective,
+        length: plan.length,
+        uppercase: plan.uppercase,
+      ),
       applyRenames: true,
       logDb: logDb,
       // The plan was previewed with these, so the run that applies it must use

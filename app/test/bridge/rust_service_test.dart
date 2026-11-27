@@ -356,4 +356,51 @@ void main() {
       expect(self.every((row) => row.status == DiffStatus.unchanged), isTrue);
     });
   }, skip: available ? false : 'BATCHHASH_FFI_LIB is not set');
+
+  // A plain unit test: no native library, no binding. This is the one place the
+  // exact suffix payload can be asserted, and the bug it guards against was
+  // invisible everywhere else - the preview showed both algorithms, the run
+  // returned success, and only the on-disk name was wrong.
+  group('buildSuffixPayload', () {
+    test('sends the whole algorithm list, not just the first', () {
+      final Map<String, Object?> payload = buildSuffixPayload(
+        algorithms: <String>['sha256', 'md5'],
+        length: 8,
+        uppercase: false,
+      );
+      expect(payload['algorithms'], <String>['sha256', 'md5']);
+      // The legacy field stays for an older native library, but it is not what
+      // drives the name.
+      expect(payload['algorithm'], 'sha256');
+    });
+
+    test('forces the prefix when more than one algorithm is written', () {
+      final Map<String, Object?> single = buildSuffixPayload(
+        algorithms: <String>['sha256'],
+        length: 8,
+        uppercase: true,
+      );
+      expect(single['prefix'], isFalse);
+      expect(single['case'], 'upper');
+
+      final Map<String, Object?> combined = buildSuffixPayload(
+        algorithms: <String>['sha256', 'md5'],
+        length: 8,
+        uppercase: true,
+      );
+      // A group of bare hex tokens cannot be parsed back, so the prefix is not
+      // optional here even when the caller did not ask for it.
+      expect(combined['prefix'], isTrue);
+    });
+
+    test('keeps the algorithm order the plan was previewed with', () {
+      final Map<String, Object?> payload = buildSuffixPayload(
+        algorithms: <String>['md5', 'sha256', 'blake3'],
+        length: 8,
+        uppercase: false,
+      );
+      expect(payload['algorithms'], <String>['md5', 'sha256', 'blake3']);
+      expect(payload['algorithm'], 'md5');
+    });
+  });
 }

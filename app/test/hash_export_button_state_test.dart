@@ -29,8 +29,11 @@ void main() {
     );
     expect(menu, findsOneWidget);
 
+    // The menu lives inside the results block, which only exists once there are
+    // entries, so reaching this point already proves the block rendered.
+    expect(find.byType(OutlinedButton), findsWidgets);
     final OutlinedButton button = tester.widget<OutlinedButton>(
-      find.descendant(of: menu, matching: find.byType(OutlinedButton)),
+      find.descendant(of: menu, matching: find.byType(OutlinedButton)).first,
     );
     // Non-null is the whole point: a null callback is what paints it grey.
     expect(button.onPressed, isNotNull);

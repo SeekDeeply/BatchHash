@@ -1049,7 +1049,10 @@ fn a_multi_algorithm_suffix_writes_every_algorithm_into_the_name() {
         name.contains("sha256-"),
         "the sha256 token is missing from {name}"
     );
-    assert!(name.contains("md5-"), "the md5 token is missing from {name}");
+    assert!(
+        name.contains("md5-"),
+        "the md5 token is missing from {name}"
+    );
     assert!(
         name.contains('+'),
         "the tokens must be joined into one group, got {name}"
@@ -1087,12 +1090,25 @@ fn a_multi_algorithm_suffix_without_the_list_falls_back_to_one_token() {
         .collect();
     assert_eq!(entries.len(), 1, "exactly one file, got {entries:?}");
     let name = &entries[0];
+    // One bare hex token and no group separator. The algorithm prefix is absent
+    // because the caller asked for none and a single token needs no label to be
+    // parsed back.
     assert!(
-        name.contains("sha256-"),
-        "the single algorithm is used: {name}"
+        !name.contains('+'),
+        "a single token must not be joined into a group: {name}"
     );
     assert!(
         !name.contains("md5-"),
         "no md5 token without the list: {name}"
+    );
+    let token = name
+        .split_once('[')
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(token, _)| token)
+        .expect("a bracketed token");
+    assert_eq!(token.len(), 8, "the requested length is honoured: {name}");
+    assert!(
+        token.chars().all(|c| c.is_ascii_hexdigit()),
+        "the token is bare hex: {name}"
     );
 }

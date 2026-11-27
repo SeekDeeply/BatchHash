@@ -2,6 +2,27 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.27.1] - 2026-11-27
+
+热修 BH-005：多算法写名时预览正确、落盘只写第一个算法。
+
+### 修复
+
+- **`executeRenames` 的 `suffix` 漏传 `algorithms`**：顶层 `runBatch(algorithms:)` 带了
+  全部算法（所以哈希都算了），但 `suffix` 对象里只有 `algorithm: effective.first`。
+  Rust 侧 `parse_suffix` 先读 `suffix.algorithms`，为空才回退单字段，因此执行时静默
+  退化为一个算法。预览走的是另一条构造路径，所以只有落盘结果不对。
+- **误导性注释**：原注释写「the list above is what actually drives a multi-algorithm
+  suffix」，指的是函数外顶层参数，读起来像是在说明 `suffix` 内部已正确——审计时正是
+  被这句话带偏，误判为已修。注释已改写为明确区分两个字段的职责。
+
+### 测试
+
+- `buildSuffixPayload` 从 `executeRenames` 中抽出，便于直接断言完整 payload。新增三条
+  单元测试：算法列表完整性、多算法强制 prefix、算法顺序保持。
+- `crates/batchhash-ffi/tests/bridge.rs` 新增两条：多算法 `apply_renames: true` 断言
+  **磁盘上的实际文件名**同时含 `sha256-` 与 `md5-` 且以 `+` 连接；单字段回退路径断言
+  只写一个裸 hex token。前者在修复前必然失败——这是唯一能捕获该 bug 的断言层次。
 ## [1.27.0] - 2026-11-27
 
 性能与 CLI（TASK-17）、CI/发布加固（TASK-20），审计计划收官。

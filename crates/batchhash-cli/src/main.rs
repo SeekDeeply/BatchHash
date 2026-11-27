@@ -245,10 +245,24 @@ fn default_log_path(root: &Path) -> PathBuf {
 }
 
 fn build_suffix_format(parsed: &Parsed, algorithm_flag: &str) -> CliResult<SuffixFormat> {
+    build_suffix_format_with(parsed, algorithm_flag, None)
+}
+
+/// Build a suffix format, defaulting to an algorithm that was actually hashed.
+///
+/// The suffix is written from the digest the run computed. Defaulting to a fixed
+/// algorithm meant `--algo md5 --write-suffix` asked for a blake3 suffix that no
+/// digest could fill. When the caller knows the hashing set, the first algorithm
+/// in it is the sensible default.
+fn build_suffix_format_with(
+    parsed: &Parsed,
+    algorithm_flag: &str,
+    fallback: Option<AlgorithmId>,
+) -> CliResult<SuffixFormat> {
     let algorithm = match parsed.value(algorithm_flag) {
         Some(name) => AlgorithmId::from_stable_id(name)
             .ok_or_else(|| format!("unknown algorithm '{name}'"))?,
-        None => batchhash_types::default_suffix_algorithm(),
+        None => fallback.unwrap_or_else(batchhash_types::default_suffix_algorithm),
     };
     let length = match parsed.value("length") {
         Some(raw) => raw
@@ -369,7 +383,11 @@ fn cmd_hash(args: &[String]) -> CliResult<()> {
         request.root = root.to_string();
     }
     if parsed.switch("write-suffix") {
-        let suffix = build_suffix_format(&parsed, "suffix-algo")?;
+        let suffix = build_suffix_format_with(
+            &parsed,
+            "suffix-algo",
+            request.algorithms.first().copied(),
+        )?;
         let db_path = match parsed.value("db") {
             Some(path) => PathBuf::from(path),
             None => default_log_path(&root_path),

@@ -2,6 +2,65 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.27.0] - 2026-11-27
+
+性能与 CLI（TASK-17）、CI/发布加固（TASK-20），审计计划收官。
+
+### 性能
+
+- **每次哈希都重建线程池**：`rayon::ThreadPoolBuilder` 每次调用都 spawn 一批 OS
+  线程，调用结束即销毁。改为按 worker 数缓存进程级线程池。
+- **缓冲区按配置上限分配**：4 MiB 缓冲区用于 1 KiB 文件，等于每个小文件都零初始化
+  4 MiB。现在按文件长度 clamp，下限仍为最小缓冲区以避免退化成大量 syscall。
+- **进度节流持锁**：每个哈希分块都调用 `emit`，而节流判断在互斥锁内，成为调度器最热
+  的争用点。新增 `AtomicU64` 快路径：被节流的调用只做一次原子读与一次 compare-exchange。
+- **进度百分比会倒退**：`swap` 在并发下可能让较旧的样本最后写入。改为 `fetch_max`。
+- **批次永远到不了 100%**：字节分母包含无法读取的文件，一个坏文件就让进度停在 99%。
+  失败/跳过条目的字节现在计入独立的 `bytes_settled` 计数器，只用于百分比——不污染
+  `bytes_hashed`，因为后者是对「已哈希字节」的陈述，不能把打不开的文件算进去。
+
+### CLI
+
+- **进度条 10% 以下永不打印**：判据 `rounded >= previous + 10` 的 `previous` 从 0 起，
+  短任务完全没有进度显示。改为首次即打印、其后每 10 点一次，并用 compare-exchange
+  保证只有一个线程输出。
+- **`--report` 一次性读入整个文件**：指向超大文件或设备节点会直接耗尽内存。改为
+  `.take(limit + 1)` 读取并显式报告超限。
+- **`scan-diff` 忽略取消**：被取消的扫描只有部分目录，diff 会把未访问文件全报为「缺失」，
+  读起来像「这些文件被删了」。现在直接报错。
+- **互斥/依赖开关无校验**：`--case-sensitive` 与 `--case-insensitive` 同时给出时静默
+  取其一；`--length` 等后缀参数在未给 `--write-suffix` 时被忽略且无提示。两者均改为
+  明确报错。
+- **算法表列宽不足**：`{:<14}` 容纳不下 `GOST R 34.11-94`（15 字符），该行后续列全部
+  错位。加宽至 18。
+
+### CI / 发布（TASK-20）
+
+- **Android 签名密钥只校验一项**：只检查 keystore，缺 alias 或密码时会生成空的
+  `key.properties`，在更晚的阶段失败且不指明缺哪个。现在四项全查。
+- **签名材料未清理**：新增 `if: always()` 步骤删除 `upload-keystore.jks` 与
+  `key.properties`，失败构建同样清理。
+- **macOS 注入 dylib 后未重签整个 bundle**：只签了 dylib，app 的签名封印已不覆盖其
+  内容，macOS 拒绝启动。现在对 `.app` 执行 `codesign --force --deep` 并 `--verify`。
+- **第三方 Action 未固定**：全部固定到 40 位 commit SHA，保留 `# vX` 注释。
+- **`verify-versions.mjs`**：补检 `app_info.dart` 的 `kAppVersion`；`Cargo.lock` 正则
+  支持 CRLF 与含数字连字符的 crate 名，并断言匹配数大于 0；toolchain 校验改读 SHA
+  后的版本注释。
+- **`release-notes.mjs` 资产名错误**：下载表写的是 Gradle 中间产物（`app-release.aab`），
+  与实际上传的 `batchhash-<tag>-*` 不符，每个下载链接都指向不存在的文件。
+- **`patch-android-signing.mjs` 可能改错块**：`replace` 命中第一处 `signingConfig`，
+  若 debug 块在前则发布产物仍是 debug 签名而脚本报成功。现在断言恰好命中 1 次且位于
+  `release { }` 块内。
+- **`format.yml` / `release-check.yml`**：Flutter 版本锁定 `3.24.5`（该工作流会重写
+  `app/lib`，不同 SDK 格式化结果不同）；`cargo build` 补 `--locked`。
+
+### Android
+
+- **无文档选择器时永久锁死**：精简 ROM、工作资料或 Android TV 可能没有 DocumentsUI，
+  `startActivityForResult` 抛 `ActivityNotFoundException` 后 `onActivityResult` 永不
+  触发，`pendingResult` 被永久占用。现在捕获并返回 `NO_PICKER`。
+- **`closeFiles` 未与 `openFiles` 保序**：改到同一单线程 executor，避免关闭早于仍在
+  排队的打开。
 ## [1.26.0] - 2026-11-27
 
 FFI 边界安全（TASK-11）、跨端契约对齐（TASK-12）与 Android SAF 全链路（TASK-09 / TASK-10）。

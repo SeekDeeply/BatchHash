@@ -1,7 +1,7 @@
 name: batchhash
 description: BatchHash - cross-platform batch file hashing and verification.
 publish_to: 'none'
-version: 1.26.0+39
+version: 1.27.0+40
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

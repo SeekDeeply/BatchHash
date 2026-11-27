@@ -845,7 +845,7 @@ fn is_rename_noreplace_unsupported(error: &std::io::Error) -> bool {
 
 /// Convert a path for a C API call, rejecting interior NUL bytes and paths that
 /// cannot be represented as bytes.
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn path_to_cstring(path: &Path) -> Result<std::ffi::CString, RenameError> {
     use std::os::unix::ffi::OsStrExt;
 

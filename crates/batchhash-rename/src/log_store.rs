@@ -741,63 +741,6 @@ impl LogStore {
         Ok(())
     }
 
-/// Insert one batch inside an open transaction.
-fn create_batch_in(
-    transaction: &rusqlite::Transaction<'_>,
-    batch: &BatchRecord,
-) -> Result<(), LogError> {
-    let algorithms = serde_json::to_string(&batch.algorithms)?;
-    transaction.execute(
-        "INSERT INTO batch (
-            id, created_at, root, root_kind, algorithms,
-            suffix_length, suffix_case, suffix_algorithm, status
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            batch.id,
-            batch.created_at,
-            batch.root,
-            batch.root_kind.as_str(),
-            algorithms,
-            i64::from(batch.suffix_length),
-            hex_case_to_db(batch.suffix_case),
-            batch.suffix_algorithm.stable_id(),
-            batch.status,
-        ],
-    )?;
-    Ok(())
-}
-
-/// Insert one operation inside an open transaction.
-///
-/// [`LogStore::insert_operation`] takes `&mut self` and therefore cannot be
-/// called while a transaction borrows the connection; this is the same INSERT
-/// against the transaction handle.
-fn insert_operation_in(
-    transaction: &rusqlite::Transaction<'_>,
-    operation: &RenameOperation,
-) -> Result<i64, LogError> {
-    transaction.execute(
-        "INSERT INTO rename_operation (
-            batch_id, sequence, original_path, new_path, algorithm,
-            digest_before, digest_after, result, error_kind, state, created_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        params![
-            operation.batch_id,
-            operation.sequence,
-            operation.original_path,
-            operation.new_path,
-            operation.algorithm,
-            operation.digest_before,
-            operation.digest_after,
-            operation.result,
-            operation.error_kind,
-            operation.state.as_str(),
-            operation.created_at,
-        ],
-    )?;
-    Ok(transaction.last_insert_rowid())
-}
-
     /// List all batches, oldest first.
     pub fn list_batches(&self) -> Result<Vec<BatchRecord>, LogError> {
         let mut statement = self.conn.prepare(
@@ -1355,12 +1298,6 @@ pub fn apply_undo_with_cancel(
     Ok(results)
 }
 
-/// Re-check a ready undo row against the filesystem immediately before the
-/// reverse rename.
-///
-/// Returns the conflict reason when the undo must not be attempted. The checks
-/// mirror [`LogStore::plan_undo`] but are evaluated fresh: the plan may be stale,
-/// and a file may have appeared at the original path since it was built.
 /// Find the temporary sibling a crashed case-only rename left behind.
 ///
 /// The temporary name is derived from the original file name, so the match is
@@ -1410,6 +1347,12 @@ fn exists_with_exact_case(path: &Path) -> bool {
     false
 }
 
+/// Re-check a ready undo row against the filesystem immediately before the
+/// reverse rename.
+///
+/// Returns the conflict reason when the undo must not be attempted. The checks
+/// mirror [`LogStore::plan_undo`] but are evaluated fresh: the plan may be stale,
+/// and a file may have appeared at the original path since it was built.
 fn undo_filesystem_conflict(row: &UndoRow, fs: &dyn RenameFs) -> Option<String> {
     let from = Path::new(&row.from);
     let to = Path::new(&row.to);
@@ -1740,6 +1683,64 @@ fn root_kind_from_db(value: &str) -> Result<RootKind, LogError> {
 
 fn now_rfc3339() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+/// Insert one batch inside an open transaction.
+fn create_batch_in(
+    transaction: &rusqlite::Transaction<'_>,
+    batch: &BatchRecord,
+) -> Result<(), LogError> {
+    let algorithms = serde_json::to_string(&batch.algorithms)?;
+    transaction.execute(
+        "INSERT INTO batch (
+            id, created_at, root, root_kind, algorithms,
+            suffix_length, suffix_case, suffix_algorithm, status
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            batch.id,
+            batch.created_at,
+            batch.root,
+            batch.root_kind.as_str(),
+            algorithms,
+            i64::from(batch.suffix_length),
+            hex_case_to_db(batch.suffix_case),
+            batch.suffix_algorithm.stable_id(),
+            batch.status,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Insert one operation inside an open transaction.
+///
+/// [`LogStore::insert_operation`] takes `&mut self` and therefore cannot be
+/// called while a transaction borrows the connection; this is the same INSERT
+/// against the transaction handle.
+fn insert_operation_in(
+    transaction: &rusqlite::Transaction<'_>,
+    operation: &RenameOperation,
+) -> Result<i64, LogError> {
+    transaction.execute(
+        "INSERT INTO rename_operation (
+            batch_id, original_path, new_path, algorithm, full_hash, suffix,
+            op_type, result, error_kind, created_at, undone_at, state
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        params![
+            operation.batch_id,
+            operation.original_path,
+            operation.new_path,
+            operation.algorithm.stable_id(),
+            operation.full_hash,
+            operation.suffix,
+            operation.op_type,
+            operation.result,
+            operation.error_kind,
+            operation.created_at,
+            operation.undone_at,
+            operation.state.as_str(),
+        ],
+    )?;
+    Ok(transaction.last_insert_rowid())
 }
 
 #[cfg(test)]

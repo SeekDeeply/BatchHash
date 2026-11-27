@@ -2,6 +2,55 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.26.0] - 2026-11-27
+
+FFI 边界安全（TASK-11）、跨端契约对齐（TASK-12）与 Android SAF 全链路（TASK-09 / TASK-10）。
+
+### 修复
+
+- **FFI 边界的 panic 可击穿宿主进程**：`bh_free`、响应序列化与 `CString` 构造原本在
+  `catch_unwind` 之外。跨 FFI 边界展开是未定义行为，会直接带走宿主进程。三者均已
+  纳入保护。
+- **任务表无上限**：每次启动都在注册表新增一项且从不移除，一次扫描上千个文件夹就
+  留下上千个已完成任务及其结果。新增 64 项上限与 10 分钟终态 TTL，按完成时间淘汰，
+  运行中的任务永不淘汰。
+- **取消会丢弃已改名批次的结果**：`apply_renames: true` 的运行在取消时磁盘已经改变，
+  结果正是对账所需的记录。现在仅对此类任务保留结果（附 `cancelled` 状态），只读运行
+  仍不暴露半截结果。
+- **同步 FFI 调用阻塞 UI 线程**：`bh_scan` 与 `bh_plan_renames` 在主 isolate 上执行，
+  网络共享上会冻结数秒。改为在 worker isolate 中调用。
+- **非递归扫描在 Dart 侧重过滤**：改为透传 `max_depth: 1`，不再整树遍历后丢弃。
+- **未知枚举静默当作成功**：`_status` 未知值回落 `ok`、`_diffStatus` 回落 `unchanged`
+  ——后者是「两文件相同」的正面断言。现在分别回落 `failed` 与 `unknown`。
+- **报告 JSON 缓存键过粗**：仅按 root 比较，同一目录重新扫描会返回上一次的 JSON。
+  改为按模型实例身份比较。
+- **多目录撤销打开错误的日志**：`undoBatch` 取第一个存在的日志库，多根目录下会失败或
+  改错库。`loadHistory` 现在记录 `batchId -> dbPath`。
+- **`includeLog` 把 SQLite 库标为 JSON 报告**：导出结果中 `.db` 伪装成 `ReportFormat.json`，
+  UI 会提供「重新导入为报告」。`ExportedReport.format` 改为可空，附属文件单独显示。
+- **`follow_links` 未被读取**：`hash_entries_request_with_progress` 声明了该字段却始终
+  跟随符号链接；错误也一律报 `NotFound`。现在按字段选择 `metadata` / `symlink_metadata`，
+  并按 `io::ErrorKind` 分类。
+
+### Android SAF
+
+- **打开文件靠拼接 URI**：`openFiles` 用 `rootDocumentId + "/" + path` 构造 document URI，
+  仅对 id 恰好呈路径形的 provider 有效。`walk` 现在返回真实 `document_id`，打开时直接
+  使用 `buildDocumentUriUsingTree(treeUri, documentId)`。
+- **句柄按路径索引**：同一路径打开两次时，第二次覆盖第一次的条目，关闭后第一个描述符
+  泄漏且无法再引用。改为唯一句柄键，写入前关闭旧值，`onDestroy` 全量关闭。
+- **全部 ContentResolver 调用在主线程**：树遍历与批量打开在平台主线程执行，大树或慢
+  provider 会冻结 UI。改到单线程 `ExecutorService`，结果切回主线程；`SecurityException`
+  映射为 `PERMISSION_REVOKED`。
+- **未知大小被当作 0**：provider 不报告大小时 `statSize` 为 -1、游标列为空，两者原先都
+  变成 0，报告声称文件为空。`FdEntryDto.length` 改为 `Option<u64>`，`null` 表示读到
+  文件末尾；Dart 侧 `size` 与 `handle` 同步为可空与显式句柄。
+- **打开失败的文件从结果中消失**：现在保留为失败条目并附原因；整组打开失败时跳过 FFI
+  调用（空列表会被判为调用方错误），且只关闭实际打开的句柄。
+
+### 测试
+
+- 新增 `length: None` 读满全文、任务表淘汰上限、两阶段中转失败注入等回归测试。
 ## [1.25.0] - 2026-11-27
 
 Phase 2 收官（TASK-06）与 Flutter 稳定性收口（TASK-13 / TASK-14 / TASK-16）。

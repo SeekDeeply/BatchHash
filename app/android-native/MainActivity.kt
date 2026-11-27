@@ -232,8 +232,8 @@ class MainActivity : FlutterActivity() {
      * otherwise be a channel round trip, and a deep tree costs hundreds of
      * them for no benefit.
      */
-    private fun collectTree(treeUri: Uri, maxDepth: Int): List<Map<String, Any>> {
-        val nodes = ArrayList<Map<String, Any>>()
+    private fun collectTree(treeUri: Uri, maxDepth: Int): List<Map<String, Any?>> {
+        val nodes = ArrayList<Map<String, Any?>>()
         val rootDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
         walk(treeUri, rootDocumentId, "", 0, maxDepth, nodes)
         return nodes
@@ -245,7 +245,7 @@ class MainActivity : FlutterActivity() {
         prefix: String,
         depth: Int,
         maxDepth: Int,
-        out: MutableList<Map<String, Any>>,
+        out: MutableList<Map<String, Any?>>,
     ) {
         // Address the subtree through the parent document id. Appending a path
         // to the tree URI instead produces a URI no provider accepts, which is
@@ -298,7 +298,7 @@ class MainActivity : FlutterActivity() {
                 val isDirectory = mime == DocumentsContract.Document.MIME_TYPE_DIR
                 val relative = if (prefix.isEmpty()) name else prefix + "/" + name
                 out.add(
-                    mapOf(
+                    mapOf<String, Any?>(
                         "path" to relative,
                         // The provider document id is the only address that works
                         // for a later open: rebuilding it by joining the root id
@@ -334,8 +334,8 @@ class MainActivity : FlutterActivity() {
     private fun openFiles(
         treeUri: Uri,
         documents: List<Map<String, String>>,
-    ): List<Map<String, Any>> {
-        val opened = ArrayList<Map<String, Any>>(documents.size)
+    ): List<Map<String, Any?>> {
+        val opened = ArrayList<Map<String, Any?>>(documents.size)
         for (entry in documents) {
             val path = entry["path"] ?: continue
             val documentId = entry["document_id"] ?: continue
@@ -367,7 +367,7 @@ class MainActivity : FlutterActivity() {
                 }
             }
             opened.add(
-                mapOf(
+                mapOf<String, Any?>(
                     "path" to path,
                     "handle" to handle,
                     "fd" to descriptor.fd,

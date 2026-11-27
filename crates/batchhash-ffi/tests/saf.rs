@@ -331,7 +331,7 @@ fn the_dart_bridge_payload_deserialises_verbatim() {
     assert_eq!(parsed.entries.len(), 1);
     assert_eq!(parsed.entries[0].path, "clip.mkv");
     assert_eq!(parsed.entries[0].fd, 42);
-    assert_eq!(parsed.entries[0].length, 1024);
+    assert_eq!(parsed.entries[0].length, Some(1024));
     assert_eq!(parsed.algorithms, vec!["sha256", "blake3"]);
 }
 
@@ -352,5 +352,44 @@ fn the_dart_scan_payload_deserialises_verbatim() {
     assert_eq!(
         result.entries[0].mtime.as_deref(),
         Some("2026-11-15T12:00:00Z")
+    );
+}
+#[test]
+fn a_missing_length_reads_to_the_end_of_the_file() {
+    use std::io::Write;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("unknown.bin");
+    let mut writer = fs::File::create(&path).expect("create fixture");
+    writer.write_all(b"twelve bytes").expect("write fixture");
+    writer.flush().expect("flush");
+    let file = fs::File::open(&path).expect("open fixture");
+
+    // The Storage Access Framework reports statSize as -1 for some providers.
+    // Carrying that as a length made the reader stop immediately and hash
+    // nothing; `None` must mean "read the whole file".
+    let request = HashFdEntriesRequest {
+        root: "content://tree/primary%3AMovies".to_string(),
+        entries: vec![FdEntryDto {
+            path: "unknown.bin".to_string(),
+            fd: file.as_raw_fd(),
+            offset: 0,
+            length: None,
+        }],
+        algorithms: vec!["sha256".to_string()],
+    };
+    let result = hash_fd_entries_request(&request).expect("hash");
+    assert_eq!(result.entries.len(), 1);
+    let entry = &result.entries[0];
+    assert_eq!(entry.status, "ok", "entry: {entry:?}");
+    // The digest must cover the whole file. Hashing zero bytes would still
+    // report a digest, so the size is what distinguishes the two.
+    assert_eq!(
+        entry.size, 12,
+        "an unknown length must not collapse the file to zero bytes"
+    );
+    assert!(
+        entry.hashes.contains_key("sha256"),
+        "a digest is still produced: {entry:?}"
     );
 }

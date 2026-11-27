@@ -461,7 +461,9 @@ pub fn hash_fd_entries_request(request: &HashFdEntriesRequest) -> Result<BatchRe
             Ok(FileIo::Fd {
                 fd,
                 offset,
-                length: Some(length),
+                // `None` means read to end of file, which is exactly what an
+                // unreported provider size should mean.
+                length,
             })
         },
         &cancel,

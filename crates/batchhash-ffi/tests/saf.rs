@@ -389,7 +389,7 @@ fn a_missing_length_reads_to_the_end_of_the_file() {
         "an unknown length must not collapse the file to zero bytes"
     );
     assert!(
-        entry.hashes.contains_key("sha256"),
+        entry.hashes.iter().any(|hash| hash.algorithm == "sha256"),
         "a digest is still produced: {entry:?}"
     );
 }

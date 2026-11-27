@@ -2,6 +2,46 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.25.0] - 2026-11-27
+
+Phase 2 收官（TASK-06）与 Flutter 稳定性收口（TASK-13 / TASK-14 / TASK-16）。
+
+### 修复
+
+- **重命名日志的邻居文件被误排除**：`exclude_log_artifacts` 用前缀匹配，
+  `batch.db.bak`、`batch.db2` 这类同前缀的真实文件被静默从报告中丢弃。改为精确
+  匹配，并补充 SQLite 的 `-wal` / `-shm` / `-journal` 伴随文件。
+- **后缀算法可以不在哈希算法集合中**：请求 `--algo md5 --write-suffix` 时后缀默认
+  用 blake3，而运行只算了 md5，改名时摘要缺失。现在请求阶段即拒绝，且 CLI 的后缀
+  算法默认跟随本次哈希算法。
+- **`suffix undo` 未先对账**：上一次运行若在改名与写日志之间被杀，日志会声称操作
+  待定而磁盘已改。现在先 `reconcile` 再规划撤销，并在输出中报告对账结果。
+- **扫描错误一律报为权限不足**：目录消失、网络挂载失效都被标为 `PermissionDenied`，
+  误导用户。改为按 `io::ErrorKind` 映射到 `PermissionDenied` / `NotFound` / `IoError`。
+- **日志流包装器的并发记账**：`StreamTransformer.fromHandlers` 的 `async` 回调返回的
+  future 会被忽略，所以等待写盘从未生效，且流同时完成与报错时会记录两次。改为手工
+  驱动订阅，确保只写一条终态记录且写盘先于监听者看到流结束。
+- **`digestsFromDiff` 静默截断**：达到上限即停止且不作说明，日志看起来像是记录了全部
+  摘要。现在返回被省略的数量并在日志行中注明。
+- **`undoBatch` 返回 `false` 时记为成功**：撤销被拒绝也显示为成功。新增 `succeeded`
+  判定回调。
+- **JSON 持久化非原子**：`writeAsString` 先截断再写，中途崩溃会丢失原有配置。新增
+  `writeStringAtomic`（同目录临时文件 + flush + rename），接入日志、配置、设置与
+  窗口状态四个 store。
+- **串行队列被单次失败毒化**：`Future.then` 链在某个动作抛错后会让后续动作全部跳过，
+  一次写入失败就静默停止整个会话的持久化。新增 `AsyncSerialQueue`，每个动作独立。
+- **`app.dart` 泄漏 3 个监听器**：`renameConfig`、`exportSql`、`reportFocus` 注册后
+  从未移除，销毁后仍回调已释放的 store。
+- **比对页 `_directBusy` 永久卡死**：结果因世代不匹配被丢弃时提前返回，忙标志不复位，
+  按钮再也点不动。改由 `finally` 统一复位。
+- **窗口关闭拦截可能乱序**：`setPreventClose(true)` 直接发起而不入队，已在进行中的
+  `setPreventClose(false)` 可能先落地，留下无内容可保存却仍被拦截的窗口。
+
+### 测试
+
+- 新增两阶段大小写重命名失败注入测试（第一跳成功、第二跳失败后验证原地回滚，且不留
+  临时文件）。
+- 新增日志产物排除、后缀算法校验、原子写与串行队列毒化等回归测试。
 ## [1.24.0] - 2026-11-27
 
 TASK-07b：并发、崩溃一致性与跨平台重命名原语。

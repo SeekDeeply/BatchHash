@@ -9,7 +9,8 @@ use std::fs;
 use std::os::unix::io::AsRawFd;
 
 use batchhash_ffi::api::{
-    scan_saf_request, FdEntryDto, HashFdEntriesRequest, SafNodeDto, ScanSafRequest,
+    hash_fd_entries_request, scan_saf_request, FdEntryDto, HashFdEntriesRequest, SafNodeDto,
+    ScanSafRequest,
 };
 use batchhash_ffi::c_api;
 

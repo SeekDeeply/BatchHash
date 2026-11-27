@@ -383,11 +383,8 @@ fn cmd_hash(args: &[String]) -> CliResult<()> {
         request.root = root.to_string();
     }
     if parsed.switch("write-suffix") {
-        let suffix = build_suffix_format_with(
-            &parsed,
-            "suffix-algo",
-            request.algorithms.first().copied(),
-        )?;
+        let suffix =
+            build_suffix_format_with(&parsed, "suffix-algo", request.algorithms.first().copied())?;
         let db_path = match parsed.value("db") {
             Some(path) => PathBuf::from(path),
             None => default_log_path(&root_path),

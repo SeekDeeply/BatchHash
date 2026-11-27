@@ -131,10 +131,6 @@ class RustBatchHashService implements BatchHashService {
   /// remembered roots it either failed with "unknown batch" or, worse, opened a
   /// different log that happened to be found first.
   final Map<String, String> _batchLogPaths = <String, String>{};
-  /// Root the batch behind [_lastReportJson] worked on, or null when the cached
-  /// JSON does not describe the report the caller is asking about.
-  String? _lastReportRoot;
-  /// Native job currently running, so [cancelCurrentOperation] can stop it.
   /// Jobs this service started and has not released.
   ///
   /// A single nullable id assumed at most one job at a time, which stopped being
@@ -272,13 +268,14 @@ class RustBatchHashService implements BatchHashService {
         environment: environment,
         overridePath: overridePath,
       ) ??
-          (throw const BridgeUnavailable(
+          (throw BridgeUnavailable(
             'the native library is not available in the worker isolate',
           ));
       return worker.callMap(function, request);
     });
   }
 
+  @override
   Future<List<BatchEntry>> scanDirectory(
     String path, {
     bool recursive = false,
@@ -568,7 +565,6 @@ class RustBatchHashService implements BatchHashService {
       throw BridgeException('internal', 'the native job returned malformed JSON');
     }
     _lastRoot = root;
-    _lastReportRoot = root;
     _lastReportJson = data['report_json'] as String?;
     final hashed = _entries(data['entries']);
     final result = explicitFiles
@@ -610,7 +606,6 @@ class RustBatchHashService implements BatchHashService {
       );
     }
     _lastRoot = root;
-    _lastReportRoot = root;
     _lastReportJson = data['report_json'] as String?;
     final hashed = _entries(data['entries']);
     final result = explicitFiles
@@ -730,7 +725,6 @@ class RustBatchHashService implements BatchHashService {
     );
     _logDbPath = logDb;
     _lastScanRecursive = recurse;
-    _lastReportRoot = root;
     _lastReportJson = data['report_json'] as String?;
     await _rememberRoot(root, logDb: logDb);
     final summary = data['plan_summary'] as Map<String, Object?>?;
@@ -1189,7 +1183,6 @@ class RustBatchHashService implements BatchHashService {
       // handed to the exporter or the diff engine again: the cached JSON and
       // the entry list it described are both stale now.
       _lastReportJson = null;
-      _lastReportRoot = null;
       _lastReportModel = null;
     }
     return undone > 0;

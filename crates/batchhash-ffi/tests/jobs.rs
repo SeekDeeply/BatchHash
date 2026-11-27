@@ -200,3 +200,26 @@ fn releasing_a_terminal_job_removes_only_that_entry() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn finished_jobs_are_evicted_to_keep_the_registry_bounded() {
+    // Each job holds a result payload; an unbounded registry is a leak in a
+    // session that scans many folders.
+    let dir = temp_dir("evict");
+    std::fs::write(dir.join("a.bin"), b"data").expect("write fixture");
+    let mut ids = Vec::new();
+    for _ in 0..(jobs::MAX_LIVE_JOBS + 8) {
+        let id = jobs::start_hash_entries(hash_request(&dir, &["a.bin"])).expect("start");
+        let _status = wait_for(&id);
+        ids.push(id);
+    }
+    assert!(
+        jobs::live_job_count() <= jobs::MAX_LIVE_JOBS,
+        "registry grew to {} entries",
+        jobs::live_job_count()
+    );
+    for id in ids {
+        let _ = jobs::release(&id);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -95,6 +95,13 @@ struct Job {
     cancel: batchhash_hash::CancelToken,
     /// When the job reached a terminal state; `None` while it runs.
     finished_at: Option<std::time::Instant>,
+    /// Whether a cancelled run still exposes its payload.
+    ///
+    /// Only a run that applied renames needs this: the files have already moved,
+    /// and the result is the record the caller uses to reconcile the log against
+    /// the disk. For a read-only run a partial payload is just a truncated
+    /// answer, and offering it invites the UI to present it as complete.
+    preserve_on_cancel: bool,
 }
 
 impl Job {
@@ -161,7 +168,7 @@ fn prune_finished(jobs: &mut BTreeMap<String, Job>) {
     }
 }
 
-fn start_job(body: JobBody) -> String {
+fn start_job(body: JobBody, preserve_on_cancel: bool) -> String {
     let job_id = next_id();
     let cancel = batchhash_hash::CancelToken::new();
     let worker_cancel = cancel.clone();
@@ -179,6 +186,7 @@ fn start_job(body: JobBody) -> String {
                 error: None,
                 cancel,
                 finished_at: None,
+                preserve_on_cancel,
             },
         );
     }
@@ -213,9 +221,13 @@ fn start_job(body: JobBody) -> String {
                     // to reconcile. Discarding it left the log and the disk out
                     // of step with no way to see what had happened.
                     job.state = JobState::Cancelled;
-                    job.result_json = match outcome {
-                        Ok(Ok(payload)) => Some(payload),
-                        _ => None,
+                    job.result_json = if job.preserve_on_cancel {
+                        match outcome {
+                            Ok(Ok(payload)) => Some(payload),
+                            _ => None,
+                        }
+                    } else {
+                        None
                     };
                     job.error = None;
                 } else {
@@ -259,10 +271,18 @@ fn serialize<T: Serialize>(value: &T) -> Result<String, ApiError> {
 pub fn start_batch(request: BatchRequestDto) -> Result<String, ApiError> {
     // Validate eagerly so a bad request fails at start instead of asynchronously.
     api::validate_batch_request(&request)?;
-    Ok(start_job(Box::new(move |cancel, progress| {
-        let result = api::run_batch_request_with_progress(&request, cancel, progress)?;
-        serialize(&result)
-    })))
+    // A batch that applies renames changes the disk as it goes. If it is
+    // cancelled midway the caller still needs the record of what already moved,
+    // otherwise the log and the filesystem disagree with nothing to reconcile
+    // them.
+    let applies_renames = request.apply_renames;
+    Ok(start_job(
+        Box::new(move |cancel, progress| {
+            let result = api::run_batch_request_with_progress(&request, cancel, progress)?;
+            serialize(&result)
+        }),
+        applies_renames,
+    ))
 }
 
 /// Start hashing explicit root-relative paths as a job.
@@ -270,18 +290,24 @@ pub fn start_hash_entries(request: HashEntriesRequest) -> Result<String, ApiErro
     if request.algorithms.is_empty() {
         return Err(ApiError::invalid("at least one algorithm is required"));
     }
-    Ok(start_job(Box::new(move |cancel, progress| {
-        let result = api::hash_entries_request_with_progress(&request, cancel, progress)?;
-        serialize(&result)
-    })))
+    Ok(start_job(
+        Box::new(move |cancel, progress| {
+            let result = api::hash_entries_request_with_progress(&request, cancel, progress)?;
+            serialize(&result)
+        }),
+        false,
+    ))
 }
 
 /// Start a report-versus-directory comparison as a job.
 pub fn start_diff_directory(request: DiffDirectoryRequest) -> Result<String, ApiError> {
-    Ok(start_job(Box::new(move |cancel, progress| {
-        let result = api::diff_directory_request_with_progress(&request, cancel, progress)?;
-        serialize(&result)
-    })))
+    Ok(start_job(
+        Box::new(move |cancel, progress| {
+            let result = api::diff_directory_request_with_progress(&request, cancel, progress)?;
+            serialize(&result)
+        }),
+        false,
+    ))
 }
 
 /// Poll one job. Returns an `invalid_request` error for an unknown id.

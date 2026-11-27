@@ -407,6 +407,11 @@ struct ProgressReporter<'a> {
     /// one compare-exchange instead of taking the mutex. Every hashed chunk calls
     /// `emit`, so the lock was the hottest contention point in the scheduler.
     last_emit_ms: AtomicU64,
+    /// Bytes of entries that will never be read (failed or skipped).
+    ///
+    /// Only the progress percentage uses this, so a batch containing an
+    /// unreadable file can still reach 100% instead of stalling at 99% forever.
+    bytes_settled: AtomicU64,
     started: Instant,
     state: Mutex<ProgressState>,
     events: &'a (dyn Fn(BatchEvent) + Sync),
@@ -421,6 +426,7 @@ impl<'a> ProgressReporter<'a> {
             bytes_done: AtomicU64::new(0),
             completed: AtomicU64::new(0),
             last_emit_ms: AtomicU64::new(0),
+            bytes_settled: AtomicU64::new(0),
             started: now,
             state: Mutex::new(ProgressState {
                 last_emit: None,
@@ -485,8 +491,9 @@ impl<'a> ProgressReporter<'a> {
             // Clamped: a file that grew while being read can push bytes_done past
             // the total that was measured at scan time, and a percentage above 100
             // makes a progress bar look broken.
+            let settled = bytes_done.saturating_add(self.bytes_settled.load(Ordering::Relaxed));
             let percent = if self.bytes_total > 0 {
-                (bytes_done as f64 / self.bytes_total as f64 * 100.0).clamp(0.0, 100.0)
+                (settled as f64 / self.bytes_total as f64 * 100.0).clamp(0.0, 100.0)
             } else if self.total > 0 {
                 (completed as f64 / self.total as f64 * 100.0).clamp(0.0, 100.0)
             } else {
@@ -514,12 +521,13 @@ impl<'a> ProgressReporter<'a> {
 
     fn entry_done(&self, entry: &FileEntry) {
         // A file that failed or was skipped still counts as processed, and its
-        // bytes are counted as done. Without this the byte-based percentage can
-        // never reach 100: the denominator includes bytes that will never be
-        // read, so a batch with one unreadable file stalls at 99% forever and the
-        // UI looks hung on work that has finished.
+        // bytes are credited to a separate counter used only for the progress
+        // percentage. They are deliberately not added to `bytes_done`: that value
+        // is reported as `bytes_hashed`, and claiming bytes were hashed when the
+        // file could not even be opened would be a false statement about the work
+        // that was done.
         if !entry.status.is_ok() {
-            self.bytes_done.fetch_add(entry.size, Ordering::Relaxed);
+            self.bytes_settled.fetch_add(entry.size, Ordering::Relaxed);
         }
         self.completed.fetch_add(1, Ordering::Relaxed);
         (self.events)(BatchEvent::EntryDone(entry.clone()));

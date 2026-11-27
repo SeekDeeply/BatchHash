@@ -76,10 +76,7 @@ impl RenameFs for StdRenameFs {
     }
 
     fn is_dir_writable(&self, dir: &Path) -> bool {
-        match std::fs::metadata(dir) {
-            Ok(metadata) => metadata.is_dir() && !metadata.permissions().readonly(),
-            Err(_) => false,
-        }
+        is_dir_writable_impl(dir)
     }
 }
 
@@ -662,6 +659,8 @@ impl StdFsBackend {
         if let Some(outcome) = linux_rename_noreplace(from, to)? {
             return outcome;
         }
+        #[cfg(target_os = "macos")]
+        return macos_rename_noreplace(from, to);
         #[cfg(target_os = "windows")]
         return windows_rename_noreplace(from, to);
         #[cfg(unix)]
@@ -681,6 +680,68 @@ impl RenameBackend for StdFsBackend {
     fn rename_no_replace(&mut self, from: &Path, to: &Path) -> Result<(), RenameError> {
         StdFsBackend::rename_no_replace_impl(from, to)
     }
+}
+
+/// Whether a directory accepts new entries on this platform.
+///
+/// Unix: `access(dir, W_OK | X_OK)` asks the kernel the same question the
+/// rename will ask. `Metadata::permissions().readonly()` cannot answer it — it
+/// only reports whether the owner-write bit is set, so a directory writable via
+/// group or ACL would be called unwritable, and a root-owned 0555 directory
+/// writable by root would be called writable.
+///
+/// Windows: the readonly attribute on a directory does not mean "cannot write"
+/// (it marks a customized folder and is set on most system directories), so it
+/// is not consulted at all. A cheap probe is used instead: try to create and
+/// remove a uniquely named file.
+#[cfg(unix)]
+fn is_dir_writable_impl(dir: &Path) -> bool {
+    let Ok(dir_c) = path_to_cstring(dir) else {
+        return false;
+    };
+    // SAFETY: the pointer is a NUL-terminated string that outlives the call.
+    let status = unsafe { libc::access(dir_c.as_ptr(), libc::W_OK | libc::X_OK) };
+    status == 0
+}
+
+#[cfg(windows)]
+fn is_dir_writable_impl(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    // A real probe, because the attributes say nothing useful here and the ACL
+    // is not readable without extra API calls. The name is process- and
+    // counter-specific so two probes cannot collide.
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let probe = dir.join(format!(".bh_write_probe_{}_{seq}", std::process::id()));
+    match std::fs::File::create(&probe) {
+        Ok(file) => {
+            drop(file);
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Rename without replacing an existing target, on macOS.
+///
+/// `renamex_np(2)` with `RENAME_EXCL` is the only atomic no-replace primitive
+/// macOS offers; `std::fs::rename` maps to `rename(2)`, which silently replaces
+/// the target. Without this, a plan that raced with another process would
+/// destroy the file it collided with.
+#[cfg(target_os = "macos")]
+fn macos_rename_noreplace(from: &Path, to: &Path) -> Result<(), RenameError> {
+    let from_c = path_to_cstring(from)?;
+    let to_c = path_to_cstring(to)?;
+    // SAFETY: both pointers are NUL-terminated and outlive the call, and
+    // RENAME_EXCL is the documented "fail if the target exists" flag.
+    let status = unsafe { libc::renamex_np(from_c.as_ptr(), to_c.as_ptr(), libc::RENAME_EXCL) };
+    if status == 0 {
+        return Ok(());
+    }
+    Err(RenameError::from_io(to, &std::io::Error::last_os_error()))
 }
 
 /// Rename without replacing an existing target, on Windows.
@@ -897,6 +958,82 @@ pub fn execute_plan_with_policy(
 ///
 /// [`should_stop`] must return `false` when nothing is cancelled; the policy
 /// argument behaves exactly as in [`execute_plan_with_policy`].
+/// Whether two paths name the same file and differ only in letter case.
+///
+/// On a case-insensitive filesystem `a.txt` and `A.txt` are one file, so a
+/// direct rename from one to the other is a no-op that the OS may report as
+/// success or as "target exists" depending on the platform and the primitive
+/// used. Callers must route those through a temporary name instead.
+pub(crate) fn is_case_only_rename(from: &Path, to: &Path) -> bool {
+    if from == to {
+        return false;
+    }
+    let (Some(from_name), Some(to_name)) = (from.file_name(), to.file_name()) else {
+        return false;
+    };
+    if from.parent() != to.parent() {
+        return false;
+    }
+    from_name != to_name
+        && from_name.to_string_lossy().to_lowercase() == to_name.to_string_lossy().to_lowercase()
+}
+
+/// Build a temporary sibling name that `reconcile` can recognise later.
+///
+/// The name is derived from the file it belongs to rather than being random, so
+/// a crash between the two hops leaves a file that can be traced back: the
+/// reconciler sees `.bh_case_<stem>.tmp` next to a missing `<stem>` and restores
+/// it. A random name would strand the user's data in a hidden file.
+fn case_rename_temp_path(from: &Path) -> PathBuf {
+    let parent = from.parent().unwrap_or_else(|| Path::new("."));
+    let stem = from
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut candidate = parent.join(format!(".bh_case_{stem}.tmp"));
+    // Two different files cannot share a name, but a leftover from a previous
+    // crash can occupy this one. A suffix keeps the name traceable.
+    let mut counter = 0u32;
+    while candidate.exists() {
+        counter += 1;
+        candidate = parent.join(format!(".bh_case_{stem}.{counter}.tmp"));
+    }
+    candidate
+}
+
+/// Rename through a temporary sibling, for case-only renames.
+///
+/// Two hops are the only reliable way to change just the letter case on a
+/// case-insensitive filesystem. If the second hop fails the first is undone
+/// immediately, so the file never stays under the temporary name unless the
+/// rollback also fails — and in that case the error names the temporary path so
+/// the user (or the reconciler) can recover it.
+pub(crate) fn rename_via_temp(
+    backend: &mut dyn RenameBackend,
+    from: &Path,
+    to: &Path,
+) -> Result<(), RenameError> {
+    let temp = case_rename_temp_path(from);
+    backend.rename(from, &temp)?;
+    match backend.rename_no_replace(&temp, to) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            // Put the file back before reporting: leaving it under the
+            // temporary name is worse than not renaming at all.
+            if let Err(rollback) = backend.rename(&temp, from) {
+                return Err(RenameError::Io {
+                    path: temp.display().to_string(),
+                    message: format!(
+                        "{error}; rolling back also failed ({rollback}), the file is at {}",
+                        temp.display()
+                    ),
+                });
+            }
+            Err(error)
+        }
+    }
+}
+
 pub fn execute_plan_with_policy_and_cancel(
     plan: &RenamePlan,
     backend: &mut dyn RenameBackend,
@@ -913,7 +1050,11 @@ pub fn execute_plan_with_policy_and_cancel(
         }
         let from = Path::new(&row.original_path);
         let to = target_path(&row.original_path, &row.proposed_name);
-        let outcome = if overwrite {
+        // A case-only rename cannot be done in one hop on a case-insensitive
+        // filesystem: the source and target are the same file to the OS.
+        let outcome = if is_case_only_rename(from, &to) {
+            rename_via_temp(backend, from, &to)
+        } else if overwrite {
             backend.rename(from, &to)
         } else {
             backend.rename_no_replace(from, &to)
@@ -1038,14 +1179,25 @@ fn build_row(entry_index: usize, entry: &FileEntry, options: &RenamePlanOptions)
     }
 
     match format_filename_multi(&base_name, &digests, &options.format, DEFAULT_MAX_UTF16_LEN) {
-        Ok(proposed_name) => RenamePlanRow {
-            entry_index,
-            original_path,
-            original_name,
-            proposed_name,
-            status: RenameRowStatus::Ready,
-            reason: None,
-        },
+        Ok(proposed_name) => {
+            // The suffix already says exactly what it should: renaming would be
+            // a no-op on a case-insensitive filesystem and a pointless churn on
+            // a case-sensitive one, so the row is reported as unchanged rather
+            // than ready.
+            let status = if proposed_name == original_name {
+                RenameRowStatus::SkippedAlreadySuffixed
+            } else {
+                RenameRowStatus::Ready
+            };
+            RenamePlanRow {
+                entry_index,
+                original_path,
+                original_name,
+                proposed_name,
+                status,
+                reason: None,
+            }
+        }
         Err(error) => {
             let reason = error.to_string();
             let status = match error {

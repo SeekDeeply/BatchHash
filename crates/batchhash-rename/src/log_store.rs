@@ -23,14 +23,14 @@
 //! meantime is never overwritten, and renames only ready rows.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use batchhash_types::{AlgorithmId, HexCase, RootKind};
 use chrono::{SecondsFormat, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use crate::planner::{RenameBackend, RenameFs, StdRenameFs};
+use crate::planner::{is_case_only_rename, rename_via_temp, RenameBackend, RenameFs, StdRenameFs};
 use crate::suffix::SuffixFormat;
 
 const SCHEMA_VERSION: u32 = 1;
@@ -564,6 +564,20 @@ impl LogStore {
 
     fn from_connection(conn: Connection) -> Result<Self, LogError> {
         conn.pragma_update(None, "foreign_keys", true)?;
+        // WAL lets the UI read the log while a rename is being recorded, which
+        // is exactly what happens when the history page is open during a batch.
+        // An in-memory database has no journal to switch, so failure here is not
+        // fatal: the fallback is the default rollback journal, which is correct
+        // but blocks readers.
+        let _ = conn.pragma_update(None, "journal_mode", "WAL");
+        // NORMAL is the documented safe pairing with WAL: a crash can lose the
+        // last transactions but cannot corrupt the database, and full sync on
+        // every rename would dominate the cost of renaming small files.
+        let _ = conn.pragma_update(None, "synchronous", "NORMAL");
+        // Five seconds of grace before reporting SQLITE_BUSY. A second writer
+        // (the UI, a second window) may hold the write lock briefly; failing
+        // immediately would surface as a spurious rename error.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let mut store = Self { conn };
         store.migrate()?;
         Ok(store)
@@ -690,14 +704,99 @@ impl LogStore {
         } else {
             None
         };
-        self.conn.execute(
+        // The transition is re-checked inside the UPDATE rather than trusted
+        // from the read above: between the two another writer (a second window,
+        // the reconciler) may have moved the row, and a blind UPDATE would then
+        // silently overwrite that decision.
+        let transaction = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let updated = transaction.execute(
             "UPDATE rename_operation
              SET result = ?1, error_kind = ?2, state = ?3, undone_at = COALESCE(?4, undone_at)
-             WHERE id = ?5",
-            params![result, error_kind, state.as_str(), undone_at, operation_id],
+             WHERE id = ?5 AND state = ?6",
+            params![
+                result,
+                error_kind,
+                state.as_str(),
+                undone_at,
+                operation_id,
+                current.as_str()
+            ],
         )?;
+        if updated == 0 {
+            // Someone else moved it. Report the state they chose so the caller
+            // can see what actually happened instead of a generic failure.
+            let actual = transaction
+                .query_row(
+                    "SELECT state FROM rename_operation WHERE id = ?1",
+                    params![operation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap_or_else(|_| "unknown".to_string());
+            return Err(LogError::InvalidStateTransition {
+                from: OperationState::from_str_name(&actual).unwrap_or(current),
+                to: state,
+            });
+        }
+        transaction.commit()?;
         Ok(())
     }
+
+/// Insert one batch inside an open transaction.
+fn create_batch_in(
+    transaction: &rusqlite::Transaction<'_>,
+    batch: &BatchRecord,
+) -> Result<(), LogError> {
+    let algorithms = serde_json::to_string(&batch.algorithms)?;
+    transaction.execute(
+        "INSERT INTO batch (
+            id, created_at, root, root_kind, algorithms,
+            suffix_length, suffix_case, suffix_algorithm, status
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            batch.id,
+            batch.created_at,
+            batch.root,
+            batch.root_kind.as_str(),
+            algorithms,
+            i64::from(batch.suffix_length),
+            hex_case_to_db(batch.suffix_case),
+            batch.suffix_algorithm.stable_id(),
+            batch.status,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Insert one operation inside an open transaction.
+///
+/// [`LogStore::insert_operation`] takes `&mut self` and therefore cannot be
+/// called while a transaction borrows the connection; this is the same INSERT
+/// against the transaction handle.
+fn insert_operation_in(
+    transaction: &rusqlite::Transaction<'_>,
+    operation: &RenameOperation,
+) -> Result<i64, LogError> {
+    transaction.execute(
+        "INSERT INTO rename_operation (
+            batch_id, sequence, original_path, new_path, algorithm,
+            digest_before, digest_after, result, error_kind, state, created_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            operation.batch_id,
+            operation.sequence,
+            operation.original_path,
+            operation.new_path,
+            operation.algorithm,
+            operation.digest_before,
+            operation.digest_after,
+            operation.result,
+            operation.error_kind,
+            operation.state.as_str(),
+            operation.created_at,
+        ],
+    )?;
+    Ok(transaction.last_insert_rowid())
+}
 
     /// List all batches, oldest first.
     pub fn list_batches(&self) -> Result<Vec<BatchRecord>, LogError> {
@@ -812,7 +911,18 @@ impl LogStore {
             match operation.state {
                 OperationState::Applied => {
                     let current_missing = !fs.exists(Path::new(&operation.new_path));
-                    let original_occupied = fs.exists(Path::new(&operation.original_path));
+                    // A case-only undo must compare names byte for byte: on a
+                    // case-insensitive filesystem the lookup would find the file
+                    // itself and call the original name occupied, blocking an
+                    // undo that is in fact possible.
+                    let original_occupied = if is_case_only_rename(
+                        Path::new(&operation.new_path),
+                        Path::new(&operation.original_path),
+                    ) {
+                        exists_with_exact_case(Path::new(&operation.original_path))
+                    } else {
+                        fs.exists(Path::new(&operation.original_path))
+                    };
                     let (status, reason) = if current_missing {
                         (
                             UndoStatus::Conflict,
@@ -992,7 +1102,12 @@ impl LogStore {
                 continue;
             }
             let batch = entry.batch.clone();
-            self.create_batch(&batch)?;
+            // One transaction per batch: a failure partway through must not
+            // leave a batch with some of its operations, because the log is the
+            // only record of what the disk looks like and a half-written batch
+            // would make the undo plan wrong.
+            let transaction = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            create_batch_in(&transaction, &batch)?;
             let mut written = 0u64;
             for operation in &entry.operations {
                 let operation = operation.to_operation()?;
@@ -1004,9 +1119,10 @@ impl LogStore {
                         batch.id, operation.batch_id
                     )));
                 }
-                self.insert_operation(&operation)?;
+                insert_operation_in(&transaction, &operation)?;
                 written += 1;
             }
+            transaction.commit()?;
             summary.batches += 1;
             summary.operations += written;
         }
@@ -1151,7 +1267,6 @@ pub fn apply_undo_with_cancel(
         validate_rename_path_safety(&row.from, &row.to)?;
     }
     let mut results = Vec::with_capacity(plan.rows.len());
-    let mut undone = Vec::new();
     for row in &plan.rows {
         if should_stop() {
             results.push(UndoResult {
@@ -1186,9 +1301,20 @@ pub fn apply_undo_with_cancel(
                     });
                     continue;
                 }
-                match backend.rename_no_replace(Path::new(&row.from), Path::new(&row.to)) {
+                // A case-only undo is the same problem in reverse: on a
+                // case-insensitive filesystem the two paths are one file.
+                let outcome = if is_case_only_rename(Path::new(&row.from), Path::new(&row.to)) {
+                    rename_via_temp(backend, Path::new(&row.from), Path::new(&row.to))
+                } else {
+                    backend.rename_no_replace(Path::new(&row.from), Path::new(&row.to))
+                };
+                match outcome {
                     Ok(()) => {
-                        undone.push(row.operation_id);
+                        // Persist immediately rather than at the end of the loop:
+                        // the disk has already changed, so a crash here would
+                        // leave a renamed file the log still calls "applied",
+                        // and the next reconcile would try to undo it twice.
+                        store.mark_undone(row.operation_id)?;
                         results.push(UndoResult {
                             operation_id: row.operation_id,
                             from: row.from.clone(),
@@ -1226,24 +1352,6 @@ pub fn apply_undo_with_cancel(
             }),
         }
     }
-    if !undone.is_empty() {
-        let transaction = store.conn.transaction()?;
-        let undone_at = now_rfc3339();
-        for operation_id in undone {
-            transaction.execute(
-                "UPDATE rename_operation
-                 SET state = ?1, undone_at = ?2
-                 WHERE id = ?3 AND state = ?4",
-                params![
-                    OperationState::Undone.as_str(),
-                    undone_at,
-                    operation_id,
-                    OperationState::Applied.as_str(),
-                ],
-            )?;
-        }
-        transaction.commit()?;
-    }
     Ok(results)
 }
 
@@ -1253,11 +1361,70 @@ pub fn apply_undo_with_cancel(
 /// Returns the conflict reason when the undo must not be attempted. The checks
 /// mirror [`LogStore::plan_undo`] but are evaluated fresh: the plan may be stale,
 /// and a file may have appeared at the original path since it was built.
+/// Find the temporary sibling a crashed case-only rename left behind.
+///
+/// The temporary name is derived from the original file name, so the match is
+/// exact rather than a guess: `.bh_case_<name>.tmp` (or `.bh_case_<name>.<n>.tmp`
+/// after a collision) in the same directory.
+fn find_case_temp_file(original_path: &str) -> Option<PathBuf> {
+    let original = Path::new(original_path);
+    let parent = original.parent().unwrap_or_else(|| Path::new("."));
+    let name = original.file_name()?.to_string_lossy().into_owned();
+    let prefix = format!(".bh_case_{name}");
+    let entries = std::fs::read_dir(parent).ok()?;
+    for entry in entries.flatten() {
+        let candidate = entry.file_name().to_string_lossy().into_owned();
+        if candidate.starts_with(&prefix) && candidate.ends_with(".tmp") {
+            return Some(entry.path());
+        }
+    }
+    None
+}
+
+/// Whether [path] exists with exactly this spelling.
+///
+/// `symlink_metadata(path).is_ok()` cannot answer this on a case-insensitive
+/// filesystem: `A.txt` and `a.txt` are the same file, so a path that differs
+/// only in case from the one on disk is reported as existing. For an undo check
+/// that is the difference between "the original name is free" and "the original
+/// name is taken", and getting it wrong either blocks a valid undo or overwrites
+/// a file. The directory is listed and the names are compared byte for byte.
+fn exists_with_exact_case(path: &Path) -> bool {
+    let Some(name) = path.file_name() else {
+        return path.exists();
+    };
+    let parent = path.parent().filter(|dir| !dir.as_os_str().is_empty());
+    let dir = match parent {
+        Some(dir) => dir.to_path_buf(),
+        None => PathBuf::from("."),
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return false;
+    };
+    let wanted = name.to_string_lossy();
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy() == wanted {
+            return true;
+        }
+    }
+    false
+}
+
 fn undo_filesystem_conflict(row: &UndoRow, fs: &dyn RenameFs) -> Option<String> {
-    if !fs.exists(Path::new(&row.from)) {
+    let from = Path::new(&row.from);
+    let to = Path::new(&row.to);
+    if !fs.exists(from) {
         return Some(format!("renamed file no longer exists: {}", row.from));
     }
-    if fs.exists(Path::new(&row.to)) {
+    // Only a case-only undo can be confused by the case-insensitive lookup: any
+    // other pair of names is distinct on every filesystem, so the cheap check is
+    // exact there and the directory scan is unnecessary.
+    let occupied = if is_case_only_rename(from, to) {
+        exists_with_exact_case(to)
+    } else {
+        fs.exists(to)
+    };
+    if occupied {
         return Some(format!("original name is already occupied: {}", row.to));
     }
     None
@@ -1368,6 +1535,43 @@ pub fn reconcile_pending_operations_with_cancel(
     for operation in pending {
         if should_stop() {
             break;
+        }
+        // A case-only rename that crashed between its two hops leaves the file
+        // under `.bh_case_<name>.tmp` and nothing at either recorded path.
+        // Recovering it before the ordinary checks keeps the user's data at a
+        // name they can see instead of a hidden temporary.
+        if !fs.exists(Path::new(&operation.new_path))
+            && !fs.exists(Path::new(&operation.original_path))
+        {
+            if let Some(temp) = find_case_temp_file(&operation.original_path) {
+                let restored = std::fs::rename(&temp, Path::new(&operation.original_path)).is_ok();
+                let reason = if restored {
+                    "a case-only rename stopped between its two steps; the file was restored to its original name"
+                } else {
+                    "a case-only rename stopped between its two steps and the file could not be restored"
+                };
+                // Either way the operation did not take effect, so the state is
+                // the same; only the reason differs so the user knows whether
+                // the file is back under its old name or still stranded.
+                let state = OperationState::Conflict;
+                store.record_reconciled_state(
+                    operation.id,
+                    state,
+                    ReconcileOutcome::NotApplied.as_str(),
+                    Some(reason),
+                )?;
+                report.not_applied += 1;
+                report.operations.push(ReconciledOperation {
+                    operation_id: operation.id,
+                    batch_id: operation.batch_id,
+                    original_path: operation.original_path,
+                    new_path: operation.new_path,
+                    outcome: ReconcileOutcome::NotApplied,
+                    state,
+                    reason: reason.to_string(),
+                });
+                continue;
+            }
         }
         let (outcome, state, reason) = if fs.exists(Path::new(&operation.new_path))
             && !fs.exists(Path::new(&operation.original_path))

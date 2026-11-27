@@ -2062,7 +2062,9 @@ mod tests {
                 .map(|name| name.to_string_lossy().starts_with(".bh_case_"))
                 .unwrap_or(false);
             if (is_temp_source && self.fail_temp_target) || self.fail_all_after_first {
-                return Err(RenameError::Io("injected failure on the second hop".to_string()));
+                return Err(RenameError::Io(
+                    "injected failure on the second hop".to_string(),
+                ));
             }
             StdFsBackend::rename_no_replace_impl(from, to)
         }
@@ -2103,7 +2105,10 @@ mod tests {
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .filter(|name| name.starts_with(".bh_case_"))
             .collect();
-        assert!(leftovers.is_empty(), "temporary file left behind: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "temporary file left behind: {leftovers:?}"
+        );
     }
 
     #[test]

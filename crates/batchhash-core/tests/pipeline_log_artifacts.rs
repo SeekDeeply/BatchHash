@@ -35,7 +35,11 @@ fn the_rename_log_is_excluded_from_the_report() {
         .iter()
         .map(|entry| entry.path.as_str())
         .collect();
-    assert_eq!(paths, vec!["a.txt"], "the log must not be hashed: {paths:?}");
+    assert_eq!(
+        paths,
+        vec!["a.txt"],
+        "the log must not be hashed: {paths:?}"
+    );
 }
 
 #[test]
@@ -105,15 +109,18 @@ fn a_suffix_algorithm_that_is_not_hashed_is_rejected() {
     let mut request = request_for(root, &log_db);
     // Hashes blake3 only, but asks for an md5 suffix: the digest would be
     // missing at rename time, so the request is refused before any work.
-    request.suffix = Some(batchhash_types::SuffixFormat {
-        algorithm: AlgorithmId::Md5,
-        ..Default::default()
-    }
-    .into());
+    request.suffix = Some(batchhash_core::rename::suffix::MultiSuffixFormat::new(vec![
+        batchhash_core::rename::suffix::SuffixFormat {
+            algorithm: AlgorithmId::Md5,
+            ..Default::default()
+        },
+    ]));
 
     let error = run_batch(&request, &CancelToken::new(), &|_event| {}).expect_err("must fail");
     assert!(
-        error.to_string().contains("not among the hashing algorithms"),
+        error
+            .to_string()
+            .contains("not among the hashing algorithms"),
         "error: {error}"
     );
 }

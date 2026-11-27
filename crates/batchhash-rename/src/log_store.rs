@@ -708,7 +708,9 @@ impl LogStore {
         // from the read above: between the two another writer (a second window,
         // the reconciler) may have moved the row, and a blind UPDATE would then
         // silently overwrite that decision.
-        let transaction = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let updated = transaction.execute(
             "UPDATE rename_operation
              SET result = ?1, error_kind = ?2, state = ?3, undone_at = COALESCE(?4, undone_at)
@@ -1049,7 +1051,9 @@ impl LogStore {
             // leave a batch with some of its operations, because the log is the
             // only record of what the disk looks like and a half-written batch
             // would make the undo plan wrong.
-            let transaction = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let transaction = self
+                .conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
             create_batch_in(&transaction, &batch)?;
             let mut written = 0u64;
             for operation in &entry.operations {

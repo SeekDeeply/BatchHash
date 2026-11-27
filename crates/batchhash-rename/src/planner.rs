@@ -1021,13 +1021,10 @@ pub(crate) fn rename_via_temp(
             // Put the file back before reporting: leaving it under the
             // temporary name is worse than not renaming at all.
             if let Err(rollback) = backend.rename(&temp, from) {
-                return Err(RenameError::Io {
-                    path: temp.display().to_string(),
-                    message: format!(
-                        "{error}; rolling back also failed ({rollback}), the file is at {}",
-                        temp.display()
-                    ),
-                });
+                return Err(RenameError::Io(format!(
+                    "{error}; rolling back also failed ({rollback}), the file is at {}",
+                    temp.display()
+                )));
             }
             Err(error)
         }

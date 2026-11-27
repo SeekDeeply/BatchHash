@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 class SafNode {
   const SafNode({
     required this.path,
+    required this.documentId,
     required this.isDirectory,
     required this.size,
     required this.mtimeMs,
@@ -16,10 +17,20 @@ class SafNode {
   /// Path relative to the granted tree root, slash separated.
   final String path;
 
+  /// The provider document id that addresses this node.
+  ///
+  /// Opening a document needs this id. Rebuilding it from the tree root id and
+  /// the relative path only works for providers whose ids happen to be path
+  /// shaped, so the listing has to carry the real one.
+  final String documentId;
+
   final bool isDirectory;
 
-  /// Size in bytes. Zero for a directory, or when the provider reports none.
-  final int size;
+  /// Size in bytes, or null when the provider does not report one.
+  ///
+  /// Null rather than 0: a directory has no size, and a provider is allowed to
+  /// leave the column empty. Reporting 0 made such files look empty in reports.
+  final int? size;
 
   final int mtimeMs;
 }
@@ -39,6 +50,7 @@ class SafDirectory {
 class SafOpenFile {
   const SafOpenFile({
     required this.path,
+    required this.handle,
     required this.fd,
     required this.size,
   });
@@ -46,11 +58,17 @@ class SafOpenFile {
   /// Path relative to the granted tree root.
   final String path;
 
+  /// Opaque handle identifying this open, used to close it again.
+  ///
+  /// Not the path: the same path can be open twice, and closing by path left the
+  /// earlier descriptor open with nothing left to reference it.
+  final String handle;
+
   /// Raw file descriptor number. Valid only until [SafBridge.closeFiles].
   final int fd;
 
-  /// Size in bytes as reported by the descriptor, not by the tree listing.
-  final int size;
+  /// Size in bytes as reported by the descriptor, or null when unavailable.
+  final int? size;
 }
 /// Storage Access Framework bridge for Android.
 ///
@@ -88,19 +106,21 @@ class SafBridge {
     }
   }
 
-  /// Open a read-only descriptor for each of [paths] inside [treeUri].
+  /// Open a read-only descriptor for each of [documents] inside [treeUri].
   ///
-  /// Returns the raw fd number and the descriptor's own size for each path
-  /// that could be opened. Paths that cannot be opened are omitted rather than
-  /// reported as an error, so the caller hashes what it could open and says so.
+  /// [documents] carries each node's provider document id, which the native side
+  /// needs to address the file. Returns the fd, a close handle, and the
+  /// descriptor's own size for each document that could be opened. Documents
+  /// that cannot be opened are omitted rather than reported as an error, so the
+  /// caller hashes what it could open and says so.
   ///
-  /// The descriptor stays open until [closeFiles] is called for the same path.
+  /// The descriptor stays open until [closeFiles] is called with its handle.
   /// The Rust core dups what it is given, so it never owns this handle.
   static Future<List<SafOpenFile>> openFiles({
     required String treeUri,
-    required List<String> paths,
+    required List<SafNode> documents,
   }) async {
-    if (paths.isEmpty) {
+    if (documents.isEmpty) {
       return const <SafOpenFile>[];
     }
     try {
@@ -108,7 +128,13 @@ class SafBridge {
         'openFiles',
         <String, Object?>{
           'uri': treeUri,
-          'paths': paths,
+          'documents': <Map<String, String>>[
+            for (final SafNode node in documents)
+              <String, String>{
+                'path': node.path,
+                'document_id': node.documentId,
+              },
+          ],
         },
       );
       if (raw == null) {
@@ -119,8 +145,11 @@ class SafBridge {
           if (item is Map)
             SafOpenFile(
               path: '${item['path'] ?? ''}',
+              handle: '${item['handle'] ?? ''}',
               fd: (item['fd'] as num?)?.toInt() ?? -1,
-              size: (item['size'] as num?)?.toInt() ?? 0,
+              // Absent means the provider reported no size, which is different
+              // from a zero-byte file.
+              size: (item['size'] as num?)?.toInt(),
             ),
       ];
     } on PlatformException catch (error) {
@@ -136,13 +165,13 @@ class SafBridge {
   /// Safe to call for paths that were never opened. Must be called for every
   /// successful open, or the process leaks a descriptor per file until the
   /// activity is destroyed.
-  static Future<void> closeFiles(List<String> paths) async {
-    if (paths.isEmpty) {
+  static Future<void> closeFiles(List<String> handles) async {
+    if (handles.isEmpty) {
       return;
     }
     try {
       await _channel.invokeMethod<void>('closeFiles', <String, Object?>{
-        'paths': paths,
+        'handles': handles,
       });
     } on PlatformException {
       // Nothing useful can be done about a failed close here; the caller is
@@ -176,8 +205,9 @@ class SafBridge {
           if (item is Map)
             SafNode(
               path: '${item['path'] ?? ''}',
+              documentId: '${item['document_id'] ?? ''}',
               isDirectory: item['is_dir'] == true,
-              size: (item['size'] as num?)?.toInt() ?? 0,
+              size: (item['size'] as num?)?.toInt(),
               mtimeMs: (item['mtime_ms'] as num?)?.toInt() ?? 0,
             ),
       ];

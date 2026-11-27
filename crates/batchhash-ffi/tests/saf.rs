@@ -135,7 +135,7 @@ fn hash_fd_entries_hashes_a_real_descriptor() {
             path: "payload.bin".to_string(),
             fd: file.as_raw_fd(),
             offset: 0,
-            length: size,
+            length: Some(size),
         }],
         algorithms: vec!["sha256".to_string()],
     };
@@ -190,7 +190,7 @@ fn hash_fd_entries_honours_a_non_zero_offset() {
             path: "payload.bin".to_string(),
             fd: file.as_raw_fd(),
             offset: 2,
-            length: 9,
+            length: Some(9),
         }],
         algorithms: vec!["sha256".to_string()],
     };
@@ -246,14 +246,14 @@ fn hash_fd_entries_reports_a_missing_descriptor_on_the_entry() {
                 path: "good.bin".to_string(),
                 fd: file.as_raw_fd(),
                 offset: 0,
-                length: 4,
+                length: Some(4),
             },
             // Never opened: the resolver finds nothing for it.
             FdEntryDto {
                 path: "absent.bin".to_string(),
                 fd: -1,
                 offset: 0,
-                length: 0,
+                length: Some(0),
             },
         ],
         algorithms: vec!["sha256".to_string()],

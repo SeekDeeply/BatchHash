@@ -131,6 +131,14 @@ class RustBatchHashService implements BatchHashService {
   /// remembered roots it either failed with "unknown batch" or, worse, opened a
   /// different log that happened to be found first.
   final Map<String, String> _batchLogPaths = <String, String>{};
+
+  /// Provider document id for each SAF path seen by [scanSafTree].
+  ///
+  /// Opening a document needs its id, and the id cannot be rebuilt from the path
+  /// for providers whose ids are opaque. [BatchEntry] deliberately carries no
+  /// platform field, so the mapping lives here, filled at scan time and consumed
+  /// by [hashSafEntries].
+  final Map<String, String> _safDocumentIds = <String, String>{};
   /// Jobs this service started and has not released.
   ///
   /// A single nullable id assumed at most one job at a time, which stopped being
@@ -338,15 +346,21 @@ class RustBatchHashService implements BatchHashService {
     );
     // Directories are dropped here rather than in the core: the platform knows
     // what it walked, and a directory has no digest to compute.
+    _safDocumentIds.clear();
     final List<Map<String, Object?>> payload = <Map<String, Object?>>[
       for (final SafNode node in nodes)
         if (!node.isDirectory)
           <String, Object?>{
             'path': node.path,
-            'size': node.size,
+            'size': node.size ?? 0,
             'mtime': safMtimeToIso(node.mtimeMs),
           },
     ];
+    for (final SafNode node in nodes) {
+      if (!node.isDirectory && node.documentId.isNotEmpty) {
+        _safDocumentIds[node.path] = node.documentId;
+      }
+    }
     final Map<String, Object?> data = native.scanSaf(
       treeUri: treeUri,
       nodes: payload,
@@ -368,13 +382,57 @@ class RustBatchHashService implements BatchHashService {
     }
     final List<BatchEntry> hashed = <BatchEntry>[];
     for (final List<BatchEntry> group in chunk(entries, kSafFdGroupSize)) {
-      final List<String> paths = <String>[
-        for (final BatchEntry entry in group) entry.path,
+      // Only files with a known document id can be opened. A missing id means the
+      // tree listing did not carry one, and guessing from the path is exactly what
+      // produced unusable URIs before.
+      final List<SafNode> documents = <SafNode>[
+        for (final BatchEntry entry in group)
+          if (_safDocumentIds[entry.path] != null)
+            SafNode(
+              path: entry.path,
+              documentId: _safDocumentIds[entry.path]!,
+              isDirectory: false,
+              size: entry.size,
+              mtimeMs: 0,
+            ),
       ];
+      if (documents.isEmpty) {
+        // Nothing in this group can be opened. Recording the reason beats
+        // dropping the entries, which would make the files vanish from the report
+        // as if they had never been selected.
+        hashed.addAll(<BatchEntry>[
+          for (final BatchEntry entry in group)
+            entry.copyWith(
+              status: EntryStatus.failed,
+              errorKind: 'NotFound',
+              hashes: const <String, String>{},
+            ),
+        ]);
+        continue;
+      }
       final List<SafOpenFile> opened = await SafBridge.openFiles(
         treeUri: treeUri,
-        paths: paths,
+        documents: documents,
       );
+      final Set<String> openedPaths = <String>{
+        for (final SafOpenFile file in opened) file.path,
+      };
+      // A document the platform refused to open is reported, not silently
+      // omitted: the user selected it and deserves to know why it is missing.
+      hashed.addAll(<BatchEntry>[
+        for (final BatchEntry entry in group)
+          if (!openedPaths.contains(entry.path))
+            entry.copyWith(
+              status: EntryStatus.failed,
+              errorKind: 'PermissionDenied',
+              hashes: const <String, String>{},
+            ),
+      ]);
+      if (opened.isEmpty) {
+        // Every open failed. Calling the core with an empty entry list would be
+        // rejected as a caller mistake, which is not what happened here.
+        continue;
+      }
       try {
         final Map<String, Object?> data = native.hashFdEntries(
           // The tree URI is the batch root: it is what the scan reported, and
@@ -386,16 +444,20 @@ class RustBatchHashService implements BatchHashService {
                 'path': file.path,
                 'fd': file.fd,
                 'offset': 0,
-                'length': file.size,
+                // Absent means "read to end of file": the provider reported no
+                // size, and a fabricated length would truncate or overrun.
+                if (file.size != null) 'length': file.size,
               },
           ],
           algorithms: algorithms,
         );
         hashed.addAll(_entries(data['entries']));
       } finally {
-        // Released on the failure path too: a descriptor leaked per failed
-        // batch is how a long session runs out of fds.
-        await SafBridge.closeFiles(paths);
+        // Handles, not paths, and only the ones actually opened: closing by path
+        // missed the descriptor whenever the same file was opened twice.
+        await SafBridge.closeFiles(<String>[
+          for (final SafOpenFile file in opened) file.handle,
+        ]);
       }
     }
     return hashed;

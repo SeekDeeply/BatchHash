@@ -1,6 +1,10 @@
 package io.github.seekdeeply.batchhash
 
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import android.os.ParcelFileDescriptor
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -37,7 +41,22 @@ class MainActivity : FlutterActivity() {
      * the number becomes a different file, or nothing. Keyed by relative path
      * so [closeFiles] can release exactly what was opened.
      */
-    private val openDescriptors = HashMap<String, ParcelFileDescriptor>()
+    private val openDescriptors = ConcurrentHashMap<String, ParcelFileDescriptor>()
+
+    /**
+     * Worker for every ContentResolver call.
+     *
+     * A tree walk on a large folder or a slow provider is seconds of blocking
+     * `query`/`openFileDescriptor` calls. Run on the platform main thread they
+     * freeze the UI and, worse, the method-channel reply arrives late enough
+     * that Flutter has already moved on.
+     */
+    /** Posts a worker result back to the platform main thread. */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val ioExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "batchhash-saf-io").apply { isDaemon = true }
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -74,10 +93,26 @@ class MainActivity : FlutterActivity() {
                             result.error("BAD_ARGS", "uri is required", null)
                             return@setMethodCallHandler
                         }
-                        try {
-                            result.success(collectTree(Uri.parse(uri), maxDepth))
-                        } catch (error: Exception) {
-                            result.error("LIST_FAILED", error.message, null)
+                        // Off the main thread: a deep tree is hundreds of
+                        // provider queries, each of which can take milliseconds.
+                        ioExecutor.execute {
+                            try {
+                                val nodes = collectTree(Uri.parse(uri), maxDepth)
+                                mainHandler.post { result.success(nodes) }
+                            } catch (error: SecurityException) {
+                                // The grant was revoked after the picker returned.
+                                mainHandler.post {
+                                    result.error(
+                                        "PERMISSION_REVOKED",
+                                        "the folder permission was withdrawn",
+                                        null,
+                                    )
+                                }
+                            } catch (error: Exception) {
+                                mainHandler.post {
+                                    result.error("LIST_FAILED", error.message, null)
+                                }
+                            }
                         }
                     }
 
@@ -90,28 +125,42 @@ class MainActivity : FlutterActivity() {
                     // that no longer matches its contents.
                     "openFiles" -> {
                         val uri = call.argument<String>("uri")
-                        val paths = call.argument<List<String>>("paths")
-                        if (uri.isNullOrEmpty() || paths == null) {
+                        val documents =
+                            call.argument<List<Map<String, String>>>("documents")
+                        if (uri.isNullOrEmpty() || documents == null) {
                             result.error(
                                 "BAD_ARGS",
-                                "uri and paths are required",
+                                "uri and documents are required",
                                 null,
                             )
                             return@setMethodCallHandler
                         }
-                        try {
-                            result.success(openFiles(Uri.parse(uri), paths))
-                        } catch (error: Exception) {
-                            result.error("OPEN_FAILED", error.message, null)
+                        ioExecutor.execute {
+                            try {
+                                val opened = openFiles(Uri.parse(uri), documents)
+                                mainHandler.post { result.success(opened) }
+                            } catch (error: SecurityException) {
+                                mainHandler.post {
+                                    result.error(
+                                        "PERMISSION_REVOKED",
+                                        "the folder permission was withdrawn",
+                                        null,
+                                    )
+                                }
+                            } catch (error: Exception) {
+                                mainHandler.post {
+                                    result.error("OPEN_FAILED", error.message, null)
+                                }
+                            }
                         }
                     }
 
                     // Releases what [openFiles] opened. Safe to call twice: a
                     // path that is not open is skipped rather than reported.
                     "closeFiles" -> {
-                        val paths = call.argument<List<String>>("paths")
-                        if (paths != null) {
-                            closeFiles(paths)
+                        val handles = call.argument<List<String>>("handles")
+                        if (handles != null) {
+                            closeFiles(handles)
                         }
                         result.success(null)
                     }
@@ -119,6 +168,23 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    override fun onDestroy() {
+        // The activity can be destroyed with descriptors still open: the
+        // Flutter side may be gone before it calls closeFiles. Leaving them to
+        // the finalizer leaks real file handles on a device that has few.
+        for (key in openDescriptors.keys.toList()) {
+            openDescriptors.remove(key)?.let { descriptor ->
+                try {
+                    descriptor.close()
+                } catch (_: Exception) {
+                    // Nothing left to do while tearing down.
+                }
+            }
+        }
+        ioExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     override fun onActivityResult(
@@ -212,14 +278,33 @@ class MainActivity : FlutterActivity() {
                 }
                 // A provider may report no size for a directory; zero is the
                 // only honest answer available.
-                val size = if (sizeIndex >= 0) cursor.getLong(sizeIndex) else 0L
-                val mtime = if (mtimeIndex >= 0) cursor.getLong(mtimeIndex) else 0L
+                // A provider is allowed to report no size. Reporting 0 for
+                // "unknown" made every such file look empty, and a hash report
+                // that claims a file is zero bytes is worse than one that says
+                // the size is unknown.
+                val size: Long? =
+                    if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                        cursor.getLong(sizeIndex).takeIf { it >= 0L }
+                    } else {
+                        null
+                    }
+                val mtime =
+                    if (mtimeIndex >= 0 && !cursor.isNull(mtimeIndex)) {
+                        cursor.getLong(mtimeIndex)
+                    } else {
+                        0L
+                    }
                 val mime = if (mimeIndex >= 0) cursor.getString(mimeIndex) else null
                 val isDirectory = mime == DocumentsContract.Document.MIME_TYPE_DIR
                 val relative = if (prefix.isEmpty()) name else prefix + "/" + name
                 out.add(
                     mapOf(
                         "path" to relative,
+                        // The provider document id is the only address that works
+                        // for a later open: rebuilding it by joining the root id
+                        // with a relative path is a guess that fails on any
+                        // provider whose ids are not path shaped.
+                        "document_id" to documentId,
                         "is_dir" to isDirectory,
                         "size" to size,
                         // Milliseconds since the epoch, matching what the Dart
@@ -235,46 +320,69 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * Open a read-only descriptor for each of [paths] inside [treeUri].
+     * Open a read-only descriptor for each requested document.
      *
-     * Returns the raw fd number and the descriptor's own size for every path
-     * that could be opened. Paths that cannot be opened are omitted, so the
-     * caller hashes what it could and says so rather than failing the batch.
+     * [documents] carries the provider document id for each path, taken from the
+     * tree listing. The id is used directly: rebuilding it as
+     * `rootDocumentId + "/" + path` only works for providers whose ids happen to
+     * look like paths, and fails outright on the ones that use opaque ids.
+     *
+     * Returns the fd, the handle that identifies it for [closeFiles], and the
+     * descriptor's own size. Paths that cannot be opened are omitted so the
+     * caller hashes what it could rather than failing the whole batch.
      */
     private fun openFiles(
         treeUri: Uri,
-        paths: List<String>,
+        documents: List<Map<String, String>>,
     ): List<Map<String, Any>> {
-        val rootDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
-        val opened = ArrayList<Map<String, Any>>(paths.size)
-        for (path in paths) {
-            // Address each file through its own document id, which is the tree
-            // document id plus the relative path. A path appended straight onto
-            // the tree URI is rejected by every provider.
-            val documentUri = DocumentsContract.buildDocumentUriUsingTree(
-                treeUri,
-                rootDocumentId + "/" + path,
-            )
+        val opened = ArrayList<Map<String, Any>>(documents.size)
+        for (entry in documents) {
+            val path = entry["path"] ?: continue
+            val documentId = entry["document_id"] ?: continue
+            val documentUri = try {
+                DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+            } catch (_: Exception) {
+                continue
+            }
             val descriptor = try {
                 contentResolver.openFileDescriptor(documentUri, "r")
+            } catch (_: SecurityException) {
+                // The grant can be revoked between listing and opening. Skipping
+                // the file keeps the rest of the batch usable; the caller reports
+                // the path as unopened.
+                null
             } catch (_: Exception) {
                 null
             } ?: continue
-            openDescriptors[path] = descriptor
+            // A handle unique per open, not the path: the same path can be opened
+            // twice (a retry, two pages), and keying by path made the second open
+            // overwrite the first entry, so closing it left the first descriptor
+            // open with no reference left to close it.
+            val handle = "h" + descriptor.fd + "-" + System.nanoTime()
+            openDescriptors.put(handle, descriptor)?.let { previous ->
+                try {
+                    previous.close()
+                } catch (_: Exception) {
+                    // Replacing a stale entry; the new one is what matters.
+                }
+            }
             opened.add(
                 mapOf(
                     "path" to path,
+                    "handle" to handle,
                     "fd" to descriptor.fd,
-                    "size" to descriptor.statSize,
+                    // `statSize` is -1 when the provider cannot report a size;
+                    // passing that through as a huge unsigned value would make the
+                    // file look enormous and the progress bar meaningless.
+                    "size" to descriptor.statSize.takeIf { it >= 0L },
                 ),
             )
         }
         return opened
     }
-
-    private fun closeFiles(paths: List<String>) {
-        for (path in paths) {
-            val descriptor = openDescriptors.remove(path) ?: continue
+    private fun closeFiles(handles: List<String>) {
+        for (handle in handles) {
+            val descriptor = openDescriptors.remove(handle) ?: continue
             try {
                 descriptor.close()
             } catch (_: Exception) {

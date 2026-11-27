@@ -368,8 +368,14 @@ pub struct FdEntryDto {
     /// Byte offset to start reading at.
     #[serde(default)]
     pub offset: u64,
-    /// Number of bytes to read.
-    pub length: u64,
+    /// Number of bytes to read, or null when the provider did not report one.
+    ///
+    /// A descriptor from the Storage Access Framework reports `statSize` as -1
+    /// when the provider cannot tell. Treating that as a length produced a
+    /// nonsense byte count and a progress bar that never advanced, so it is
+    /// carried as absent and the reader reads to end of file instead.
+    #[serde(default)]
+    pub length: Option<u64>,
 }
 
 /// Hash entries addressed by descriptor.
@@ -389,7 +395,7 @@ pub fn hash_fd_entries_request(request: &HashFdEntriesRequest) -> Result<BatchRe
     // The table is keyed by path and read-only for the whole call. It holds raw
     // fd numbers, so it must not outlive the descriptors the caller opened for
     // this batch; the caller closes them once this returns.
-    let table: std::collections::HashMap<String, (i32, u64, u64)> = request
+    let table: std::collections::HashMap<String, (i32, u64, Option<u64>)> = request
         .entries
         .iter()
         .map(|entry| (entry.path.clone(), (entry.fd, entry.offset, entry.length)))
@@ -408,10 +414,13 @@ pub fn hash_fd_entries_request(request: &HashFdEntriesRequest) -> Result<BatchRe
         // Only the length is needed here, as the entry size. The descriptor and
         // offset are read by the resolver straight from the table, so pulling
         // them out here as well would just leave them unused.
+        // An unknown length is reported as size 0 in the entry and read to end of
+        // file. It is the only honest option: the report has no "size unknown"
+        // field on this path, and inventing a number would misstate the file.
         let length = table
             .get(&entry.path)
-            .map(|(_, _, length)| *length)
-            .unwrap_or(entry.length);
+            .map(|(_, _, length)| length.unwrap_or(0))
+            .unwrap_or_else(|| entry.length.unwrap_or(0));
         let file_entry = FileEntry::new(
             "saf",
             batchhash_types::RootKind::Saf,

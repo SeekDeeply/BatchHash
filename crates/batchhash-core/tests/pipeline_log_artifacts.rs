@@ -109,12 +109,12 @@ fn a_suffix_algorithm_that_is_not_hashed_is_rejected() {
     let mut request = request_for(root, &log_db);
     // Hashes blake3 only, but asks for an md5 suffix: the digest would be
     // missing at rename time, so the request is refused before any work.
-    request.suffix = Some(batchhash_core::rename::suffix::MultiSuffixFormat::new(vec![
+    request.suffix = Some(batchhash_core::rename::suffix::MultiSuffixFormat::single(
         batchhash_core::rename::suffix::SuffixFormat {
             algorithm: AlgorithmId::Md5,
             ..Default::default()
         },
-    ]));
+    ));
 
     let error = run_batch(&request, &CancelToken::new(), &|_event| {}).expect_err("must fail");
     assert!(

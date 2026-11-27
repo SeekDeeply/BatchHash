@@ -2,6 +2,37 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.24.0] - 2026-11-27
+
+TASK-07b：并发、崩溃一致性与跨平台重命名原语。
+
+### 修复
+
+- **大小写仅变更的重命名在大小写不敏感文件系统上失效**：`a.txt` → `A.txt` 在
+  Windows 与 macOS 默认文件系统上是同一个文件，直接 rename 或静默无操作、或报
+  「目标已存在」。现在经同目录临时名两跳完成（正向与撤销都如此），第二跳失败时
+  立即回滚第一跳，错误信息带上临时路径。
+- **崩溃残留的临时文件无法回收**：临时名由原文件名派生（`.bh_case_<name>.tmp`），
+  `reconcile` 发现两个记录路径都不存在但该临时文件存在时，会把它还原为原名并标记
+  为未生效，而不是让用户文件永久藏在隐藏文件里。
+- **大小写不敏感文件系统上的存在性误判**：`plan_undo`、`undo_filesystem_conflict`
+  与 `reconcile` 原先用 `exists()` 判断，`A.txt` 会被当作与 `a.txt` 并存，导致本可
+  完成的撤销被判为冲突。仅大小写不同的路径改为列目录逐字节比对文件名。
+- **`record_result` 的状态检查与写入分离**：先读后写之间存在窗口，另一个写者
+  （第二个窗口、reconcile）可能已改变状态，盲目 UPDATE 会覆盖其决定。改为
+  `BEGIN IMMEDIATE` + `WHERE id = ? AND state = ?` 并检查影响行数。
+- **撤销的状态持久化滞后**：原先在循环结束后统一提交，中途崩溃会让磁盘已还原、
+  日志仍记「已应用」的文件被下一次 reconcile 再次撤销。现在每完成一条即落盘。
+- **`import_archive` 可能留下半个批次**：中途失败会写入部分操作，使撤销计划基于
+  不完整的历史。现在每个批次在单个事务内完成。
+- **SQLite 并发与崩溃**：开启 WAL（允许 UI 在记录重命名时读取历史）、
+  `synchronous = NORMAL`、`busy_timeout(5s)`，避免瞬时写锁冲突报成重命名失败。
+- **macOS 缺少非覆盖重命名**：`std::fs::rename` 在 macOS 上会静默替换目标。接入
+  `renamex_np(RENAME_EXCL)`，与 Linux 的 `renameat2(RENAME_NOREPLACE)` 和 Windows
+  的 `MoveFileExW(flags=0)` 对齐。
+- **目录可写判断失真**：Unix 改用 `access(W_OK | X_OK)` 询问内核；Windows 不再
+  用目录的 `readonly` 位判断（它标记的是自定义文件夹，多数系统目录都带此位），
+  改为实际创建并删除探测文件。
 ## [1.23.0] - 2026-11-26
 
 TASK-07a：后缀跨平台合法性与匹配正确性。

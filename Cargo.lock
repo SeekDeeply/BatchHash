@@ -37,7 +37,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "batchhash-cli"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "batchhash-core",
  "batchhash-hash",
@@ -50,7 +50,7 @@ dependencies = [
 
 [[package]]
 name = "batchhash-core"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "batchhash-hash",
  "batchhash-rename",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "batchhash-ffi"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "batchhash-core",
  "batchhash-hash",
@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "batchhash-hash"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "batchhash-types",
  "blake2",
@@ -113,7 +113,7 @@ dependencies = [
 
 [[package]]
 name = "batchhash-rename"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "batchhash-types",
  "chrono",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "batchhash-report"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "batchhash-types",
  "chrono",
@@ -145,7 +145,7 @@ dependencies = [
 
 [[package]]
 name = "batchhash-types"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "indexmap",
  "serde",

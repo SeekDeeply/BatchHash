@@ -383,11 +383,18 @@ fn a_missing_length_reads_to_the_end_of_the_file() {
     assert_eq!(result.entries.len(), 1);
     let entry = &result.entries[0];
     assert_eq!(entry.status, "ok", "entry: {entry:?}");
-    // The digest must cover the whole file. Hashing zero bytes would still
-    // report a digest, so the size is what distinguishes the two.
+    // `size` mirrors the request, which carried no length, so it is 0 here by
+    // design; what proves the read worked is a digest of the whole content.
+    let digest = entry
+        .hashes
+        .iter()
+        .find(|hash| hash.algorithm == "sha256")
+        .map(|hash| hash.hex.as_str())
+        .expect("a sha256 digest");
+    // sha256("twelve bytes"), computed independently of this crate.
     assert_eq!(
-        entry.size, 12,
-        "an unknown length must not collapse the file to zero bytes"
+        digest, "d4ce2c527afe674c7a086bd74e256019e3d5dcdb31eeb6eaadef5ada8c4383b9",
+        "the whole file must be hashed, not zero bytes"
     );
     assert!(
         entry.hashes.iter().any(|hash| hash.algorithm == "sha256"),

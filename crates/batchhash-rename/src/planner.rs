@@ -2038,6 +2038,105 @@ mod tests {
     }
 
     #[test]
+    /// Backend that performs real renames but can be told to fail one.
+    ///
+    /// The two-hop case rename is only correct if a failure between the hops is
+    /// rolled back, and that path cannot be reached with a backend that always
+    /// succeeds. This one fails the `rename_no_replace` call whose source is a
+    /// temporary file, which is exactly the second hop.
+    struct FailSecondHopBackend {
+        fail_temp_target: bool,
+        fail_all_after_first: bool,
+        calls: usize,
+    }
+
+    impl RenameBackend for FailSecondHopBackend {
+        fn rename(&mut self, from: &Path, to: &Path) -> Result<(), RenameError> {
+            self.calls += 1;
+            std::fs::rename(from, to).map_err(|error| RenameError::from_io(from, &error))
+        }
+
+        fn rename_no_replace(&mut self, from: &Path, to: &Path) -> Result<(), RenameError> {
+            self.calls += 1;
+            let is_temp_source = from
+                .file_name()
+                .map(|name| name.to_string_lossy().starts_with(".bh_case_"))
+                .unwrap_or(false);
+            if (is_temp_source && self.fail_temp_target) || self.fail_all_after_first {
+                return Err(RenameError::Io("injected failure on the second hop".to_string()));
+            }
+            StdFsBackend::rename_no_replace_impl(from, to)
+        }
+    }
+
+    #[test]
+    fn a_failed_second_hop_puts_the_file_back() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("a.txt");
+        fs::write(&source, b"payload").expect("source file");
+        // Build a plan whose proposed name differs only in case, which is the
+        // only shape that takes the two-hop path.
+        let plan = RenamePlan {
+            rows: vec![RenamePlanRow {
+                entry_index: 0,
+                original_path: source.display().to_string(),
+                original_name: "a.txt".to_string(),
+                proposed_name: "A.txt".to_string(),
+                status: RenameRowStatus::Ready,
+                reason: None,
+            }],
+            summary: RenamePlanSummary::default(),
+            dry_run: true,
+        };
+        let mut backend = FailSecondHopBackend {
+            fail_temp_target: true,
+            fail_all_after_first: false,
+            calls: 0,
+        };
+        let results = execute_plan(&plan, &mut backend);
+        assert_eq!(results[0].status, RenameResultStatus::Failed);
+        // The first hop must have been undone: the file is back at its original
+        // name with its content, and nothing is left under the temporary name.
+        assert_eq!(fs::read(&source).expect("source is back"), b"payload");
+        let leftovers: Vec<String> = fs::read_dir(temp.path())
+            .expect("list")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".bh_case_"))
+            .collect();
+        assert!(leftovers.is_empty(), "temporary file left behind: {leftovers:?}");
+    }
+
+    #[test]
+    fn a_case_only_rename_succeeds_through_the_temporary_name() {
+        let temp = tempdir().expect("tempdir");
+        let source = temp.path().join("a.txt");
+        fs::write(&source, b"payload").expect("source file");
+        let plan = RenamePlan {
+            rows: vec![RenamePlanRow {
+                entry_index: 0,
+                original_path: source.display().to_string(),
+                original_name: "a.txt".to_string(),
+                proposed_name: "A.txt".to_string(),
+                status: RenameRowStatus::Ready,
+                reason: None,
+            }],
+            summary: RenamePlanSummary::default(),
+            dry_run: true,
+        };
+        let results = execute_plan(&plan, &mut StdFsBackend::new());
+        assert_eq!(results[0].status, RenameResultStatus::Renamed);
+        assert!(temp.path().join("A.txt").exists());
+        // On a case-insensitive filesystem the old spelling resolves to the new
+        // file, so the directory listing is the only honest check.
+        let names: Vec<String> = fs::read_dir(temp.path())
+            .expect("list")
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"A.txt".to_string()), "names: {names:?}");
+    }
+
     fn execute_plan_never_replaces_a_target_created_after_planning() {
         let temp = tempdir().expect("tempdir");
         let source = temp.path().join("a.txt");

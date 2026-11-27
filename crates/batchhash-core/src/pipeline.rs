@@ -316,6 +316,15 @@ pub fn run_batch(
     if let Some(format) = &request.suffix {
         for part in format.parts() {
             part.validate()?;
+            // A suffix is written from the digest the run computed. Asking for an
+            // algorithm that was never hashed would silently produce a name with a
+            // missing or borrowed digest, so the request is rejected up front.
+            if !request.algorithms.contains(&part.algorithm) {
+                return Err(PipelineError::InvalidRequest(format!(
+                    "suffix algorithm {} is not among the hashing algorithms",
+                    part.algorithm
+                )));
+            }
         }
         if request.apply_renames && request.log_db.is_none() {
             return Err(PipelineError::InvalidRequest(
@@ -582,9 +591,19 @@ fn exclude_log_artifacts(
         return (entries, skipped);
     };
     let log_display = crate::scan::display_path(log_db);
+    // SQLite writes companion files next to the database. They belong to the log
+    // too: hashing them would put the log's own bookkeeping into the report, and
+    // renaming them would corrupt an open database.
+    let mut artifacts = vec![log_display.clone()];
+    for suffix in ["-wal", "-shm", "-journal"] {
+        artifacts.push(format!("{log_display}{suffix}"));
+    }
     let mut kept = Vec::with_capacity(entries.len());
     for entry in entries {
-        if entry.display_path == log_display || entry.display_path.starts_with(&log_display) {
+        // Exact match only. A prefix test would also swallow a neighbour such as
+        // `batch.db.bak` or `batch.db2`, silently dropping real files from the
+        // report because they happen to share a name prefix with the log.
+        if artifacts.iter().any(|artifact| entry.display_path == *artifact) {
             skipped.push(ScanSkip {
                 path: entry.display_path.clone(),
                 reason: "rename log database".to_string(),

@@ -37,7 +37,9 @@ use batchhash_core::pipeline::{
     default_case_sensitive, now_rfc3339, run_batch, BatchRequest, BatchRun, PipelineEvent,
 };
 use batchhash_core::scan::{display_path, scan, ScanOptions};
-use batchhash_rename::log_store::{apply_undo, LogStore, UndoResultStatus, UndoStatus};
+use batchhash_rename::log_store::{
+    apply_undo, reconcile_pending_operations, LogStore, UndoResultStatus, UndoStatus,
+};
 use batchhash_rename::planner::{
     RenamePlan, RenameResultStatus, RenameRowStatus, StdFsBackend, StdRenameFs,
 };
@@ -727,6 +729,12 @@ fn cmd_suffix_undo(args: &[String]) -> CliResult<()> {
     };
     let mut store =
         LogStore::open(db).map_err(|error| format!("cannot open rename log {db}: {error}"))?;
+    // Reconcile before planning: a previous run may have been killed between the
+    // rename and the log write, leaving rows that claim to be pending although
+    // the disk already moved. Planning an undo against that stale view would
+    // either skip files that were renamed or try to reverse ones that never were.
+    let reconciled = reconcile_pending_operations(&mut store, &StdRenameFs)
+        .map_err(|error| format!("cannot reconcile rename log: {error}"))?;
     let batch_id = match parsed.value("batch") {
         Some(id) => id.to_string(),
         None => {
@@ -742,6 +750,15 @@ fn cmd_suffix_undo(args: &[String]) -> CliResult<()> {
         .map_err(|error| error.to_string())?;
     let mut text = String::new();
     text.push_str(&format!("# BatchHash undo plan for batch {batch_id}\n\n"));
+    if reconciled.applied > 0 || reconciled.not_applied > 0 || reconciled.ambiguous > 0 {
+        text.push_str(&format!(
+            "Reconciled {} pending operations first: {} applied, {} not applied, {} ambiguous.\n\n",
+            reconciled.applied + reconciled.not_applied + reconciled.ambiguous,
+            reconciled.applied,
+            reconciled.not_applied,
+            reconciled.ambiguous
+        ));
+    }
     text.push_str("| # | From | To | Status | Reason |\n|---:|---|---|---|---|\n");
     let mut ready = 0usize;
     for (index, row) in plan.rows.iter().enumerate() {

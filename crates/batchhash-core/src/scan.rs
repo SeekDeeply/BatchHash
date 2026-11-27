@@ -252,6 +252,15 @@ fn file_type_label(metadata: &fs::Metadata) -> &'static str {
     "special file"
 }
 
+/// Classify an I/O error the way the report schema expects.
+fn error_kind_from_io(error: &std::io::Error) -> ErrorKind {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => ErrorKind::PermissionDenied,
+        std::io::ErrorKind::NotFound => ErrorKind::NotFound,
+        _ => ErrorKind::IoError,
+    }
+}
+
 fn walk(
     root: &Path,
     current: &Path,
@@ -287,10 +296,13 @@ fn walk(
             } else {
                 relative
             };
+            // Every directory that cannot be listed was previously reported as
+            // PermissionDenied, which is wrong for a vanished directory or a
+            // stale network mount and misleads the user about what to fix.
             push_failure(
                 current,
                 &relative,
-                ErrorKind::PermissionDenied,
+                error_kind_from_io(&error),
                 error.to_string(),
                 options,
                 outcome,

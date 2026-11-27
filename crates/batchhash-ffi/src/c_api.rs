@@ -302,7 +302,11 @@ pub unsafe extern "C" fn bh_free(ptr: *mut c_char) {
     if ptr.is_null() {
         return;
     }
-    drop(CString::from_raw(ptr));
+    // An unwind must never cross the FFI boundary: doing so is undefined
+    // behaviour in the caller's runtime. Dropping a `CString` allocates nothing
+    // and should not panic, but "should not" is not a guarantee worth betting the
+    // whole process on for a call that costs a closure.
+    let _ = catch_unwind(AssertUnwindSafe(|| drop(CString::from_raw(ptr))));
 }
 
 fn parse_request<T: serde::de::DeserializeOwned>(
@@ -353,20 +357,25 @@ where
     reply_ok(envelope)
 }
 
+/// Envelope returned when serialisation itself fails.
+const INTERNAL_ENVELOPE: &str =
+    "{\"ok\":false,\"api_version\":1,\"kind\":\"internal\",\"error\":\"cannot serialise the response\"}";
+
 fn reply_ok(value: serde_json::Value) -> *mut c_char {
-    let text = serde_json::to_string(&value).unwrap_or_else(|_| {
-        let fallback = json!({
-            "ok": false,
-            "api_version": C_ABI_VERSION,
-            "kind": "internal",
-            "error": "cannot serialise the response",
-        });
-        fallback.to_string()
-    });
-    // A JSON document never contains a NUL byte, so CString::new is safe here.
-    match CString::new(text) {
-        Ok(cstring) => cstring.into_raw(),
-        Err(_) => CString::new("{\"ok\":false,\"kind\":\"internal\",\"error\":\"nul byte\"}")
+    // Serialisation and CString construction both allocate and both can panic
+    // (a deeply nested value, an allocator failure). Neither is inside the
+    // caller's `catch_unwind` in `reply`, so each is guarded here; otherwise a
+    // panic would unwind across the FFI boundary, which is undefined behaviour
+    // and takes the host process with it.
+    let text = match catch_unwind(AssertUnwindSafe(|| serde_json::to_string(&value))) {
+        Ok(Ok(text)) => text,
+        _ => INTERNAL_ENVELOPE.to_string(),
+    };
+    // A JSON document never contains a NUL byte, so this is expected to succeed;
+    // the fallback covers a caller that hand-built a string with a NUL in it.
+    match catch_unwind(AssertUnwindSafe(|| CString::new(text))) {
+        Ok(Ok(cstring)) => cstring.into_raw(),
+        _ => CString::new(INTERNAL_ENVELOPE)
             .map(CString::into_raw)
             .unwrap_or(std::ptr::null_mut()),
     }
@@ -375,12 +384,18 @@ fn reply_ok(value: serde_json::Value) -> *mut c_char {
 /// Serialise a value into a JSON envelope, used by tests and bindings that must
 /// not go through the raw pointers.
 pub fn call_json<T: Serialize>(value: T) -> String {
-    serde_json::to_string(&json!({
+    let envelope = json!({
         "ok": true,
         "api_version": C_ABI_VERSION,
         "data": value,
-    }))
-    .unwrap_or_else(|_| "{\"ok\":false,\"kind\":\"internal\",\"error\":\"serialise\"}".to_string())
+    });
+    // Same reasoning as `reply_ok`: this is reachable from the Dart bridge, and
+    // a panic here would unwind into the caller's isolate instead of returning
+    // an error it can display.
+    match catch_unwind(AssertUnwindSafe(|| serde_json::to_string(&envelope))) {
+        Ok(Ok(text)) => text,
+        _ => INTERNAL_ENVELOPE.to_string(),
+    }
 }
 
 /// Hash explicit root-relative paths. Request: see api::HashEntriesRequest.

@@ -1554,7 +1554,15 @@ pub fn hash_entries_request_with_progress(
             continue;
         }
         let display = std::path::Path::new(&request.root).join(path);
-        let metadata = std::fs::metadata(&display);
+        // `metadata` follows a symlink, `symlink_metadata` describes the link.
+        // With `follow_links` off the link itself is what the caller asked about,
+        // so its own size is the honest answer; following it would hash a target
+        // the request never named.
+        let metadata = if request.follow_links {
+            std::fs::metadata(&display)
+        } else {
+            std::fs::symlink_metadata(&display)
+        };
         let (size, mtime) = match metadata {
             Ok(metadata) => (
                 metadata.len(),
@@ -1572,10 +1580,17 @@ pub fn hash_entries_request_with_progress(
                     0,
                     None,
                 );
-                entry.fail(
-                    batchhash_types::ErrorKind::NotFound,
-                    format!("cannot stat the entry: {error}"),
-                );
+                // A vanished file and a denied one are different problems for
+                // the user, and reporting both as NotFound sent them looking for
+                // a missing file that was merely unreadable.
+                let kind = match error.kind() {
+                    std::io::ErrorKind::NotFound => batchhash_types::ErrorKind::NotFound,
+                    std::io::ErrorKind::PermissionDenied => {
+                        batchhash_types::ErrorKind::PermissionDenied
+                    }
+                    _ => batchhash_types::ErrorKind::IoError,
+                };
+                entry.fail(kind, format!("cannot stat the entry: {error}"));
                 entries.push(entry);
                 continue;
             }

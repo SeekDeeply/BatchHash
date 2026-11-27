@@ -1061,10 +1061,19 @@ class RenameExecuteResult {
 
 /// One file written by the report exporter.
 class ExportedReport {
-  const ExportedReport({required this.format, required this.path});
+  const ExportedReport({this.format, required this.path});
 
-  final ReportFormat format;
+  /// Report format of the written file, or null for a companion file.
+  ///
+  /// The rename log travels with the report when the user asks for it. It is a
+  /// SQLite database, not a report, and claiming `ReportFormat.json` for it made
+  /// the UI offer to re-import it as a report and show a `.json` label for a
+  /// `.db` file.
+  final ReportFormat? format;
   final String path;
+
+  /// Whether this is the report itself rather than a companion file.
+  bool get isReport => format != null;
 }
 
 /// One batch stored in the rename log.

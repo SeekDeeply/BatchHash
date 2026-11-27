@@ -79,12 +79,22 @@ pub struct JobStatusDto {
     pub error: Option<String>,
 }
 
+/// Most jobs kept at once. The registry is a leak in a long-running UI: every
+/// start adds an entry and nothing removed it, so a session that scanned a
+/// thousand folders held a thousand finished jobs and their result payloads.
+pub const MAX_LIVE_JOBS: usize = 64;
+
+/// How long a finished job is kept so a late poll can still read its result.
+pub const FINISHED_JOB_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+
 struct Job {
     state: JobState,
     progress: Option<ProgressDto>,
     result_json: Option<String>,
     error: Option<ApiError>,
     cancel: batchhash_hash::CancelToken,
+    /// When the job reached a terminal state; `None` while it runs.
+    finished_at: Option<std::time::Instant>,
 }
 
 impl Job {
@@ -123,6 +133,34 @@ type JobBody = Box<
     dyn FnOnce(&batchhash_hash::CancelToken, ProgressSink<'_>) -> Result<String, ApiError> + Send,
 >;
 
+/// Drop finished jobs past the TTL, then the oldest finished ones until the
+/// registry is under [MAX_LIVE_JOBS]. Running jobs are never evicted: they own
+/// threads that would keep writing to a map entry nobody can poll.
+fn prune_finished(jobs: &mut BTreeMap<String, Job>) {
+    let now = std::time::Instant::now();
+    jobs.retain(|_, job| {
+        match job.finished_at {
+            Some(finished) => now.duration_since(finished) < FINISHED_JOB_TTL,
+            None => true,
+        }
+    });
+    if jobs.len() < MAX_LIVE_JOBS {
+        return;
+    }
+    // Oldest first: a BTreeMap keyed by `job-N` iterates in creation order, so
+    // collecting the finished ids and sorting by finish time keeps the newest
+    // results readable.
+    let mut finished: Vec<(String, std::time::Instant)> = jobs
+        .iter()
+        .filter_map(|(id, job)| job.finished_at.map(|at| (id.clone(), at)))
+        .collect();
+    finished.sort_by_key(|(_, at)| *at);
+    let excess = jobs.len().saturating_sub(MAX_LIVE_JOBS - 1);
+    for (id, _) in finished.into_iter().take(excess) {
+        jobs.remove(&id);
+    }
+}
+
 fn start_job(body: JobBody) -> String {
     let job_id = next_id();
     let cancel = batchhash_hash::CancelToken::new();
@@ -131,6 +169,7 @@ fn start_job(body: JobBody) -> String {
         let mut jobs = registry()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        prune_finished(&mut jobs);
         jobs.insert(
             job_id.clone(),
             Job {
@@ -139,6 +178,7 @@ fn start_job(body: JobBody) -> String {
                 result_json: None,
                 error: None,
                 cancel,
+                finished_at: None,
             },
         );
     }
@@ -165,11 +205,18 @@ fn start_job(body: JobBody) -> String {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(job) = jobs.get_mut(&thread_id) {
+                job.finished_at = Some(std::time::Instant::now());
                 if job.cancel.is_cancelled() {
-                    // Cancellation wins over a successful return: a run that
-                    // stopped early must never be reported as a complete result.
+                    // A cancelled run is not a complete result, but it is not
+                    // nothing either: when the work applied renames, the files
+                    // on disk have already moved and the caller needs the record
+                    // to reconcile. Discarding it left the log and the disk out
+                    // of step with no way to see what had happened.
                     job.state = JobState::Cancelled;
-                    job.result_json = None;
+                    job.result_json = match outcome {
+                        Ok(Ok(payload)) => Some(payload),
+                        _ => None,
+                    };
                     job.error = None;
                 } else {
                     match outcome {

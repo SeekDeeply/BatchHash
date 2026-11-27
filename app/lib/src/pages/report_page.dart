@@ -374,13 +374,23 @@ class _ReportPageState extends State<ReportPage> {
                               'report-exported-${exported.path}',
                             ),
                             dense: true,
-                            leading: Icon(_iconFor(exported.format)),
+                            leading: Icon(
+                              exported.format == null
+                                  ? Icons.storage
+                                  : _iconFor(exported.format!),
+                            ),
                             title: Text(
                               exported.path,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: Text(exported.format.label),
+                            // A companion file has no report format; naming it
+                            // "json" for a SQLite database was a lie the user
+                            // could act on and be misled by.
+                            subtitle: Text(
+                              exported.format?.label ??
+                                  context.strings('report.companionFile'),
+                            ),
                             onTap: () => _copyPath(exported.path),
                             trailing: _canOpenFolder
                                 ? IconButton(

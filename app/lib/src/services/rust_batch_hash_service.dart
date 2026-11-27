@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -65,10 +67,14 @@ class RustBatchHashService implements BatchHashService {
     String? logDbPath,
     AppConfigStore? configStore,
     SupportDirectoryResolver? supportDirectory,
+    Map<String, String>? nativeEnvironment,
+    String? nativeOverridePath,
   }) : _renderingProvider = renderingProvider,
        _logDbPath = logDbPath,
        _configStore = configStore,
-       _supportDirectory = supportDirectory;
+       _supportDirectory = supportDirectory,
+       _nativeEnvironment = nativeEnvironment,
+       _nativeOverridePath = nativeOverridePath;
 
   /// Open the native library and return null when it is not available.
   static RustBatchHashService? tryCreate({
@@ -91,10 +97,17 @@ class RustBatchHashService implements BatchHashService {
       renderingProvider: renderingProvider,
       configStore: configStore,
       supportDirectory: supportDirectory,
+      // Kept so a worker isolate can open the same library the UI isolate uses.
+      nativeEnvironment: environment,
+      nativeOverridePath: overridePath,
     );
   }
 
   final BatchHashNative native;
+  /// Environment used to locate the native library, replayed in worker isolates.
+  final Map<String, String>? _nativeEnvironment;
+  /// Explicit library path, replayed in worker isolates.
+  final String? _nativeOverridePath;
   final RenderingHardwareProvider _renderingProvider;
   final SupportDirectoryResolver? _supportDirectory;
   AppConfigStore? _configStore;
@@ -105,11 +118,30 @@ class RustBatchHashService implements BatchHashService {
   /// Cached result of [listAlgorithms]; the registry is static per process.
   List<AlgorithmInfo>? _algorithms;
   String? _lastReportJson;
+  /// The exact model [_lastReportJson] was built from.
+  ///
+  /// Identity rather than the root string: a rescan of the same folder produces
+  /// a new model, and comparing roots served the previous report.
+  ReportModel? _lastReportModel;
+
+  /// Which log database each batch came from, filled by [loadHistory].
+  ///
+  /// Undo needs the database that actually holds the batch. Picking the first
+  /// existing log on disk worked only while one folder was in use; with several
+  /// remembered roots it either failed with "unknown batch" or, worse, opened a
+  /// different log that happened to be found first.
+  final Map<String, String> _batchLogPaths = <String, String>{};
   /// Root the batch behind [_lastReportJson] worked on, or null when the cached
   /// JSON does not describe the report the caller is asking about.
   String? _lastReportRoot;
   /// Native job currently running, so [cancelCurrentOperation] can stop it.
-  String? _activeJobId;
+  /// Jobs this service started and has not released.
+  ///
+  /// A single nullable id assumed at most one job at a time, which stopped being
+  /// true once scanning and hashing could overlap: starting the second job
+  /// overwrote the first id, and `cancelCurrentOperation` then cancelled the
+  /// wrong one while the first kept running.
+  final Set<String> _activeJobIds = <String>{};
 
   /// How often the Dart side asks a native job for progress.
   ///
@@ -216,20 +248,57 @@ class RustBatchHashService implements BatchHashService {
     ];
   }
   @override
+  /// Run a native call that has no job API on a worker isolate.
+  ///
+  /// `bh_scan` and `bh_plan_renames` are synchronous C calls. Called on the UI
+  /// isolate they block it for the whole walk — on a network share that is
+  /// seconds of frozen window with no progress at all. [Isolate.run] moves the
+  /// call off the UI thread and hands back a plain JSON map, which is the only
+  /// shape that can cross an isolate boundary.
+  ///
+  /// [request] must be a plain JSON-safe map: the closure sent to the worker
+  /// cannot reference `this`, and anything it captures is copied. The library is
+  /// opened again inside the isolate because a `DynamicLibrary` handle is not
+  /// sendable; the platform loader returns the same already-loaded module, so
+  /// this costs a lookup rather than a second load.
+  Future<Map<String, Object?>> _runOffThread(
+    Map<String, Object?> request,
+    String function,
+  ) async {
+    final Map<String, String>? environment = _nativeEnvironment;
+    final String? overridePath = _nativeOverridePath;
+    return Isolate.run(() {
+      final BatchHashNative worker = BatchHashNative.tryOpen(
+        environment: environment,
+        overridePath: overridePath,
+      ) ??
+          (throw const BridgeUnavailable(
+            'the native library is not available in the worker isolate',
+          ));
+      return worker.callMap(function, request);
+    });
+  }
+
   Future<List<BatchEntry>> scanDirectory(
     String path, {
     bool recursive = false,
   }) async {
     _explicitPaths = null;
-    final data = native.scan(path);
+    // The depth limit is passed to the native scanner rather than filtered here:
+    // the native side already knows the directory structure, and hashing a whole
+    // tree only to discard the subdirectory entries wasted the walk.
+    final Map<String, Object?> data = await _runOffThread(
+      <String, Object?>{
+        'root': path,
+        'follow_links': false,
+        if (!recursive) 'max_depth': 1,
+      },
+      'bh_scan',
+    );
     _lastRoot = path;
     _lastScanRecursive = recursive;
     await _rememberRoot(path);
-    final entries = _entries(data['entries']);
-    if (recursive) {
-      return entries;
-    }
-    return entries.where((entry) => !entry.path.contains('/')).toList();
+    return _entries(data['entries']);
   }
 
   @override
@@ -418,7 +487,7 @@ class RustBatchHashService implements BatchHashService {
       return;
     }
     final jobId = native.jobStart(action: action, payload: request);
-    _activeJobId = jobId;
+    _activeJobIds.add(jobId);
     try {
       while (true) {
         final status = native.jobPoll(jobId);
@@ -465,7 +534,7 @@ class RustBatchHashService implements BatchHashService {
         await Future<void>.delayed(_pollInterval);
       }
     } finally {
-      _activeJobId = null;
+      _activeJobIds.remove(jobId);
       native.jobRelease(jobId);
     }
   }
@@ -571,21 +640,23 @@ class RustBatchHashService implements BatchHashService {
     final List<String> effective = algorithms.isEmpty
         ? const <String>[kDefaultRenameAlgorithm]
         : algorithms;
-    final data = native.planRenames(
-      root: _lastRoot,
-      entries: entries.map(_entryJson).toList(),
-      algorithms: effective,
-      length: length,
-      uppercase: uppercase,
+    // Planning reads the filesystem to detect conflicts and can take seconds on
+    // a large tree, so it runs off the UI isolate like the scan does.
+    final data = await _runOffThread(<String, Object?>{
+      'root': _lastRoot,
+      'entries': entries.map(_entryJson).toList(),
+      'algorithms': effective,
+      'length': length,
+      'uppercase': uppercase,
       // A combined group of bare hex tokens cannot be parsed back: nothing in
       // `[ABCD1234+EF567890]` says which half is which algorithm. The core
       // forces the prefix for multi-algorithm output for that reason, and this
       // flag is what lets it; without it a two-algorithm plan silently wrote a
       // single unlabelled token.
-      prefix: effective.length > 1,
-      strict: strict,
-      clearSuffix: clearSuffix,
-    );
+      'prefix': effective.length > 1,
+      'strict': strict,
+      'clear_suffix': clearSuffix,
+    }, 'bh_plan_renames');
     final rows = (data['rows'] as List<Object?>? ?? const <Object?>[])
         .cast<Map<String, Object?>>()
         .map(
@@ -740,9 +811,7 @@ class RustBatchHashService implements BatchHashService {
         if (source.existsSync()) {
           final File copy = _claimFileName(dirPath, 'db');
           await source.copy(copy.path);
-          written.add(
-            ExportedReport(format: ReportFormat.json, path: copy.path),
-          );
+          written.add(ExportedReport(path: copy.path));
         }
       }
     }
@@ -867,33 +936,14 @@ class RustBatchHashService implements BatchHashService {
     final String root = report.root;
     final List<String> paths = <String>[];
     for (final BatchEntry entry in report.entries) {
-      final String relative = _relativeTo(root, entry.path);
+      // One implementation, not two: the local copy compared raw prefixes and
+      // would turn `/data/foo` + `/data/foobar/x` into `bar/x`.
+      final String relative = rootRelativePath(root, entry.path);
       if (relative.isNotEmpty) {
         paths.add(relative);
       }
     }
     return paths;
-  }
-
-  /// Strip the root prefix from a display path.
-  ///
-  /// Returns an empty string when the entry is not under the root, which the
-  /// engine would reject anyway; skipping it keeps the rest of the scope valid.
-  String _relativeTo(String root, String path) {
-    if (root.isEmpty) {
-      return '';
-    }
-    final String normalizedRoot = root.endsWith('/') || root.endsWith('\\')
-        ? root.substring(0, root.length - 1)
-        : root;
-    if (!path.startsWith(normalizedRoot)) {
-      return '';
-    }
-    String relative = path.substring(normalizedRoot.length);
-    while (relative.startsWith('/') || relative.startsWith('\\')) {
-      relative = relative.substring(1);
-    }
-    return relative;
   }
 
   /// Only true when the loaded library exposes the async job API.
@@ -905,16 +955,17 @@ class RustBatchHashService implements BatchHashService {
 
   @override
   Future<void> cancelCurrentOperation() async {
-    final jobId = _activeJobId;
-    if (jobId == null) {
-      return;
-    }
-    // The job reports its terminal state through the poll loop, which is what
-    // closes the stream; cancelling here only asks the worker to stop.
-    try {
-      native.jobCancel(jobId);
-    } on BridgeException {
-      // A job that finished between the read and this call is already gone.
+    // Every live job is cancelled, not just the most recent one. A scan that is
+    // still running while hashing starts is exactly the case the UI shows a
+    // single cancel button for.
+    for (final String jobId in _activeJobIds.toList()) {
+      // The job reports its terminal state through the poll loop, which is what
+      // closes the stream; cancelling here only asks the worker to stop.
+      try {
+        native.jobCancel(jobId);
+      } on BridgeException {
+        // A job that finished between the read and this call is already gone.
+      }
     }
   }
 
@@ -964,7 +1015,7 @@ class RustBatchHashService implements BatchHashService {
       return;
     }
     final jobId = native.jobStart(action: 'diff_directory', payload: request);
-    _activeJobId = jobId;
+    _activeJobIds.add(jobId);
     try {
       while (true) {
         final status = native.jobPoll(jobId);
@@ -1023,7 +1074,7 @@ class RustBatchHashService implements BatchHashService {
         await Future<void>.delayed(_pollInterval);
       }
     } finally {
-      _activeJobId = null;
+      _activeJobIds.remove(jobId);
       native.jobRelease(jobId);
     }
   }
@@ -1064,6 +1115,8 @@ class RustBatchHashService implements BatchHashService {
         if (id.isEmpty || !seenIds.add(id)) {
           continue;
         }
+        // Remember where this batch lives so undo opens the right database.
+        _batchLogPaths[id] = candidate;
         final createdAt =
             DateTime.tryParse(batch['created_at'] as String? ?? '') ??
             DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
@@ -1123,7 +1176,9 @@ class RustBatchHashService implements BatchHashService {
 
   @override
   Future<bool> undoBatch(String batchId) async {
-    final db = await _resolveLogDb();
+    // The batch knows its own database; falling back to a search is only for a
+    // batch that was never listed through loadHistory in this session.
+    final db = _batchLogPaths[batchId] ?? await _resolveLogDb();
     if (db == null) {
       return false;
     }
@@ -1135,6 +1190,7 @@ class RustBatchHashService implements BatchHashService {
       // the entry list it described are both stale now.
       _lastReportJson = null;
       _lastReportRoot = null;
+      _lastReportModel = null;
     }
     return undone > 0;
   }
@@ -1247,18 +1303,24 @@ class RustBatchHashService implements BatchHashService {
 
   String _reportJson(ReportModel report) {
     final cached = _lastReportJson;
-    if (cached != null && report.root == _lastReportRoot) {
+    // Identity, not equality of the root: two different reports of the same
+    // folder are the common case (rescan after editing files), and keying on the
+    // root alone served the first one's JSON for the second.
+    if (cached != null && identical(report, _lastReportModel)) {
       return cached;
     }
+    _lastReportModel = report;
     final algorithms = report.algorithms.isEmpty
         ? const <String>['sha256']
         : report.algorithms;
-    return native.buildReport(
+    final String json = native.buildReport(
       root: report.root,
       algorithms: algorithms,
       entries: report.entries.map(_entryJson).toList(),
       generatedAt: report.generatedAt.toUtc().toIso8601String(),
     );
+    _lastReportJson = json;
+    return json;
   }
 
   ReportModel _reportFromJson(String json, ReportModel fallback) {
@@ -1442,14 +1504,20 @@ class RustBatchHashService implements BatchHashService {
 
   EntryStatus _status(String? value) {
     return switch (value) {
+      'ok' => EntryStatus.ok,
       'failed' => EntryStatus.failed,
       'skipped' => EntryStatus.skipped,
-      _ => EntryStatus.ok,
+      // An unrecognised value means the native side is newer than this build.
+      // Falling back to `ok` would present an entry the engine rejected as a
+      // success, and the report would claim a hash that may not exist. Treating
+      // it as failed keeps the entry visible with its raw status in the log.
+      _ => EntryStatus.failed,
     };
   }
 
   DiffStatus _diffStatus(String? value) {
     return switch (value) {
+      'unchanged' => DiffStatus.unchanged,
       'changed' => DiffStatus.changed,
       'added' => DiffStatus.added,
       'removed' => DiffStatus.removed,
@@ -1459,7 +1527,9 @@ class RustBatchHashService implements BatchHashService {
       'out_of_root' => DiffStatus.outOfRoot,
       'corrupt' => DiffStatus.corrupt,
       'unstable' => DiffStatus.unstable,
-      _ => DiffStatus.unchanged,
+      // `unchanged` is a positive claim: the two files match. An unknown value
+      // must not become that claim, so it is reported as unknown instead.
+      _ => DiffStatus.unknown,
     };
   }
 

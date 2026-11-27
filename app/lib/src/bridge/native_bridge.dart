@@ -134,10 +134,21 @@ class BatchHashNative {
   }
 
   /// Scan a directory (or a single file) without hashing.
-  Map<String, Object?> scan(String root, {bool followLinks = false}) {
+  /// Scan a directory tree into entries.
+  ///
+  /// [recursive] false asks for the top level only. The native scanner has no
+  /// "recursive" switch, so this passes `max_depth: 1` instead of silently
+  /// scanning the whole tree: a user who picked "only this folder" expects the
+  /// subfolders to be left out.
+  Map<String, Object?> scan(
+    String root, {
+    bool followLinks = false,
+    bool recursive = true,
+  }) {
     return _callMap('bh_scan', <String, Object?>{
       'root': root,
       'follow_links': followLinks,
+      if (!recursive) 'max_depth': 1,
     });
   }
 
@@ -433,6 +444,18 @@ class BatchHashNative {
 
   Map<String, Object?> _callMap(String name, Map<String, Object?> request) {
     return _asMap(_call(name, request));
+  }
+
+  /// Call a JSON-in/JSON-out entry point by name.
+  ///
+  /// Public so a worker isolate can replay a call on its own handle: the
+  /// synchronous entry points have to run off the UI isolate, and a
+  /// `DynamicLibrary` cannot be sent across the boundary.
+  Map<String, Object?> callMap(
+    String name,
+    Map<String, Object?> request,
+  ) {
+    return _callMap(name, request);
   }
 
   List<Map<String, Object?>> _callList(

@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 
 import 'models/models.dart';
@@ -74,11 +77,92 @@ class AppTheme {
     return base.copyWith(primary: primary, onPrimary: onPrimary);
   }
 
+  /// Sans-serif families to try, in order, after the primary font.
+  ///
+  /// Flutter ships only Roboto, which has no CJK glyphs. On Windows the missing
+  /// glyphs fell back to SimSun, an old Song-style face that looks nothing like
+  /// the rest of the UI; on Linux the choice was whatever fontconfig picked, so
+  /// two machines rendered the same build differently. Naming the modern system
+  /// faces keeps the text consistent without embedding a font.
+  static List<String> get _cjkFallback {
+    if (Platform.isWindows) {
+      return const <String>[
+        'Segoe UI',
+        'Microsoft YaHei UI',
+        'Microsoft YaHei',
+        'Noto Sans SC',
+      ];
+    }
+    if (Platform.isMacOS) {
+      return const <String>['PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC'];
+    }
+    if (Platform.isAndroid) {
+      return const <String>['Noto Sans CJK SC', 'Noto Sans SC'];
+    }
+    // Linux and anything else: fontconfig usually has at least one of these.
+    return const <String>[
+      'Noto Sans CJK SC',
+      'Source Han Sans SC',
+      'WenQuanYi Micro Hei',
+      'DejaVu Sans',
+    ];
+  }
+
+  /// The platform face that should lead the stack.
+  ///
+  /// Only Windows is named explicitly: it is the platform where the default
+  /// Roboto-first stack visibly degrades, and Segoe UI Variable is both the
+  /// modern Windows face and a close match for Material. Elsewhere the system
+  /// default already is the right one, and forcing a name would break on a
+  /// release that renamed it.
+  static String? get _primaryFontFamily {
+    if (Platform.isWindows) {
+      return 'Segoe UI Variable';
+    }
+    return null;
+  }
+
+  /// Monospace stack for digests, paths and anything column-aligned.
+  ///
+  /// A hex digest is only readable when every character has the same advance;
+  /// a proportional fallback made the report columns ragged.
+  static const List<String> monoFontFallback = <String>[
+    'Cascadia Mono',
+    'JetBrains Mono',
+    'SF Mono',
+    'Consolas',
+    'Noto Sans Mono',
+    'monospace',
+  ];
+
+  /// The monospace family to request, or null to let the fallback stack decide.
+  static String? get monoFontFamily {
+    if (Platform.isWindows) {
+      return 'Cascadia Mono';
+    }
+    if (Platform.isMacOS) {
+      return 'SF Mono';
+    }
+    return null;
+  }
+
   static ThemeData _themeFrom(ColorScheme scheme) {
+    final String? family = _primaryFontFamily;
+    final List<String> fallback = _cjkFallback;
+    // The text theme is rebuilt rather than only setting `fontFamily` on
+    // ThemeData: the per-style fields are what actually reach a Text widget, and
+    // a family set only at the top is ignored by styles that already carry one.
+    final TextTheme base = Typography.material2021(
+      platform: defaultTargetPlatform,
+      colorScheme: scheme,
+    ).black.apply(fontFamily: family, fontFamilyFallback: fallback);
     return ThemeData(
       colorScheme: scheme,
       useMaterial3: true,
       visualDensity: VisualDensity.compact,
+      fontFamily: family,
+      fontFamilyFallback: fallback,
+      textTheme: base.apply(fontFamily: family, fontFamilyFallback: fallback),
     );
   }
 }

@@ -52,7 +52,47 @@ class _HashPageState extends State<HashPage> {
   /// The export awaits the folder picker, so without this the buttons stay
   /// live while the dialog is open and every extra tap opens another dialog.
   bool _exporting = false;
+
+  /// Whether the algorithm chips are shown in full.
+  ///
+  /// A dozen selected algorithms used to push the run button and the results
+  /// below the fold, so the page looked like it had no way forward. The chip row
+  /// is capped until the user asks for the rest.
+  bool _algorithmsExpanded = false;
   StreamSubscription<HashProgress>? _subscription;
+
+  /// Chips shown before the row is folded.
+  ///
+  /// Eight fits one line on a narrow window together with the manage chip, which
+  /// is the point of folding: the run button below stays visible.
+  static const int _kAlgorithmChipLimit = 8;
+
+  /// The chips to render, selected ones first.
+  ///
+  /// Selection first matters when folding: a ticked algorithm hidden behind
+  /// "show all" looks like the selection was lost.
+  List<String> _visiblePinnedAlgorithms() {
+    if (_algorithmsExpanded || _pinned.length <= _kAlgorithmChipLimit) {
+      return _pinned;
+    }
+    final List<String> selected = <String>[
+      for (final String algorithm in _pinned)
+        if (_algorithms.contains(algorithm)) algorithm,
+    ];
+    final List<String> unselected = <String>[
+      for (final String algorithm in _pinned)
+        if (!_algorithms.contains(algorithm)) algorithm,
+    ];
+    return <String>[...selected, ...unselected].take(_kAlgorithmChipLimit).toList();
+  }
+
+  /// How many chips the fold is hiding.
+  int _hiddenPinnedCount() {
+    if (_algorithmsExpanded || _pinned.length <= _kAlgorithmChipLimit) {
+      return 0;
+    }
+    return _pinned.length - _kAlgorithmChipLimit;
+  }
 
   @override
   void initState() {
@@ -876,7 +916,7 @@ class _HashPageState extends State<HashPage> {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
-              for (final String algorithm in _pinned)
+              for (final String algorithm in _visiblePinnedAlgorithms())
                 FilterChip(
                   key: ValueKey<String>('hash-algorithm-$algorithm'),
                   label: Text(_labelFor(algorithm)),
@@ -884,6 +924,26 @@ class _HashPageState extends State<HashPage> {
                   onSelected: _computing
                       ? null
                       : (bool selected) => _toggleAlgorithm(algorithm, selected),
+                ),
+              if (_hiddenPinnedCount() > 0)
+                ActionChip(
+                  key: const ValueKey<String>('hash-algorithm-expand'),
+                  avatar: const Icon(Icons.expand_more, size: 18),
+                  label: Text(
+                    context.strings('algorithm.expandAll', args: <String, String>{
+                      'count': '${_hiddenPinnedCount()}',
+                    }),
+                  ),
+                  onPressed: () =>
+                      setState(() => _algorithmsExpanded = true),
+                ),
+              if (_algorithmsExpanded && _pinned.length > _kAlgorithmChipLimit)
+                ActionChip(
+                  key: const ValueKey<String>('hash-algorithm-collapse'),
+                  avatar: const Icon(Icons.expand_less, size: 18),
+                  label: Text(context.strings('algorithm.collapse')),
+                  onPressed: () =>
+                      setState(() => _algorithmsExpanded = false),
                 ),
               ActionChip(
                 key: const ValueKey<String>('hash-algorithm-manage'),
@@ -1076,10 +1136,18 @@ class _HashPageState extends State<HashPage> {
                           ),
                         ),
                     ],
-                    child: OutlinedButton.icon(
-                      onPressed: null,
-                      icon: const Icon(Icons.ios_share),
-                      label: Text(context.strings('hash.export')),
+                    // The button is a label, not a control: PopupMenuButton
+                    // owns the tap. It must not be `onPressed: null`, though —
+                    // Material 3 renders a null callback as the disabled grey,
+                    // so an enabled menu looked disabled. IgnorePointer keeps
+                    // the tap going to the menu while a non-null callback lets
+                    // the button paint in its normal enabled colours.
+                    child: IgnorePointer(
+                      child: OutlinedButton.icon(
+                        onPressed: _computing || _exporting ? null : () {},
+                        icon: const Icon(Icons.ios_share),
+                        label: Text(context.strings('hash.export')),
+                      ),
                     ),
                   ),
 

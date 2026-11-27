@@ -75,21 +75,73 @@ class _RenamePageState extends State<RenamePage> {
   /// now the hash page selection intersected with the algorithms that can
   /// actually produce a filename suffix; when that intersection is empty the
   /// fallback keeps the page usable instead of showing an empty dropdown.
-  List<AlgorithmInfo> _availableAlgorithms() {
+  List<AlgorithmInfo> _availableAlgorithms(List<BatchEntry> entries) {
+    // What the files in hand actually have, not what the hash page happens to
+    // have ticked right now. The two drift apart constantly: the user switches
+    // to this page after a run, then changes the selection on the hash page, and
+    // the stored config still names an algorithm no entry was hashed with. The
+    // core then reports every row as `missingHash`, which reads as a data problem
+    // rather than a stale setting.
+    final Set<String> computed = <String>{
+      for (final BatchEntry entry in entries) ...entry.hashes.keys,
+    };
     final Set<String> selected = widget.state.algorithms.value;
     final List<AlgorithmInfo> usable = <AlgorithmInfo>[
       for (final AlgorithmInfo info in kSuffixUsableAlgorithms)
+        if (computed.contains(info.id)) info,
+    ];
+    if (usable.isNotEmpty) {
+      return usable;
+    }
+    // Nothing has been hashed yet, or nothing usable. Fall back to the hash page
+    // selection so the dropdown is not empty, and let [_preview] refuse with an
+    // explanation rather than sending a request that cannot succeed.
+    final List<AlgorithmInfo> fromSelection = <AlgorithmInfo>[
+      for (final AlgorithmInfo info in kSuffixUsableAlgorithms)
         if (selected.contains(info.id)) info,
     ];
-    if (usable.isEmpty) {
-      return kSuffixUsableAlgorithms;
+    if (fromSelection.isNotEmpty) {
+      return fromSelection;
     }
-    return usable;
+    return kSuffixUsableAlgorithms;
+  }
+
+  /// Whether the entries carry a digest for any writable algorithm.
+  bool _hasUsableHashes(List<BatchEntry> entries) {
+    final Set<String> computed = <String>{
+      for (final BatchEntry entry in entries) ...entry.hashes.keys,
+    };
+    for (final AlgorithmInfo info in kSuffixUsableAlgorithms) {
+      if (computed.contains(info.id)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// The effective algorithm list for both the UI and the request.
+  ///
+  /// One source for both: the dropdown, the extra-algorithm checkboxes and the
+  /// preview call all read this, so the request cannot name an algorithm the UI
+  /// never offered.
+  List<String> _effectiveAlgorithms(List<BatchEntry> entries) {
+    final List<AlgorithmInfo> available = _availableAlgorithms(entries);
+    final Set<String> availableIds = <String>{
+      for (final AlgorithmInfo info in available) info.id,
+    };
+    final List<String> wanted = <String>[
+      for (final String id in _config.algorithms)
+        if (availableIds.contains(id)) id,
+    ];
+    if (wanted.isNotEmpty) {
+      return wanted;
+    }
+    return <String>[available.first.id];
   }
 
   /// The algorithm the dropdown shows, guaranteed to be in its item list.
-  String _primaryAlgorithm() {
-    final List<AlgorithmInfo> available = _availableAlgorithms();
+  String _primaryAlgorithm(List<BatchEntry> entries) {
+    final List<AlgorithmInfo> available = _availableAlgorithms(entries);
     final String stored = _config.algorithms.isEmpty
         ? kDefaultRenameAlgorithm
         : _config.algorithms.first;
@@ -106,8 +158,8 @@ class _RenamePageState extends State<RenamePage> {
   /// A digest has a fixed number of hex characters; asking for more would
   /// require padding or silent truncation, and asking for exactly that many is
   /// the most a user can legitimately write.
-  int _maxSuffixLength() {
-    final String primary = _primaryAlgorithm();
+  int _maxSuffixLength(List<BatchEntry> entries) {
+    final String primary = _primaryAlgorithm(entries);
     for (final AlgorithmInfo info in kSuffixUsableAlgorithms) {
       if (info.id == primary && info.hexLength > 0) {
         return info.hexLength;
@@ -134,7 +186,7 @@ class _RenamePageState extends State<RenamePage> {
     try {
       final RenamePlanModel plan = await widget.state.service.planRenames(
         entries: entries,
-        algorithms: _config.algorithms,
+        algorithms: _effectiveAlgorithms(entries),
         length: _config.length,
         uppercase: _config.uppercase,
         strict: _config.strict,
@@ -347,7 +399,7 @@ class _RenamePageState extends State<RenamePage> {
                               // asserts: the hash page selection can exclude the
                               // stored primary, so fall back to the first offered
                               // algorithm rather than crash.
-                              value: _primaryAlgorithm(),
+                              value: _primaryAlgorithm(entries),
                               isDense: true,
                               isExpanded: true,
                               onChanged: (String? value) {
@@ -371,7 +423,7 @@ class _RenamePageState extends State<RenamePage> {
                               },
                               items: <DropdownMenuItem<String>>[
                                 for (final AlgorithmInfo info
-                                    in _availableAlgorithms())
+                                    in _availableAlgorithms(entries))
                                   DropdownMenuItem<String>(
                                     value: info.id,
                                     child: Text(info.displayName),
@@ -402,11 +454,11 @@ class _RenamePageState extends State<RenamePage> {
                         child: Slider(
                           key: const ValueKey<String>('rename-length-slider'),
                           value: _config.length
-                              .clamp(0, _maxSuffixLength())
+                              .clamp(0, _maxSuffixLength(entries))
                               .toDouble(),
                           min: 0,
-                          max: _maxSuffixLength().toDouble(),
-                          divisions: _maxSuffixLength(),
+                          max: _maxSuffixLength(entries).toDouble(),
+                          divisions: _maxSuffixLength(entries),
                           label: '${_config.length}',
                           onChanged: (double value) {
                             setState(() {
@@ -437,7 +489,7 @@ class _RenamePageState extends State<RenamePage> {
                       context.strings('rename.moreAlgorithmsHint'),
                     ),
                     children: <Widget>[
-                      for (final AlgorithmInfo info in _availableAlgorithms())
+                      for (final AlgorithmInfo info in _availableAlgorithms(entries))
                         CheckboxListTile(
                           key: ValueKey<String>(
                             'rename-extra-${info.id}',
@@ -542,6 +594,32 @@ class _RenamePageState extends State<RenamePage> {
                     key: const ValueKey<String>('rename-collision-estimate'),
                     style: theme.textTheme.bodyMedium,
                   ),
+                  if (!_hasUsableHashes(entries)) ...<Widget>[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.info_outline,
+                            size: 18,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              context.strings('rename.needHashes'),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   Wrap(
                     spacing: 8,
@@ -549,7 +627,12 @@ class _RenamePageState extends State<RenamePage> {
                     children: <Widget>[
                       FilledButton.icon(
                         key: const ValueKey<String>('rename-dry-run-button'),
-                        onPressed: _planning || _executing
+                        // Refused up front when nothing usable has been hashed:
+                        // the request would come back with every row marked
+                        // `missingHash`, which looks like corrupt data instead of
+                        // a step the user has not done yet.
+                        onPressed:
+                            _planning || _executing || !_hasUsableHashes(entries)
                             ? null
                             : () => _preview(entries),
                         icon: const Icon(Icons.preview),

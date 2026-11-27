@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'util/atomic_file.dart';
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +14,8 @@ import 'pages/hash_page.dart';
 import 'pages/rename_page.dart';
 import 'pages/report_page.dart';
 import 'pages/settings_page.dart';
+import 'util/atomic_file.dart';
+import 'util/platform_pickers.dart';
 import 'services/app_settings_store.dart';
 import 'services/batch_hash_service.dart';
 import 'services/fake_batch_hash_service.dart';
@@ -468,19 +469,31 @@ class _Home extends StatelessWidget {
           page: section.build(),
         ),
     ];
-    return AdaptiveScaffold(
-      destinations: destinations,
-      selectedIndex: selectedIndex,
-      onDestinationSelected: onDestinationSelected,
-      banner: usingDemoData
-          ? DemoDataBanner(
-              message: context.strings('demo.banner'),
-              actionLabel: context.strings('demo.detail'),
-              title: context.strings('demo.dialogTitle'),
-              body: context.strings('demo.dialogBody'),
-              remedy: context.strings('demo.howToFix'),
-            )
-          : null,
+    // A desktop file dialog is not modal to Flutter, so the window keeps taking
+    // taps while it is open: a second dialog can be opened, a run started, or a
+    // tab switched, all against a picker that has not returned yet. Blocking
+    // input for as long as one is open is what makes the choice a single step.
+    return ValueListenableBuilder<bool>(
+      valueListenable: PlatformPickers.picking,
+      builder: (BuildContext context, bool picking, Widget? _) {
+        return AbsorbPointer(
+          absorbing: picking,
+          child: AdaptiveScaffold(
+            destinations: destinations,
+            selectedIndex: selectedIndex,
+            onDestinationSelected: onDestinationSelected,
+            banner: usingDemoData
+                ? DemoDataBanner(
+                    message: context.strings('demo.banner'),
+                    actionLabel: context.strings('demo.detail'),
+                    title: context.strings('demo.dialogTitle'),
+                    body: context.strings('demo.dialogBody'),
+                    remedy: context.strings('demo.howToFix'),
+                  )
+                : null,
+          ),
+        );
+      },
     );
   }
 }

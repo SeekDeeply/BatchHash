@@ -2,6 +2,7 @@
 import 'dart:io' show File, Platform;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier;
 
 import 'saf_bridge.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,34 @@ import 'package:flutter/services.dart';
 class PlatformPickers {
   const PlatformPickers._();
 
+  /// Whether a system picker is currently open.
+  ///
+  /// A desktop file dialog is not modal to Flutter: the window keeps receiving
+  /// taps, so the user could open a second dialog, start a run, or switch tabs
+  /// while the first one is still waiting. The shell listens to this and blocks
+  /// input for as long as it is true.
+  static final ValueNotifier<bool> picking = ValueNotifier<bool>(false);
+
+  /// Run [body] with [picking] set, restoring the previous value afterwards.
+  ///
+  /// A counter rather than a plain flag: nested pickers (a directory picker that
+  /// falls back to the app's own dialog) would otherwise clear the guard while
+  /// the outer dialog is still open.
+  static Future<T> _guarded<T>(Future<T> Function() body) async {
+    _depth += 1;
+    picking.value = true;
+    try {
+      return await body();
+    } finally {
+      _depth -= 1;
+      if (_depth == 0) {
+        picking.value = false;
+      }
+    }
+  }
+
+  static int _depth = 0;
+
   /// Ask for a directory. Returns null when cancelled or unavailable.
   ///
   /// [fallback] is invoked when the native dialog cannot be shown; it should
@@ -24,6 +53,12 @@ class PlatformPickers {
   /// dialog title, so a path handed to it would be rendered as a title string
   /// rather than opening that folder.
   static Future<String?> directory(
+    Future<String?> Function() fallback,
+  ) {
+    return _guarded(() => _directory(fallback));
+  }
+
+  static Future<String?> _directory(
     Future<String?> Function() fallback,
   ) async {
     try {
@@ -58,7 +93,11 @@ class PlatformPickers {
   /// when the platform refuses, which the caller must report: silently falling
   /// back to the in-app path dialog would send the user down a route that
   /// cannot read the folder they just picked.
-  static Future<SafDirectory?> safDirectory() async {
+  static Future<SafDirectory?> safDirectory() {
+    return _guarded(_safDirectory);
+  }
+
+  static Future<SafDirectory?> _safDirectory() async {
     if (!Platform.isAndroid) {
       return null;
     }
@@ -75,6 +114,12 @@ class PlatformPickers {
   }
   /// Ask for one or more files. Returns an empty list when cancelled.
   static Future<List<String>> files(
+    Future<List<String>> Function() fallback,
+  ) {
+    return _guarded(() => _files(fallback));
+  }
+
+  static Future<List<String>> _files(
     Future<List<String>> Function() fallback,
   ) async {
     try {
@@ -111,6 +156,15 @@ class PlatformPickers {
   /// made a broken save look exactly like a cancelled one, and the caller had
   /// no way to tell the user what went wrong.
   static Future<String?> saveBytes({
+    required String suggestedName,
+    required List<int> bytes,
+  }) {
+    return _guarded(
+      () => _saveBytes(suggestedName: suggestedName, bytes: bytes),
+    );
+  }
+
+  static Future<String?> _saveBytes({
     required String suggestedName,
     required List<int> bytes,
   }) async {

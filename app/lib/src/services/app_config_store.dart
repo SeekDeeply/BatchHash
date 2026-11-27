@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import '../util/atomic_file.dart';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -203,7 +204,7 @@ class FileAppConfigStore implements AppConfigStore {
       'roots': <Object?>[for (final RecentRoot root in merged) root.toJson()],
     };
     try {
-      await file.writeAsString(jsonEncode(payload), flush: true);
+      await writeStringAtomic(file.path, jsonEncode(payload));
     } on Exception catch (_) {
       // A read-only volume must not fail the scan that triggered the write.
     } catch (_) {

@@ -20,23 +20,29 @@ class LoggingBatchHashService implements BatchHashService {
   final OperationLogStore store;
 
   /// Run [body], record the outcome, and rethrow failures unchanged.
+  /// [succeeded] decides the recorded status when the operation can fail
+  /// without throwing. `undoBatch` returns `false` for "the undo was refused",
+  /// which is a failed operation even though the future completed normally;
+  /// recording it as success made the history claim a rollback that never ran.
   Future<T> _record<T>(
     String kind,
     Future<T> Function() body, {
     String? Function(T value)? detail,
     List<HashDigestRecord> Function(T value)? digests,
+    bool Function(T value)? succeeded,
   }) async {
     final DateTime startedAt = DateTime.now();
     final Stopwatch watch = Stopwatch()..start();
     try {
       final T value = await body();
       watch.stop();
+      final bool ok = succeeded?.call(value) ?? true;
       await store.append(
         OperationLogEntry(
           kind: kind,
-          status: true,
+          status: ok,
           startedAt: startedAt,
-          detail: detail?.call(value),
+          detail: ok ? detail?.call(value) : '$kind was refused',
           durationMs: watch.elapsedMilliseconds,
           hashes: digests?.call(value) ?? const <HashDigestRecord>[],
         ),
@@ -233,26 +239,70 @@ class LoggingBatchHashService implements BatchHashService {
       );
     }
 
-    return source.transform(
-      StreamTransformer<T, T>.fromHandlers(
-        handleData: (T sample, EventSink<T> sink) {
-          if (collect == null || collect(sample)) {
-            samples
-              ..clear()
-              ..add(sample);
-          }
-          sink.add(sample);
-        },
-        handleDone: (EventSink<T> sink) async {
-          await record(ok: true);
-          sink.close();
-        },
-        handleError: (Object error, StackTrace stack, EventSink<T> sink) async {
-          await record(ok: false, error: error);
-          sink.addError(error, stack);
-        },
-      ),
+    // `StreamTransformer.fromHandlers` invokes its callbacks synchronously and
+    // ignores the future an `async` callback returns. Awaiting the log write
+    // inside `handleDone` therefore never actually delayed `sink.close()`, and a
+    // stream that both completes and errors could record the operation twice.
+    // Driving the source by hand keeps exactly one terminal record and lets the
+    // write finish before the listener sees the end of the stream.
+    bool recorded = false;
+    Future<void> recordOnce({required bool ok, Object? error}) async {
+      if (recorded) {
+        return;
+      }
+      recorded = true;
+      await record(ok: ok, error: error);
+    }
+
+    late final StreamController<T> controller;
+    StreamSubscription<T>? subscription;
+    bool finished = false;
+
+    Future<void> finish({required bool ok, Object? error}) async {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      await recordOnce(ok: ok, error: error);
+      await subscription?.cancel();
+      await controller.close();
+    }
+
+    controller = StreamController<T>(
+      onListen: () {
+        subscription = source.listen(
+          (T sample) {
+            if (collect == null || collect(sample)) {
+              samples
+                ..clear()
+                ..add(sample);
+            }
+            if (!controller.isClosed) {
+              controller.add(sample);
+            }
+          },
+          onError: (Object error, StackTrace stack) {
+            if (!controller.isClosed) {
+              controller.addError(error, stack);
+            }
+            // The log entry is written before the stream reports the error, so
+            // a listener that refreshes on error sees the record it caused.
+            unawaited(finish(ok: false, error: error));
+          },
+          onDone: () {
+            unawaited(finish(ok: true));
+          },
+          cancelOnError: false,
+        );
+      },
+      onPause: () => subscription?.pause(),
+      onResume: () => subscription?.resume(),
+      onCancel: () async {
+        // A listener that walks away still leaves a record: the operation ran.
+        await finish(ok: true);
+      },
     );
+    return controller.stream;
   }
 
   @override
@@ -396,13 +446,20 @@ class LoggingBatchHashService implements BatchHashService {
       // Only the last sample has the complete row set; earlier ones are
       // partial and would understate the match count.
       collect: (DiffProgress progress) => progress.rows.isNotEmpty,
-      detail: (List<DiffProgress> samples) => describeVerification(
-        samples.isEmpty ? const <DiffRowModel>[] : samples.last.rows,
-        directory: directory,
-      ),
+      detail: (List<DiffProgress> samples) {
+        final List<DiffRowModel> rows =
+            samples.isEmpty ? const <DiffRowModel>[] : samples.last.rows;
+        final String verdict = describeVerification(rows, directory: directory);
+        final int truncated = digestsFromDiff(rows).truncated;
+        // Say how many digests were withheld. A log line that shows a digest
+        // sample without mentioning the cap reads as if it were complete.
+        return truncated > 0
+            ? '$verdict · $truncated digests not recorded'
+            : verdict;
+      },
       digests: (List<DiffProgress> samples) => digestsFromDiff(
         samples.isEmpty ? const <DiffRowModel>[] : samples.last.rows,
-      ),
+      ).records,
     );
   }
   /// One-line verdict for a verification run.
@@ -454,8 +511,16 @@ class LoggingBatchHashService implements BatchHashService {
   /// Only matching rows are kept: recording every compared file would bury the
   /// log under the contents of the report, while the matching digests are what a
   /// later reader wants to see to believe the verification.
-  List<HashDigestRecord> digestsFromDiff(List<DiffRowModel> rows) {
+  /// Digests of the rows that actually matched, plus how many were withheld.
+  ///
+  /// Returning the withheld count matters: the previous version stopped at the
+  /// cap and said nothing, so a log entry looked like it had recorded every
+  /// matching digest when it had silently dropped the rest.
+  ({List<HashDigestRecord> records, int truncated}) digestsFromDiff(
+    List<DiffRowModel> rows,
+  ) {
     final List<HashDigestRecord> records = <HashDigestRecord>[];
+    int withheld = 0;
     for (final DiffRowModel row in rows) {
       if (row.status != DiffStatus.unchanged) {
         continue;
@@ -467,7 +532,8 @@ class LoggingBatchHashService implements BatchHashService {
           continue;
         }
         if (records.length >= kMaxRecordedDigests) {
-          return records;
+          withheld += 1;
+          continue;
         }
         records.add(
           HashDigestRecord(
@@ -478,7 +544,7 @@ class LoggingBatchHashService implements BatchHashService {
         );
       }
     }
-    return records;
+    return (records: records, truncated: withheld);
   }
 
   @override
@@ -531,6 +597,7 @@ class LoggingBatchHashService implements BatchHashService {
       'op.undo',
       () => inner.undoBatch(batchId),
       detail: (_) => batchId,
+      succeeded: (bool undone) => undone,
     );
   }
 }

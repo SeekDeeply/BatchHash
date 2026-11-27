@@ -714,6 +714,16 @@ class _ComparePageState extends State<ComparePage> {
         _directBusy = false;
         _error = failure;
       });
+    } finally {
+      // The busy flag must be cleared even when the result was discarded as
+      // stale. Returning early on `generation != _generation` used to leave it
+      // set forever, and the compare button stayed disabled with no way back
+      // except leaving the page.
+      if (mounted && generation == _generation && _directBusy) {
+        setState(() {
+          _directBusy = false;
+        });
+      }
     }
   }
 

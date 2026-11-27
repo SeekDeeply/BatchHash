@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'src/util/atomic_file.dart';
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
@@ -101,7 +102,13 @@ class _BatchHashAppState extends State<BatchHashApp> {
   late final bool _usingDemoData;
 
   /// Tail of the settings write chain; see [_persistSettings].
-  Future<void> _writeQueue = Future<void>.value();
+  /// Serialises settings writes.
+  ///
+  /// A bare `Future.then` chain would be poisoned by one failure: the chain
+  /// future would hold an error and every later save would be skipped, so a
+  /// single transient write error would silently stop all persistence for the
+  /// rest of the session. [AsyncSerialQueue] isolates each action.
+  final AsyncSerialQueue _writeQueue = AsyncSerialQueue();
 
   /// True while the stored payload is being applied.
   ///
@@ -269,9 +276,9 @@ class _BatchHashAppState extends State<BatchHashApp> {
   /// overlapping cycles on one file.
   Future<void> _persistSettings() {
     if (_restoring) {
-      return _writeQueue;
+      return _writeQueue.run(() async {});
     }
-    _writeQueue = _writeQueue.then((_) async {
+    return _writeQueue.run(() async {
       final AppSettings stored = await _settingsStore.load();
       await _settingsStore.save(
         stored.copyWith(
@@ -286,14 +293,19 @@ class _BatchHashAppState extends State<BatchHashApp> {
         ),
       );
     });
-    return _writeQueue;
   }
 
   @override
   void dispose() {
+    // Every listener registered in initState must be removed here. The three
+    // below were missing: the app state outlives this widget during teardown,
+    // so its notifier kept calling _persistSettings on a disposed store.
     _localeController.removeListener(_persistSettings);
     _themeController.removeListener(_persistSettings);
     _appState.algorithms.removeListener(_persistSettings);
+    _appState.renameConfig.removeListener(_persistSettings);
+    _appState.exportSql.removeListener(_persistSettings);
+    _appState.reportFocus.removeListener(_showReportTab);
     _localeController.dispose();
     _themeController.dispose();
     _appState.dispose();

@@ -5,6 +5,7 @@ import 'dart:ui' show Size;
 import 'package:flutter/foundation.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../util/atomic_file.dart';
 import 'window_state_store.dart';
 
 /// Restores and remembers the desktop window size.
@@ -19,9 +20,12 @@ class WindowStateController with WindowListener {
   /// Debounce timer for platforms that only report continuous resizes.
   Timer? _debounce;
 
-  /// Writes are serialised through this chain so a save cannot interleave with
-  /// the close that follows it.
-  Future<void> _pending = Future<void>.value();
+  /// Serialises the save and the close so they cannot interleave.
+  ///
+  /// A bare `Future.then` chain would stop working after one failure: the chain
+  /// future would hold the error and every later save and the final close would
+  /// be skipped, leaving the window unable to shut down.
+  final AsyncSerialQueue _pending = AsyncSerialQueue();
 
   /// Incremented on every resize.
   ///
@@ -85,7 +89,7 @@ class WindowStateController with WindowListener {
     windowManager.removeListener(this);
     _debounce?.cancel();
     _debounce = null;
-    await _pending;
+    await _pending.idle();
   }
 
   @override
@@ -119,14 +123,17 @@ class WindowStateController with WindowListener {
     // Only armed while dirty. A close with nothing to save is left entirely to
     // the platform, which is what keeps it instant; intercepting every close
     // forced a native -> Dart -> destroy round trip on each one.
-    unawaited(
-      windowManager
-          .setPreventClose(true)
-          .catchError((Object error) {
-            _guardArmed = false;
-            debugPrint('close interception not armed: $error');
-          }),
-    );
+    // Arming goes through the same queue as disarming. Firing it directly let a
+    // disarm that was already in flight land first, leaving the guard armed with
+    // nothing to save, and the next close was then intercepted for nothing.
+    unawaited(_pending.run(() async {
+      try {
+        await windowManager.setPreventClose(true);
+      } catch (error) {
+        _guardArmed = false;
+        debugPrint('close interception not armed: $error');
+      }
+    }));
   }
 
   /// Release the close interception once nothing is outstanding.
@@ -144,12 +151,12 @@ class WindowStateController with WindowListener {
 
   /// Persist the current size and disarm when done.
   void _flush() {
-    _pending = _pending.then((_) async {
+    unawaited(_pending.run(() async {
       await _capture();
       if (!_dirty) {
         await _disarm();
       }
-    });
+    }));
   }
 
   /// Close the window, waiting for a write only when one is outstanding.
@@ -161,7 +168,7 @@ class WindowStateController with WindowListener {
   void onWindowClose() {
     _debounce?.cancel();
     _debounce = null;
-    _pending = _pending.then((_) async {
+    unawaited(_pending.run(() async {
       if (_dirty) {
         await _capture();
       }
@@ -174,7 +181,7 @@ class WindowStateController with WindowListener {
       } catch (error) {
         debugPrint('window close not completed: $error');
       }
-    });
+    }));
   }
 
   /// Read the current geometry and persist it.

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import '../util/atomic_file.dart';
 
 import 'package:flutter/painting.dart' show Color;
 import 'package:path_provider/path_provider.dart';
@@ -182,7 +183,7 @@ class AppSettingsStore {
     try {
       final File file = await _file();
       await file.parent.create(recursive: true);
-      await file.writeAsString(jsonEncode(settings.toJson()));
+      await writeStringAtomic(file.path, jsonEncode(settings.toJson()));
     } catch (_) {
       // Writing settings must never surface an error the user cannot act on.
     }

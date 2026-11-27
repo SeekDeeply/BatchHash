@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import '../util/atomic_file.dart';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -107,9 +108,9 @@ class OperationLogStore {
     }
     try {
       final File file = await _retentionFile();
-      await file.writeAsString(
+      await writeStringAtomic(
+        file.path,
         jsonEncode(<String, Object?>{'max_entries': value}),
-        flush: true,
       );
     } catch (_) {
       // Same reasoning as loadRetention(): retention is a convenience, not a
@@ -151,11 +152,13 @@ class OperationLogStore {
         ...existing,
       ].take(retention).toList(growable: false);
       final File file = await _file();
-      await file.writeAsString(
+      // Atomic so an interrupted write cannot truncate the history file and
+      // leave the next launch parsing a half-written document.
+      await writeStringAtomic(
+        file.path,
         jsonEncode(<Object?>[
           for (final OperationLogEntry item in next) item.toJson(),
         ]),
-        flush: true,
       );
     } catch (_) {
       // Same reasoning as load(): a failed write must not surface as an

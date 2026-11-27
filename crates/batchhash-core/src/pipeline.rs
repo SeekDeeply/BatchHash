@@ -603,7 +603,7 @@ fn exclude_log_artifacts(
         // Exact match only. A prefix test would also swallow a neighbour such as
         // `batch.db.bak` or `batch.db2`, silently dropping real files from the
         // report because they happen to share a name prefix with the log.
-        if artifacts.iter().any(|artifact| entry.display_path == *artifact) {
+        if artifacts.contains(&entry.display_path) {
             skipped.push(ScanSkip {
                 path: entry.display_path.clone(),
                 reason: "rename log database".to_string(),

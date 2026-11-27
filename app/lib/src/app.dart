@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'src/util/atomic_file.dart';
+import 'util/atomic_file.dart';
 
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';

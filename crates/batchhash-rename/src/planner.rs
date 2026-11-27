@@ -2037,7 +2037,6 @@ mod tests {
         assert!(!temp.path().join("a[ABCDEF].txt").exists());
     }
 
-    #[test]
     /// Backend that performs real renames but can be told to fail one.
     ///
     /// The two-hop case rename is only correct if a failure between the hops is

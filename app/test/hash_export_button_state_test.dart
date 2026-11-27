@@ -39,13 +39,17 @@ void main() {
     // The menu itself must be enabled; that is what makes the tap work.
     expect(tester.widget<PopupMenuButton<Object?>>(menu).enabled, isTrue);
 
+    // The label is built by `OutlinedButton.icon`, which Flutter renders as a
+    // private subclass, so a plain `byType(OutlinedButton)` finds nothing. Match
+    // on the predicate instead of the exact runtime type.
     final Finder inner = find.descendant(
       of: menu,
-      matching: find.byType(OutlinedButton),
+      matching: find.byWidgetPredicate((Widget widget) => widget is OutlinedButton),
     );
     expect(inner, findsOneWidget);
 
     // Non-null is the whole point: a null callback is what paints it grey.
-    expect(tester.widget<OutlinedButton>(inner).onPressed, isNotNull);
+    final OutlinedButton button = tester.widget<OutlinedButton>(inner);
+    expect(button.onPressed, isNotNull);
   });
 }

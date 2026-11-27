@@ -1031,6 +1031,17 @@ pub(crate) fn rename_via_temp(
     }
 }
 
+/// Execute a plan, honouring an overwrite policy and a cancellation check.
+///
+/// Rows are visited in plan order, which the planner has already sorted so that
+/// no row overwrites the input of another. A row whose status is not
+/// [`RenameRowStatus::Ready`] is skipped: only ready rows describe a rename the
+/// planner decided is safe.
+///
+/// With `overwrite` the target is replaced when it exists; without it the rename
+/// fails instead. A case-only rename always goes through a temporary sibling,
+/// because on a case-insensitive filesystem the source and target are the same
+/// file and a direct rename is a no-op.
 pub fn execute_plan_with_policy_and_cancel(
     plan: &RenamePlan,
     backend: &mut dyn RenameBackend,

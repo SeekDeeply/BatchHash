@@ -579,7 +579,11 @@ pub(crate) fn compute_hashes_streaming_sized(
     let buffer_len = match expected_len {
         // Clamp to the file size, but never below the minimum: a tiny buffer
         // multiplies syscalls on a file that is merely small, not trivial.
-        Some(len) => configured.min(usize::try_from(len).unwrap_or(usize::MAX).max(MIN_BUFFER_SIZE)),
+        Some(len) => configured.min(
+            usize::try_from(len)
+                .unwrap_or(usize::MAX)
+                .max(MIN_BUFFER_SIZE),
+        ),
         None => configured,
     };
     let mut buffer = vec![0u8; buffer_len];

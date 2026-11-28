@@ -2,6 +2,37 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.28.2] - 2026-11-28
+
+Windows 文件选择框非模态（可拖动、可压后、事件积压）。
+
+### 修复
+
+- **Win32 对话框未绑定父窗口**：`getDirectoryPath`、`pickFiles`、`saveFile` 三处调用
+  均未传 `lockParentWindow`（`file_picker` 该参数默认 `false`）。未传时插件给
+  `IFileOpenDialog::Show` 的 `hwndOwner` 为 `NULL`，对话框因此**无主、非模态**：主窗口
+  仍可被拖动、聚焦，甚至盖到对话框前面。
+
+  这解释了为什么 `AbsorbPointer` 挡不住——Flutter 层只能拦截到达 Dart 引擎的点击，
+  而窗口激活与消息入队发生在 OS 层，早于引擎。三处现已全部启用 `lockParentWindow: true`，
+  由 Windows 自行禁用父窗口，点击只会闪烁提示对话框，输入事件被系统丢弃而非排队。
+
+- **守卫提前释放**：`_guarded` 原先在 `finally` 中立即把 `picking` 置回 `false`。关闭对话框
+  与抬起鼠标是同一个手势，后者可能晚于 future 完成，于是残余事件落到下层按钮上。现在等待
+  一帧（`endOfFrame` 与零延迟竞速，避免无帧调度时死锁）后再释放，并重新检查 `_depth` 防止
+  等待期间有新选择器启动。
+
+### 说明
+
+- **对话框期间主窗口仍可能短暂黑屏**：插件在 Windows 上于主 isolate 同步调用 Win32，
+  Flutter 渲染管线在对话框打开期间暂停。这是重绘问题，不是输入问题。不能靠把调用移入
+  `Isolate.run` 解决——跨线程把 `HWND` 传给 `IFileOpenDialog::Show` 会死锁。若要彻底消除，
+  需改用 C++ 插件或独立 STA 线程，属于后续工作。
+
+### 测试
+
+- `picker_guard_test.dart` 更新为 3 条，明确覆盖：初始为 false、取消后复位、以及**回退对话框
+  运行期间守卫是刻意释放的**（该对话框是应用内路由，持锁会锁死它自己的按钮）。
 ## [1.28.1] - 2026-11-28
 
 v1.28.0 审查发现的 4 项缺陷修复。

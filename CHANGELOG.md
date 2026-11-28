@@ -2,6 +2,39 @@
 
 所有重要变更记录在此文件。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [1.28.1] - 2026-11-28
+
+v1.28.0 审查发现的 4 项缺陷修复。
+
+### 修复
+
+- **深色模式黑底黑字（P0）**：`_themeFrom` 对浅色与深色都取了
+  `Typography.material2021(...).black`，深色模式下文字仍是近黑色，落在近黑背景上几乎
+  不可读。`colorScheme` 本身不会修正文字颜色——文本主题在配色方案生效前就已解析。
+  现在按 `scheme.brightness` 选择 `typography.white` / `typography.black`。
+- **文本主题重复 `.apply`**：第 164 行把同一个 `apply` 又做了一遍，改为只应用一次。
+- **首页「选择文件」绕过选择框守卫（P1）**：`HashPage._selectFiles()` 直接调用
+  `FilePicker.platform.pickFiles`，`TextComparePanel` 直接调用 `getDirectoryPath`，两者都
+  不经过 `PlatformPickers`，因此 `picking` 保持 `false`，系统对话框打开期间页面仍可点击。
+  两处均改为走 `PlatformPickers`；全仓 `app/lib/` 已无 `FilePicker.platform` 直调。
+- **守卫在 fallback 期间误锁（P1）**：系统对话框才需要阻断输入；应用自身的回退对话框是
+  一条路由，已经遮住其下的页面，继续持锁会把对话框自己的按钮也锁死。`_guarded` 现在在
+  进入 `fallback()` 前通过 `_unguarded` 释放守卫。
+- **写名页算法与长度三处不同步（P1）**：
+  1. `_primaryAlgorithm` 原先自行解析 `_config.algorithms.first`，与 `_effectiveAlgorithms`
+     的过滤结果可能不同，导致下拉框显示的不是预览实际发送的算法。现直接返回
+     `_effectiveAlgorithms(entries).first`，单一事实来源。
+  2. 附加算法复选框的 `value`、主算法禁用判断与 `onChanged` 起点均改为基于有效列表派生，
+     过期的持久化算法不会在下次编辑时被继续携带。
+  3. `_preview()` 与 Slider `label` 统一使用 `clamp(0, _maxSuffixLength(entries))`，与
+     Slider 的 `max` 一致。
+- **等宽字体栈是死代码（P2）**：`AppTheme.monoFontFamily` 与 `monoFontFallback` 全仓 0 处
+  引用，6 处摘要/路径/颜色显示仍硬编码 `fontFamily: 'monospace'`。现已全部接线。
+
+### 测试
+
+- 新增主题亮度测试 4 条：深色文字亮度大于 0.5、浅色小于 0.5、两模式实际不同、等宽栈可达
+  且有序。
 ## [1.28.0] - 2026-11-27
 
 真机验收反馈的 5 项 UI/交互修复。

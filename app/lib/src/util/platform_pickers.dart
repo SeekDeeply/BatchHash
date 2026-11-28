@@ -44,6 +44,24 @@ class PlatformPickers {
 
   static int _depth = 0;
 
+  /// Drop the guard while [body] runs, then restore it.
+  ///
+  /// The guard exists because a *system* dialog leaves the Flutter window live.
+  /// The app's own fallback dialog is a route inside this app: it already blocks
+  /// the page it covers, and holding the guard through it would also block the
+  /// dialog's own buttons, which is worse than the problem being solved.
+  static Future<T> _unguarded<T>(Future<T> Function() body) async {
+    final int previous = _depth;
+    _depth = 0;
+    picking.value = false;
+    try {
+      return await body();
+    } finally {
+      _depth = previous;
+      picking.value = previous > 0;
+    }
+  }
+
   /// Ask for a directory. Returns null when cancelled or unavailable.
   ///
   /// [fallback] is invoked when the native dialog cannot be shown; it should
@@ -76,13 +94,13 @@ class PlatformPickers {
       }
       return picked.trim();
     } on PlatformException {
-      return fallback();
+      return _unguarded(fallback);
     } on MissingPluginException {
-      return fallback();
+      return _unguarded(fallback);
     } catch (_) {
       // A plugin can also fail with an Error (for example a missing channel
       // registration); picking a path must still be possible.
-      return fallback();
+      return _unguarded(fallback);
     }
   }
 
@@ -133,11 +151,11 @@ class PlatformPickers {
           if (file.path != null && file.path!.isNotEmpty) file.path!,
       ];
     } on PlatformException {
-      return fallback();
+      return _unguarded(fallback);
     } on MissingPluginException {
-      return fallback();
+      return _unguarded(fallback);
     } catch (_) {
-      return fallback();
+      return _unguarded(fallback);
     }
   }
   /// Save [bytes] to a file the user picks.

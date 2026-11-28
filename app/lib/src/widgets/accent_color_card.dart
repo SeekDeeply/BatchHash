@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings_scope.dart';
+import '../theme.dart';
 import '../theme_controller.dart';
 
 /// Settings card that lets the user pick the seed color.
@@ -273,7 +274,8 @@ class _AccentColorInputDialogState extends State<AccentColorInputDialog> {
                             ? context.strings('accent.previewInvalid')
                             : formatColorInput(live),
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          fontFamily: 'monospace',
+                          fontFamily: AppTheme.monoFontFamily,
+                              fontFamilyFallback: AppTheme.monoFontFallback,
                         ),
                       ),
                       if (live != null)

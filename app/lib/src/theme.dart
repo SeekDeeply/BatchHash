@@ -152,17 +152,32 @@ class AppTheme {
     // The text theme is rebuilt rather than only setting `fontFamily` on
     // ThemeData: the per-style fields are what actually reach a Text widget, and
     // a family set only at the top is ignored by styles that already carry one.
-    final TextTheme base = Typography.material2021(
+    //
+    // The baseline must follow the brightness. `material2021` exposes `black` and
+    // `white` text themes, and taking `black` unconditionally painted dark mode
+    // with near-black text on a near-black surface: readable in light mode,
+    // invisible in dark. `colorScheme` alone does not fix the colours, because
+    // the text theme is resolved before the scheme is applied.
+    final Typography typography = Typography.material2021(
       platform: defaultTargetPlatform,
       colorScheme: scheme,
-    ).black.apply(fontFamily: family, fontFamilyFallback: fallback);
+    );
+    final TextTheme baseline = scheme.brightness == Brightness.dark
+        ? typography.white
+        : typography.black;
+    // One `apply`, not two: the family is applied once to the baseline and the
+    // result is handed to ThemeData as-is.
+    final TextTheme textTheme = baseline.apply(
+      fontFamily: family,
+      fontFamilyFallback: fallback,
+    );
     return ThemeData(
       colorScheme: scheme,
       useMaterial3: true,
       visualDensity: VisualDensity.compact,
       fontFamily: family,
       fontFamilyFallback: fallback,
-      textTheme: base.apply(fontFamily: family, fontFamilyFallback: fallback),
+      textTheme: textTheme,
     );
   }
 }

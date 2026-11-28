@@ -9,6 +9,7 @@ import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../models/operation_log.dart';
 import '../models/operation_log_filter.dart';
+import '../theme.dart';
 import '../services/archive_export.dart';
 import '../services/batch_hash_service.dart';
 import '../services/operation_log_export.dart';
@@ -722,7 +723,8 @@ class _OperationLogPageState extends State<OperationLogPage> {
                           SelectableText(
                             record.digest,
                             style: theme.textTheme.bodySmall?.copyWith(
-                              fontFamily: 'monospace',
+                              fontFamily: AppTheme.monoFontFamily,
+                              fontFamilyFallback: AppTheme.monoFontFallback,
                               color: scheme.onSurfaceVariant,
                             ),
                           ),

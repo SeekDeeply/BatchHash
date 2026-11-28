@@ -259,7 +259,8 @@ class _ProjectFooter extends StatelessWidget {
                 SelectableText(
                   kProjectUrl,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    fontFamily: 'monospace',
+                    fontFamily: AppTheme.monoFontFamily,
+                              fontFamilyFallback: AppTheme.monoFontFallback,
                     color: scheme.onSurfaceVariant,
                   ),
                 ),

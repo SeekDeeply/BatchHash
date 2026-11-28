@@ -1,12 +1,13 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart' show FilePicker;
 import 'package:flutter/material.dart';
 
 import '../l10n/app_strings_scope.dart';
 import '../models/models.dart';
 import '../services/archive_export.dart';
 import '../services/batch_hash_service.dart';
+import '../theme.dart';
+import '../util/platform_pickers.dart';
 import '../services/text_compare_export.dart';
 import 'text_diff.dart';
 
@@ -196,12 +197,12 @@ class _TextComparePanelState extends State<TextComparePanel> {
   }
 
   Future<String?> _pickDirectory() async {
+    // Through PlatformPickers so the shared guard is raised: calling the plugin
+    // directly left the window accepting taps while a system dialog was open.
+    // No fallback dialog here, so the fallback resolves to null, which is the
+    // same "nothing chosen" answer this returned before.
     try {
-      final String? picked = await FilePicker.platform.getDirectoryPath();
-      if (picked == null || picked.trim().isEmpty) {
-        return null;
-      }
-      return picked.trim();
+      return await PlatformPickers.directory(() async => null);
     } catch (_) {
       return null;
     }
@@ -496,7 +497,8 @@ class _HashLine extends StatelessWidget {
           SelectableText(
             result.digest,
             style: theme.textTheme.bodySmall?.copyWith(
-              fontFamily: 'monospace',
+              fontFamily: AppTheme.monoFontFamily,
+                              fontFamilyFallback: AppTheme.monoFontFallback,
               color: scheme.onSurfaceVariant,
             ),
           ),
@@ -504,7 +506,8 @@ class _HashLine extends StatelessWidget {
             SelectableText(
               other,
               style: theme.textTheme.bodySmall?.copyWith(
-                fontFamily: 'monospace',
+                fontFamily: AppTheme.monoFontFamily,
+                              fontFamilyFallback: AppTheme.monoFontFallback,
                 color: scheme.onSurfaceVariant,
               ),
             ),

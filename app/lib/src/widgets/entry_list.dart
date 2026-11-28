@@ -63,7 +63,8 @@ class _DigestLine extends StatelessWidget {
               digest,
               key: ValueKey<String>('digest-$algorithm-$digest'),
               style: theme.textTheme.bodySmall?.copyWith(
-                fontFamily: 'monospace',
+                fontFamily: AppTheme.monoFontFamily,
+                              fontFamilyFallback: AppTheme.monoFontFallback,
               ),
             ),
           ),

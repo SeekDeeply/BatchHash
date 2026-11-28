@@ -139,18 +139,14 @@ class _RenamePageState extends State<RenamePage> {
     return <String>[available.first.id];
   }
 
-  /// The algorithm the dropdown shows, guaranteed to be in its item list.
+  /// The algorithm the dropdown shows.
+  ///
+  /// Taken straight from [_effectiveAlgorithms] so the dropdown, the checkbox
+  /// list and the request can never disagree. Resolving it separately was how the
+  /// dropdown ended up showing a stale stored algorithm while the preview sent a
+  /// filtered one.
   String _primaryAlgorithm(List<BatchEntry> entries) {
-    final List<AlgorithmInfo> available = _availableAlgorithms(entries);
-    final String stored = _config.algorithms.isEmpty
-        ? kDefaultRenameAlgorithm
-        : _config.algorithms.first;
-    for (final AlgorithmInfo info in available) {
-      if (info.id == stored) {
-        return stored;
-      }
-    }
-    return available.first.id;
+    return _effectiveAlgorithms(entries).first;
   }
 
   /// The longest suffix the current primary algorithm can produce.
@@ -187,7 +183,10 @@ class _RenamePageState extends State<RenamePage> {
       final RenamePlanModel plan = await widget.state.service.planRenames(
         entries: entries,
         algorithms: _effectiveAlgorithms(entries),
-        length: _config.length,
+        // Clamped like the slider: a stored length longer than the current
+        // algorithm can produce would be rejected by the core, and the slider
+        // already refuses to show it.
+        length: _config.length.clamp(0, _maxSuffixLength(entries)),
         uppercase: _config.uppercase,
         strict: _config.strict,
         clearSuffix: _clearSuffix,
@@ -459,7 +458,7 @@ class _RenamePageState extends State<RenamePage> {
                           min: 0,
                           max: _maxSuffixLength(entries).toDouble(),
                           divisions: _maxSuffixLength(entries),
-                          label: '${_config.length}',
+                          label: '${_config.length.clamp(0, _maxSuffixLength(entries))}',
                           onChanged: (double value) {
                             setState(() {
                               _updateConfig(
@@ -497,15 +496,22 @@ class _RenamePageState extends State<RenamePage> {
                           dense: true,
                           contentPadding: EdgeInsets.zero,
                           title: Text(info.displayName),
-                          value: _config.algorithms.contains(info.id),
+                          // Read from the effective list, not the stored config:
+                          // a stored algorithm the files were never hashed with
+                          // would otherwise render as ticked and be sent to the
+                          // core, which answers `missingHash` for every row.
+                          value: _effectiveAlgorithms(entries).contains(info.id),
                           // The primary algorithm is never removable here: the
                           // dropdown above owns it, and unchecking it from a second
                           // control would leave the page with no algorithm at all.
-                          onChanged: info.id == _config.algorithms.first
+                          onChanged: info.id == _primaryAlgorithm(entries)
                               ? null
                               : (bool? selected) {
+                                  // Start from the effective list, so an obsolete
+                                  // stored algorithm is dropped rather than carried
+                                  // forward by the next edit.
                                   final List<String> next = <String>[
-                                    ..._config.algorithms,
+                                    ..._effectiveAlgorithms(entries),
                                   ];
                                   if (selected == true) {
                                     if (!next.contains(info.id)) {

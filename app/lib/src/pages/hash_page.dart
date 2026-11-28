@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -159,22 +158,11 @@ class _HashPageState extends State<HashPage> {
   }
 
   Future<void> _selectFiles() async {
-    List<String> paths = <String>[];
-    try {
-      final FilePickerResult? result = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        type: FileType.any,
-        withData: false,
-      );
-      paths = <String>[
-        for (final PlatformFile file in result?.files ?? const <PlatformFile>[])
-          if (file.path != null && file.path!.isNotEmpty) file.path!,
-      ];
-    } on PlatformException {
-      paths = await _fallbackFilePaths();
-    } on MissingPluginException {
-      paths = await _fallbackFilePaths();
-    }
+    // Through PlatformPickers, not FilePicker directly: that is what raises the
+    // shared guard, and calling the plugin here left `picking` false while a
+    // system dialog was open, so the page stayed clickable and a second dialog
+    // could be opened on top of the first.
+    final List<String> paths = await PlatformPickers.files(_fallbackFilePaths);
     if (!mounted || paths.isEmpty) {
       return;
     }

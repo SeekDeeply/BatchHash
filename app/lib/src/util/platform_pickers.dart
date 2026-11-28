@@ -3,9 +3,10 @@ import 'dart:io' show File, Platform;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show WidgetsBinding;
 
 import 'saf_bridge.dart';
-import 'package:flutter/services.dart';
 
 /// Native pickers with a guaranteed fallback.
 ///
@@ -37,9 +38,41 @@ class PlatformPickers {
     } finally {
       _depth -= 1;
       if (_depth == 0) {
-        picking.value = false;
+        // Released one frame later, not immediately. The dialog closes on the
+        // same pointer gesture that dismissed it, and the matching mouse-up can
+        // still arrive after the future resolves; clearing the guard right away
+        // let that residual event land on whatever button sits under the cursor.
+        // Waiting for a frame drains it first.
+        //
+        // Guarded by a binding check so a unit test without a Flutter binding
+        // (or a synchronous fake) still works: there is no frame to wait for and
+        // nothing to protect against.
+        await _releaseAfterFrame();
+        // Re-checked: another picker may have started while waiting.
+        if (_depth == 0) {
+          picking.value = false;
+        }
       }
     }
+  }
+
+  /// Wait for the next frame, if there is one to wait for.
+  ///
+  /// `WidgetsBinding.instance` throws rather than returning null when no binding
+  /// exists, so the presence check is a try/catch: a unit test that never
+  /// initialises a binding must not fail here.
+  static Future<void> _releaseAfterFrame() async {
+    Future<void>? frame;
+    try {
+      frame = WidgetsBinding.instance.endOfFrame;
+    } catch (_) {
+      // No binding: nothing to wait for.
+      return;
+    }
+    // `endOfFrame` never completes when no frame is scheduled, which is exactly
+    // the case in a test that never pumps. Racing a zero delay keeps the guard
+    // from becoming a deadlock.
+    await Future.any(<Future<void>>[frame, Future<void>.delayed(Duration.zero)]);
   }
 
   static int _depth = 0;
@@ -80,15 +113,26 @@ class PlatformPickers {
     Future<String?> Function() fallback,
   ) async {
     try {
-      // Known upstream defect: on Windows `getDirectoryPath` runs a modal
-      // system dialog on the platform thread, so the app window stops
-      // repainting while it is open and can show a stale (black) frame
-      // (flutter_file_picker #1478). Locking the window to work around it was
-      // worse than the defect: `setResizable(false)` strips WS_THICKFRAME, so
-      // the window could not be resized or moved at all until the dialog
-      // closed. The frame is restored as soon as the dialog returns, so the
-      // cosmetic glitch is accepted rather than traded for a frozen window.
-      final String? picked = await FilePicker.platform.getDirectoryPath();
+      // `lockParentWindow: true` binds the Win32 dialog to this window.
+      // Without it the plugin passes `hwndOwner = NULL`, which makes the dialog
+      // unowned and therefore non-modal at the OS level: the main window can
+      // still be dragged, focused, and moved in front of the dialog. A Flutter
+      // `AbsorbPointer` cannot help here, because the taps never reach the Dart
+      // engine — the OS decides window activation before Flutter sees anything.
+      //
+      // With an owner set, Windows disables the parent for the duration, so a
+      // click on it only flashes the dialog. Input is discarded by the OS
+      // instead of queuing up behind the blocking call and firing all at once
+      // when the dialog closes.
+      //
+      // A black frame while the dialog is open is still possible: the plugin
+      // calls Win32 on the main isolate, so the Flutter render pipeline is
+      // paused. That is a repaint problem, not an input problem, and it cannot
+      // be fixed by moving the call to another isolate — passing an `HWND` to
+      // `IFileOpenDialog::Show` from a non-owning thread deadlocks.
+      final String? picked = await FilePicker.platform.getDirectoryPath(
+        lockParentWindow: true,
+      );
       if (picked == null || picked.trim().isEmpty) {
         return null;
       }
@@ -145,6 +189,10 @@ class PlatformPickers {
         allowMultiple: true,
         type: FileType.any,
         withData: false,
+        // Same reason as getDirectoryPath above: an unowned Win32 dialog is
+        // not modal to the OS, so the main window stays draggable and clickable
+        // behind it.
+        lockParentWindow: true,
       );
       return <String>[
         for (final PlatformFile file in result?.files ?? const <PlatformFile>[])
@@ -196,6 +244,9 @@ class PlatformPickers {
         bytes: Platform.isAndroid || Platform.isIOS
             ? Uint8List.fromList(bytes)
             : null,
+        // Same reason as getDirectoryPath above: without an owner the Win32
+        // dialog is not modal and the main window can be dragged over it.
+        lockParentWindow: true,
       );
       if (path == null || path.trim().isEmpty) {
         return null;
